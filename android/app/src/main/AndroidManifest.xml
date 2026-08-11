@@ -34,7 +34,7 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="tr.com.basarsubasi.simplefitnessapp"/>
+        <data android:scheme="dev.lutmak.simplegymtracker"/>
       </intent-filter>
     </activity>
   </application>

@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Simple",
-    "slug": "simplefitnessappbeta",
+    "name": "Simple: Gym Tracker",
+    "slug": "simple-gym-tracker",
     "version": "1.7.15",
     "orientation": "portrait",
     "icon": "./assets/simpleicon.png",
@@ -12,7 +12,7 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "bundleIdentifier": "tr.com.basarsubasi.simplefitnessapp"
+      "bundleIdentifier": "dev.lutmak.simplegymtracker"
     },
     "android": {
       "versionCode": 66,
@@ -25,15 +25,10 @@
         "foregroundImage": "./assets/simpleicon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "tr.com.basarsubasi.simplefitnessapp"
+      "package": "dev.lutmak.simplegymtracker"
     },
     "web": {
       "favicon": "./assets/simpleicon.png"
-    },
-    "extra": {
-      "eas": {
-        "projectId": "1b72cc6b-8e1a-47b1-a7d3-8fcf199a3015"
-      }
     },
     "plugins": [
       "expo-sqlite",
@@ -46,7 +41,6 @@
           "enableBackgroundRemoteNotifications": false
         }
       ]
-    ],
-    "owner": "basarsubasi"
+    ]
   }
 }

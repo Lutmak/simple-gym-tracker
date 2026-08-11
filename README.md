@@ -1,16 +1,38 @@
 <div align="center">
-  
-[![Join our Discord](https://img.shields.io/badge/Discord-Join_Our_Community-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/A38Ny7UggP) [![Donate BTC](https://img.shields.io/badge/Donate-BTC-orange?logo=bitcoin&style=for-the-badge)](https://github.com/user-attachments/assets/cc2c2281-73c1-4df6-b574-54678806ae03) [![Contact Me](https://img.shields.io/badge/Email-Contact_Me-D14836?style=for-the-badge&logo=gmail&logoColor=white)](mailto:basarsubasi@protonmail.com)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-black?style=for-the-badge)](./LICENSE)
+[![Report a Bug](https://img.shields.io/badge/Issues-Report_a_Bug-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/Lutmak/simple-gym-tracker/issues)
+
+<!--
+  TODO(donations): decide on a platform, then uncomment and fill in one of these.
+  Ko-fi:            [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/USERNAME)
+  Liberapay:        [![Liberapay](https://img.shields.io/badge/Liberapay-Donate-F6C915?style=for-the-badge&logo=liberapay&logoColor=black)](https://liberapay.com/USERNAME)
+  GitHub Sponsors:  [![Sponsor](https://img.shields.io/badge/Sponsor-EA4AAA?style=for-the-badge&logo=githubsponsors&logoColor=white)](https://github.com/sponsors/USERNAME)
+-->
 
 </div>
 
-# **Simple.**
+# **Simple: Gym Tracker**
 
-Welcome to **Simple.**
+An easy to use fitness app that lets you create, schedule and track your workouts — entirely on your device, with no account and no network access.
 
-An easy to use fitness app that lets you create, schedule and track your workouts locally.
+## 🍴 **About this fork**
+
+This project is a fork of [basarsubasi/simplefitnessapp](https://github.com/basarsubasi/simplefitnessapp) ("**Simple.**"), forked at upstream `v1.7.15`.
+
+The original is an excellent app — the UI, the name and above all the *simplicity* are why this fork exists rather than a rewrite. But upstream has seen no commits since December 2025, with open bug reports and feature requests going unanswered, so this fork picks the project back up: clearing the backlog the original maintainer left behind, and then extending it.
+
+Full credit and thanks to **Başar Subaşı** for the original work, which remains MIT-licensed. This fork is published under a different name and a different application ID, so it is a **separate app** — it will not upgrade or replace an existing install of the original, and the two can be installed side by side.
+
+## 🎯 **What this fork adds**
+
+- **Fixes first.** The inherited bug backlog is the first priority — see [SPECS.md](./SPECS.md) for the current iteration.
+- **First-class 5/3/1 support.** Native support for Jim Wendler's 5/3/1 programming: training-max driven percentages, warm-up ramps, and cycle progression, instead of hand-entering every set each week.
+- **Same feel.** No redesign, no account, no telemetry, no network permission.
 
 ## 📸 **Screenshots**
+
+> Screenshots below are inherited from upstream and predate this fork's rebrand — they will be re-captured before the first release.
 
 <div align="center">
   <img
@@ -41,60 +63,61 @@ An easy to use fitness app that lets you create, schedule and track your workout
 
 ## 🚀 **Features**
 
-🏋️ **Create a Workout**  
+🏋️ **Create a Workout**
 - Choose a featured workout or easily create customized workouts with exercises, sets, and reps of your own
 
 ✏️ **Edit Your Workouts**
-
 - Modify your existing workouts to update exercises, sets, or reps as your fitness goals evolve.
 
-📅 **Schedule Your Workouts**  
-- Plan your fitness journey by scheduling workouts on specific days.  
+📅 **Schedule Your Workouts**
+- Plan your fitness journey by scheduling workouts on specific days.
 
-📊 **Track Your Progress**  
-- Log your weights and reps to monitor your progress over time with graphical data.  
+📊 **Track Your Progress**
+- Log your weights and reps to monitor your progress over time with graphical data.
 
-📆 **Customizable Date and Weight Formats**  
-- Choose between `dd-mm-yyyy` or `mm-dd-yyyy` date formats and toggle between `kg` or `lbs` for weights.  
+📆 **Customizable Date and Weight Formats**
+- Choose between `dd-mm-yyyy` or `mm-dd-yyyy` date formats and toggle between `kg` or `lbs` for weights.
 
 ## 🌍 **Languages**
 
+🇨🇿 🇩🇪 🇩🇰 🇬🇷 🇬🇧 🇪🇸 🇫🇮 🇫🇷 🇮🇹 🇯🇵 🇰🇷 🇳🇱 🇳🇴 🇵🇱 🇵🇹 🇷🇴 🇷🇺 🇸🇮 🇸🇪 🇹🇷 🇺🇦 🇨🇳
 
-🇨🇿 🇩🇪 🇩🇰 🇬🇷 🇬🇧 🇪🇸 🇫🇮 🇫🇷 🇮🇹 🇯🇵 🇰🇷 🇳🇱 🇳🇴 🇵🇱 🇵🇹 🇷🇺 🇸🇮 🇸🇪 🇹🇷 🇺🇦 🇨🇳
-
-_(If you want to translate the app to your language or improve the existing translations but don't know how, 
-please join our discord server or contact me at basarsubasi@protonmail.com)_
+Translations are inherited from upstream. To add a language or improve an existing one, open a pull request against `locales/` — English (`locales/en/translation.json`) is the fallback, so any key missing from your language falls back to English rather than breaking.
 
 ## 🛠️ **How It Works**
 
-1.  **Adjust Settings**: Change the Date and Weight Formats to your liking.  
-2.  **Create Workouts**: Start by adding days, exercises, sets, and reps.  
-3.  **Schedule Workouts**: Plan your fitness routine by selecting a date.  
-4.  **Track Progress**: Log weights and reps you have done during your workouts to see your improvement.  
+1. **Adjust Settings**: Change the Date and Weight Formats to your liking.
+2. **Create Workouts**: Start by adding days, exercises, sets, and reps.
+3. **Schedule Workouts**: Plan your fitness routine by selecting a date.
+4. **Track Progress**: Log weights and reps you have done during your workouts to see your improvement.
 
-## ⬇️ **Installation Methods**
+## ⬇️ **Installation**
 
-<div align="left">
-  <a href="https://github.com/basarsubasi/simplefitnessapp/releases">
-        <img src="https://github.com/user-attachments/assets/a78be8fb-51a2-4328-b6c0-56d00648fea5" alt="Get it on GitHub" width="180">
-  </a>
-</br>
+This fork has not been published to any app store yet. Google Play and F-Droid releases are planned — until then, build from source (see below).
 
-<a href="https://f-droid.org/packages/tr.com.basarsubasi.simplefitnessapp" style="padding: 10px;">
-    <img src="https://f-droid.org/badge/get-it-on.png" alt="Get it on F-Droid" width="180">
-</a>
+> Looking for the original app? It is still available on [F-Droid](https://f-droid.org/packages/tr.com.basarsubasi.simplefitnessapp), [Google Play](https://play.google.com/store/apps/details?id=tr.com.basarsubasi.simplefitnessapp) and the [App Store](https://apps.apple.com/us/app/simple-fitness-simplified/id6740262965).
 
-</br>
+## 🧑‍💻 **Building from source**
 
-<a href="https://play.google.com/store/apps/details?id=tr.com.basarsubasi.simplefitnessapp" style="padding: 10px;">
-    <img src="https://upload.wikimedia.org/wikipedia/commons/7/78/Google_Play_Store_badge_EN.svg" alt="Get it on Google Play" width="180">
-</a>
-</br>
+Requires Node.js (20 or 22 are the officially supported versions; 26 is verified working),
+JDK 17, and the Android SDK.
 
-<a href="https://apps.apple.com/us/app/simple-fitness-simplified/id6740262965" style="padding: 10px;">
-    <img src="https://github.com/user-attachments/assets/9473c701-e53e-4bb9-bbc2-3cf01669889f" alt="Download from App Store" width="180">
-</a>
-</div>
+```bash
+npm install
+npx tsc --noEmit                    # typecheck — should pass with zero errors
+npx expo export --platform android  # bundle only; needs no Android SDK or device
+npm run android                     # build and install a debug APK on a device or emulator
+```
 
-*(Notification functionality is not available on the F-Droid builds due to package incompatibility with F-Droid policies.)*
+See [ENGINEERING.md](./ENGINEERING.md) for the full toolchain setup, architecture notes, and contribution workflow.
 
+## 📄 **Documentation**
+
+| File | Purpose |
+|---|---|
+| [SPECS.md](./SPECS.md) | What the **current iteration** is building. Replaced wholesale when an iteration completes. |
+| [ENGINEERING.md](./ENGINEERING.md) | Durable record of *why* the codebase is the way it is, plus the workflow every contributor follows. |
+
+## ⚖️ **License**
+
+MIT — see [LICENSE](./LICENSE). Original copyright © 2024 Başar Subaşı; fork copyright © 2026 Lutmak.

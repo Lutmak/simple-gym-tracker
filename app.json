@@ -1,0 +1,52 @@
+{
+  "expo": {
+    "name": "Simple",
+    "slug": "simplefitnessappbeta",
+    "version": "1.7.15",
+    "orientation": "portrait",
+    "icon": "./assets/simpleicon.png",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/simpleicon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "bundleIdentifier": "tr.com.basarsubasi.simplefitnessapp"
+    },
+    "android": {
+      "versionCode": 66,
+      "blockedPermissions": ["android.permission.INTERNET",
+       "android.permission.RECEIVE_BOOT_COMPLETED",
+       "android.permission.RECORD_AUDIO",
+       "android.permission.ACCESS_NETWORK_STATE",
+       "android.permission.ACCESS_WIFI_STATE" ],
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/simpleicon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "tr.com.basarsubasi.simplefitnessapp"
+    },
+    "web": {
+      "favicon": "./assets/simpleicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "1b72cc6b-8e1a-47b1-a7d3-8fcf199a3015"
+      }
+    },
+    "plugins": [
+      "expo-sqlite",
+      "expo-build-properties",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notificationicon.png",
+          "color": "#000000",
+          "enableBackgroundRemoteNotifications": false
+        }
+      ]
+    ],
+    "owner": "basarsubasi"
+  }
+}

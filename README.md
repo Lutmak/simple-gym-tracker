@@ -99,15 +99,25 @@ This fork has not been published to any app store yet. Google Play and F-Droid r
 
 ## 🧑‍💻 **Building from source**
 
-Requires Node.js (20 or 22 are the officially supported versions; 26 is verified working),
-JDK 17, and the Android SDK.
+Requires only Node.js (20 or 22 are the officially supported versions; 26 is verified working)
+and the **Expo Go** app on an Android phone. No Android SDK, JDK, Gradle or emulator needed for
+day-to-day development.
 
 ```bash
 npm install
-npx tsc --noEmit                    # typecheck — should pass with zero errors
-npx expo export --platform android  # bundle only; needs no Android SDK or device
-npm run android                     # build and install a debug APK on a device or emulator
+npx expo start --go   # scan the QR code from Expo Go, phone on the same Wi-Fi
 ```
+
+Edits hot-reload on the device. To check a change without a phone at all:
+
+```bash
+npx tsc --noEmit                    # typecheck — should pass with zero errors
+npx expo export --platform android  # bundle only; no SDK or device required
+```
+
+A full native build (`npm run android`) additionally needs JDK 17 and the Android SDK — see
+[ENGINEERING.md](./ENGINEERING.md) §5 — but release builds go through EAS Build in the cloud,
+so a local native toolchain is optional.
 
 See [ENGINEERING.md](./ENGINEERING.md) for the full toolchain setup, architecture notes, and contribution workflow.
 

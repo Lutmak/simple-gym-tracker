@@ -86,9 +86,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'tr.com.basarsubasi.simplefitnessapp'
+    namespace 'dev.lutmak.simplegymtracker'
     defaultConfig {
-        applicationId 'tr.com.basarsubasi.simplefitnessapp'
+        applicationId 'dev.lutmak.simplegymtracker'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 66

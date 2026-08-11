@@ -1,4 +1,4 @@
-package tr.com.basarsubasi.simplefitnessapp
+package dev.lutmak.simplegymtracker
 
 import android.os.Build
 import android.os.Bundle

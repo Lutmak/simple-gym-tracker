@@ -19,7 +19,8 @@ export default function Home({ navigation }: any) {
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <View style={styles.headerContainer}>
         {/* App Title */}
-        <Text style={[styles.title, { color: theme.text }]}>Simple.</Text>
+        <Text style={[styles.title, { color: theme.text }]}>Simple:</Text>
+        <Text style={[styles.subtitle, { color: theme.text }]}>Gym Tracker</Text>
       </View>
 
       {/* Create a Workout Section */}
@@ -68,11 +69,15 @@ export default function Home({ navigation }: any) {
                 styles.communityButton,
                 { backgroundColor: '#121212' },
               ]}
-              onPress={() => Linking.openURL('https://discord.gg/A38Ny7UggP')}
+              onPress={() =>
+                Linking.openURL(
+                  'https://github.com/Lutmak/simple-gym-tracker/issues',
+                )
+              }
             >
               <View style={styles.communityButtonContent}>
                 <Ionicons
-                  name='logo-discord'
+                  name='bug'
                   size={scale(20)}
                   color={'#FFFFFF'}
                   style={styles.communityButtonIcon}
@@ -83,7 +88,7 @@ export default function Home({ navigation }: any) {
                     { color: '#FFFFFF' },
                   ]}
                 >
-                  {t('Discord')}
+                  {t('reportIssue')}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -95,7 +100,7 @@ export default function Home({ navigation }: any) {
               ]}
               onPress={() =>
                 Linking.openURL(
-                  'https://github.com/basarsubasi/simplefitnessapp',
+                  'https://github.com/Lutmak/simple-gym-tracker',
                 )
               }
             >
@@ -136,6 +141,12 @@ const styles = ScaledSheet.create({
     fontSize: '36@s', // Smaller scaled font size
     fontWeight: '900',
     textAlign: 'center',
+  },
+  subtitle: {
+    fontSize: '16@s',
+    fontWeight: '600',
+    textAlign: 'center',
+    letterSpacing: '1@s',
   },
   card: {
     borderRadius: 15, // Keep fixed border radius for better uniformity

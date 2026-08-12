@@ -35,6 +35,8 @@
   import Difficulty from './screens/Difficulty';
   import Template from './screens/Template';
   import TemplateDetails from './screens/TemplateDetails';
+  import Programs from './screens/Programs';
+  import FiveThreeOneSetup from './screens/FiveThreeOneSetup';
   import * as Notifications from 'expo-notifications';
   import { useRecurringWorkouts } from './utils/recurringWorkoutUtils';
   import { addRecurringTable, createUpdateTriggers } from './utils/addRecurringTable';
@@ -132,6 +134,8 @@
     Difficulty: undefined;
     Template: { workout_difficulty: string };
     TemplateDetails: { workout_id: number };
+    Programs: undefined;
+    FiveThreeOneSetup: undefined;
   };
 
   export type WorkoutLogStackParamList = {
@@ -204,6 +208,16 @@
           component={TemplateDetails}
           options={{title: 'TemplateDetails'}}
           />
+         <WorkoutStackScreen.Screen
+           name="Programs"
+           component={Programs}
+           options={{ title: 'Programs' }}
+         />
+         <WorkoutStackScreen.Screen
+           name="FiveThreeOneSetup"
+           component={FiveThreeOneSetup}
+           options={{ title: '5/3/1 Setup' }}
+         />
       </WorkoutStackScreen.Navigator>
     );
   }

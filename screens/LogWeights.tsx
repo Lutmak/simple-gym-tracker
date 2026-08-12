@@ -15,7 +15,10 @@ import { useTheme } from '../context/ThemeContext';
 import { KeyboardAwareFlatList, KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useTranslation } from 'react-i18next';
 import { WeightLogStackParamList } from '../App';
-import AppTextInput, { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
+import AppTextInput, {
+  APP_TEXT_MAX_FONT_SIZE_MULTIPLIER,
+  parseNumericInput,
+} from '../components/AppTextInput';
 
 type LogWeightsRouteProp = RouteProp<WeightLogStackParamList, 'LogWeights'>;
 
@@ -207,10 +210,16 @@ export default function LogWeights() {
         const weightKey = `${exercise.logged_exercise_id}_${setNumber}`;
         const repsKey = `${exercise.logged_exercise_id}_${setNumber}`;
 
-        const weight = parseFloat(weights[weightKey]?.replace(',', '.') || '0');
-        const repsCount = parseInt(reps[repsKey] || '0', 10);
+        const weight = parseNumericInput(weights[weightKey] ?? '');
+        const repsValue = parseNumericInput(reps[repsKey] ?? '');
+        const repsCount = repsValue === null ? null : Math.trunc(repsValue);
 
-        if (weight <= 0 || repsCount <= 0) {
+        if (
+          weight === null ||
+          repsCount === null ||
+          weight <= 0 ||
+          repsCount <= 0
+        ) {
           Alert.alert(
             t('errorTitle'),
             t('logWeightsError')
@@ -227,8 +236,13 @@ export default function LogWeights() {
             const weightKey = `${exercise.logged_exercise_id}_${setNumber}`;
             const repsKey = `${exercise.logged_exercise_id}_${setNumber}`;
 
-            const weight = parseFloat(weights[weightKey]?.replace(',', '.') || '0');
-            const repsCount = parseInt(reps[repsKey] || '0', 10);
+            const weight = parseNumericInput(weights[weightKey] ?? '');
+            const repsValue = parseNumericInput(reps[repsKey] ?? '');
+            const repsCount = repsValue === null ? null : Math.trunc(repsValue);
+
+            if (weight === null || repsCount === null) {
+              throw new Error('Numeric input became invalid before logging');
+            }
 
             await db.runAsync(
               `INSERT INTO Weight_Log 
@@ -389,21 +403,23 @@ const SetInputRow = React.memo(({ setNumber, reps, weight, onRepsChange, onWeigh
     >
       <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.setText, { color: theme.text }]}>{t('Set')} {setNumber}:</Text>
       <AppTextInput
+        variant="numeric"
         style={[styles.input, { color: theme.text, backgroundColor: 'transparent' }]}
         placeholder={t('repsPlaceholder') + " (> 0)"}
         placeholderTextColor={theme.logborder}
         keyboardType="numeric"
         value={reps}
-        onChangeText={onRepsChange}
+        onRawChange={onRepsChange}
       />
 
       <AppTextInput
+        variant="numeric"
         style={[styles.input, { color: theme.text, backgroundColor: 'transparent' }]}
         placeholder={weightFormat + " (> 0)"}
         placeholderTextColor={theme.logborder}
         keyboardType="decimal-pad"
         value={weight}
-        onChangeText={onWeightChange}
+        onRawChange={onWeightChange}
       />
     </TouchableOpacity>
   );

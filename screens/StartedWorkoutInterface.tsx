@@ -28,7 +28,10 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSettings } from '../context/SettingsContext';
 import { loadRestTimerPreferences, saveRestTimerPreferences } from '../utils/startedWorkoutPreferenceUtils';
 import { useAudioPlayer, setAudioModeAsync } from 'expo-audio';
-import AppTextInput, { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
+import AppTextInput, {
+  APP_TEXT_MAX_FONT_SIZE_MULTIPLIER,
+  parseNumericInput,
+} from '../components/AppTextInput';
 import { 
   useTimerPersistence, 
   createTimerState, 
@@ -68,6 +71,12 @@ interface ExerciseSet {
   muscle_group: string | null;
   exercise_notes: string | null;
 }
+
+const hasPositiveIntegerPart = (value: string): boolean =>
+  /^[0-9]*[1-9][0-9]*$/.test(value.split('.')[0]);
+
+const hasPositiveDecimalInput = (value: string): boolean =>
+  /^(?=.*[1-9])[0-9]*(?:\.[0-9]*)?$/.test(value);
 
 export default function StartedWorkoutInterface() {
   const navigation = useNavigation();
@@ -630,8 +639,11 @@ export default function StartedWorkoutInterface() {
 
   // Workout flow functions
   const startWorkout = async () => {
-    const setRestSeconds = parseInt(restTime);
-    const exerciseRestSeconds = parseInt(exerciseRestTime);
+    const setRestValue = parseNumericInput(restTime);
+    const exerciseRestValue = parseNumericInput(exerciseRestTime);
+    const setRestSeconds = setRestValue === null ? NaN : Math.trunc(setRestValue);
+    const exerciseRestSeconds =
+      exerciseRestValue === null ? NaN : Math.trunc(exerciseRestValue);
     
     if (isNaN(setRestSeconds) || setRestSeconds < 0) {
       Alert.alert(t('invalidRestTime'), t('pleaseEnterValidSeconds'));
@@ -782,13 +794,14 @@ export default function StartedWorkoutInterface() {
         <View style={styles.setupSection}>
           <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.setupLabel, { color: theme.text }]}>{t('restTimeBetweenSets')}:</Text>
           <AppTextInput
+            variant="numeric"
             style={[styles.restTimeInput, { 
               backgroundColor: theme.card,
               color: theme.text,
               borderColor: theme.border
             }]}
             value={restTime}
-            onChangeText={setRestTime}
+            onRawChange={setRestTime}
             keyboardType="number-pad"
             maxLength={4}
             placeholderTextColor={theme.type === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'}
@@ -796,13 +809,14 @@ export default function StartedWorkoutInterface() {
           
           <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.setupLabel, { color: theme.text }]}>{t('restTimeBetweenExercises')}:</Text>
           <AppTextInput
+            variant="numeric"
             style={[styles.restTimeInput, { 
               backgroundColor: theme.card,
               color: theme.text,
               borderColor: theme.border
             }]}
             value={exerciseRestTime}
-            onChangeText={setExerciseRestTime}
+            onRawChange={setExerciseRestTime}
             keyboardType="number-pad"
             maxLength={4}
             placeholderTextColor={theme.type === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'}
@@ -907,6 +921,10 @@ export default function StartedWorkoutInterface() {
   const renderExerciseScreen = () => {
     const currentSet = allSets[timerState.currentSetIndex];
     if (!currentSet) return null;
+
+    const currentSetHasValidInputs =
+      hasPositiveIntegerPart(currentSet.reps_done) &&
+      hasPositiveDecimalInput(currentSet.weight);
     
     const muscleGroupInfo = muscleGroupData.find(mg => mg.value === currentSet.muscle_group);
     
@@ -966,13 +984,14 @@ export default function StartedWorkoutInterface() {
             <View style={styles.inputGroup}>
               <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text }]}>{t('repsDone')}</Text>
               <AppTextInput
+                variant="numeric"
                   style={[styles.input, { 
                   backgroundColor: theme.card,
               color: theme.text,
               borderColor: theme.border
             }]}
-            value={currentSet.reps_done}
-            onChangeText={(text) => {
+             value={currentSet.reps_done}
+             onRawChange={(text) => {
               const updatedSets = [...allSets];
               updatedSets[timerState.currentSetIndex] = {
                 ...updatedSets[timerState.currentSetIndex],
@@ -990,13 +1009,14 @@ export default function StartedWorkoutInterface() {
             <View style={styles.inputGroup}>
               <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text }]}> {t('Weight')} ({weightFormat})</Text>
               <AppTextInput
+                variant="numeric"
                 style={[styles.input, { 
                   backgroundColor: theme.card,
                   color: theme.text,
                   borderColor: theme.border
                 }]}
                 value={currentSet.weight}
-                onChangeText={(text) => {
+                onRawChange={(text) => {
 
 
 
@@ -1020,13 +1040,26 @@ export default function StartedWorkoutInterface() {
             <TouchableOpacity
                 style={[styles.completeButton, { 
                 backgroundColor: 
-                    !allSets[timerState.currentSetIndex] || allSets[timerState.currentSetIndex].reps_done === '' || parseInt(allSets[timerState.currentSetIndex].reps_done) <= 0 || allSets[timerState.currentSetIndex].weight === '' || parseFloat(allSets[timerState.currentSetIndex].weight) <= 0
+                    !currentSetHasValidInputs
                     ? theme.inactivetint 
                     : theme.buttonBackground
                 }]}
                 onPress={() => {
                 const pressCurrentSet = allSets[timerState.currentSetIndex];
-                if (!pressCurrentSet || pressCurrentSet.reps_done === '' || parseInt(pressCurrentSet.reps_done) <= 0 || pressCurrentSet.weight === '' || parseFloat(pressCurrentSet.weight) <= 0) {
+                const repsValue = pressCurrentSet
+                  ? parseNumericInput(pressCurrentSet.reps_done)
+                  : null;
+                const weightValue = pressCurrentSet
+                  ? parseNumericInput(pressCurrentSet.weight)
+                  : null;
+                const repsDone = repsValue === null ? null : Math.trunc(repsValue);
+                if (
+                  !pressCurrentSet ||
+                  repsDone === null ||
+                  repsDone <= 0 ||
+                  weightValue === null ||
+                  weightValue <= 0
+                ) {
                     Alert.alert(t('missingInformation'), t('enterRepsAndWeight'));
                     return;
                 }
@@ -1061,9 +1094,11 @@ export default function StartedWorkoutInterface() {
                     currentSetIndex: nextSetIndex 
                     }));
                     
-                    const restSeconds = differentExercise 
-                    ? parseInt(exerciseRestTime) 
-                    : parseInt(restTime);
+                    const restValue = parseNumericInput(
+                      differentExercise ? exerciseRestTime : restTime,
+                    );
+                    const restSeconds =
+                      restValue === null ? 0 : Math.trunc(restValue);
                     
                     setIsCompletingSet(false);
                     startRestTimer(restSeconds);
@@ -1110,7 +1145,7 @@ export default function StartedWorkoutInterface() {
                 }}
                 disabled={
                     isCompletingSet ||
-                    !allSets[timerState.currentSetIndex] || allSets[timerState.currentSetIndex].reps_done === '' || parseInt(allSets[timerState.currentSetIndex].reps_done) <= 0 || allSets[timerState.currentSetIndex].weight === '' || parseFloat(allSets[timerState.currentSetIndex].weight) <= 0
+                    !currentSetHasValidInputs
                 }
             >
                 <Text style={[styles.buttonText, { color: theme.buttonText }]}>
@@ -1293,6 +1328,14 @@ export default function StartedWorkoutInterface() {
         console.log('Saving completed sets:', loggedSets.length);
         for (let i = 0; i < loggedSets.length; i++) {
           const set = loggedSets[i];
+          const weight = parseNumericInput(set.weight);
+          const repsValue = parseNumericInput(set.reps_done);
+          const repsDone = repsValue === null ? null : Math.trunc(repsValue);
+
+          if (weight === null || repsDone === null) {
+            throw new Error('Numeric input became invalid before saving');
+          }
+
           await db.runAsync(
             `INSERT INTO Weight_Log (
               workout_log_id, 
@@ -1308,8 +1351,8 @@ export default function StartedWorkoutInterface() {
               set.exercise_id,
               set.exercise_name,
               set.set_number,
-              parseFloat(set.weight),
-              parseInt(set.reps_done),
+              weight,
+              repsDone,
               set.muscle_group
             ]
           );
@@ -1637,8 +1680,21 @@ export default function StartedWorkoutInterface() {
   const handleFinishWorkout = () => {
     const currentSetIndex = timerState.currentSetIndex;
     const currentSet = allSets[currentSetIndex];
+    const repsValue = currentSet
+      ? parseNumericInput(currentSet.reps_done)
+      : null;
+    const weightValue = currentSet
+      ? parseNumericInput(currentSet.weight)
+      : null;
+    const repsDone = repsValue === null ? null : Math.trunc(repsValue);
 
-    if (currentSet && currentSet.reps_done !== '' && parseInt(currentSet.reps_done) > 0 && currentSet.weight !== '' && parseFloat(currentSet.weight) > 0) {
+    if (
+      currentSet &&
+      repsDone !== null &&
+      repsDone > 0 &&
+      weightValue !== null &&
+      weightValue > 0
+    ) {
       const updatedSets = [...allSets];
       updatedSets[currentSetIndex] = { ...currentSet, set_logged: true };
       setAllSets(updatedSets);

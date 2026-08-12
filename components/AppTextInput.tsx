@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   TextInput,
@@ -8,26 +8,169 @@ import { useTheme } from '../context/ThemeContext';
 
 export const APP_TEXT_MAX_FONT_SIZE_MULTIPLIER = 1.5;
 
-export type AppTextInputProps = TextInputProps;
+export type NumericAppTextInputProps = Omit<
+  TextInputProps,
+  'value' | 'defaultValue' | 'onChangeText' | 'onBlur' | 'onSubmitEditing'
+> & {
+  variant: 'numeric';
+  value?: string;
+  defaultValue?: string;
+  onRawChange?: (value: string) => void;
+  onCommit?: (value: number | null) => void;
+  onBlur?: TextInputProps['onBlur'];
+  onSubmitEditing?: TextInputProps['onSubmitEditing'];
+};
+
+export type TextAppTextInputProps = TextInputProps & {
+  variant?: 'text';
+};
+
+export type AppTextInputProps =
+  | TextAppTextInputProps
+  | NumericAppTextInputProps;
+
+export function normalizeNumericInput(value: string): string {
+  let normalized = '';
+  let hasDecimalSeparator = false;
+
+  for (const character of value) {
+    if (character >= '0' && character <= '9') {
+      normalized += character;
+      continue;
+    }
+
+    if (
+      (character === '.' || character === ',') &&
+      !hasDecimalSeparator
+    ) {
+      normalized += '.';
+      hasDecimalSeparator = true;
+    }
+  }
+
+  return normalized;
+}
+
+export function parseNumericInput(value: string): number | null {
+  const normalized = normalizeNumericInput(value);
+
+  if (normalized === '' || normalized === '.') {
+    return null;
+  }
+
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 const AppTextInput = React.forwardRef<TextInput, AppTextInputProps>(
-  ({ style, onFocus, onBlur, ...props }, ref) => {
+  (props, ref) => {
     const { theme } = useTheme();
     const [isFocused, setIsFocused] = useState(false);
+    const [rawNumericValue, setRawNumericValue] = useState(() =>
+      props.variant === 'numeric'
+        ? normalizeNumericInput(props.value ?? props.defaultValue ?? '')
+        : '',
+    );
+
+    useEffect(() => {
+      if (
+        props.variant !== 'numeric' ||
+        isFocused ||
+        props.value === undefined
+      ) {
+        return;
+      }
+
+      const nextValue = normalizeNumericInput(props.value);
+      setRawNumericValue((currentValue) =>
+        currentValue === nextValue ? currentValue : nextValue,
+      );
+    }, [props.value, props.variant]);
 
     const handleFocus: NonNullable<TextInputProps['onFocus']> = (event) => {
       setIsFocused(true);
-      onFocus?.(event);
+      props.onFocus?.(event);
     };
 
     const handleBlur: NonNullable<TextInputProps['onBlur']> = (event) => {
       setIsFocused(false);
-      onBlur?.(event);
+      props.onBlur?.(event);
     };
+
+    if (props.variant === 'numeric') {
+      const {
+        variant: _variant,
+        value: _value,
+        defaultValue: _defaultValue,
+        onRawChange,
+        onCommit,
+        onSubmitEditing,
+        onBlur,
+        style,
+        ...nativeProps
+      } = props;
+
+      const handleRawChange: NonNullable<TextInputProps['onChangeText']> = (
+        value,
+      ) => {
+        const normalizedValue = normalizeNumericInput(value);
+        setRawNumericValue(normalizedValue);
+        onRawChange?.(normalizedValue);
+      };
+
+      const commitNumericValue = () => {
+        onCommit?.(parseNumericInput(rawNumericValue));
+      };
+
+      const handleSubmitEditing: NonNullable<
+        TextInputProps['onSubmitEditing']
+      > = (event) => {
+        commitNumericValue();
+        onSubmitEditing?.(event);
+      };
+
+      const handleNumericBlur: NonNullable<TextInputProps['onBlur']> = (
+        event,
+      ) => {
+        setIsFocused(false);
+        commitNumericValue();
+        onBlur?.(event);
+      };
+
+      return (
+        <TextInput
+          {...nativeProps}
+          ref={ref}
+          value={rawNumericValue}
+          style={[
+            styles.input,
+            { color: theme.text },
+            style,
+            {
+              backgroundColor: theme.card,
+              borderColor: isFocused ? theme.buttonBackground : theme.border,
+              borderWidth: 1,
+            },
+          ]}
+          placeholderTextColor={
+            theme.type === 'dark'
+              ? 'rgba(255, 255, 255, 0.6)'
+              : 'rgba(0, 0, 0, 0.6)'
+          }
+          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          onFocus={handleFocus}
+          onBlur={handleNumericBlur}
+          onChangeText={handleRawChange}
+          onSubmitEditing={handleSubmitEditing}
+        />
+      );
+    }
+
+    const { variant: _variant, style, ...nativeProps } = props;
 
     return (
       <TextInput
-        {...props}
+        {...nativeProps}
         ref={ref}
         style={[
           styles.input,

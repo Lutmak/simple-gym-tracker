@@ -147,6 +147,22 @@ export default function Programs() {
                 {program.unit} / {program.include_deload === 1 ? t('deloadIncluded') : t('deloadNotIncluded')}
               </Text>
             </View>
+            <TouchableOpacity
+              style={[styles.progressButton, { borderColor: theme.border }]}
+              onPress={() =>
+                navigation.navigate('FiveThreeOneProgress', { programId: program.program_id })
+              }
+              accessibilityRole="button"
+              accessibilityLabel={`${t('fiveThreeOneProgress')}: ${program.program_name}`}
+            >
+              <Ionicons name="trending-up" size={19} color={theme.text} />
+              <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                style={[styles.progressButtonText, { color: theme.text }]}
+              >
+                {t('fiveThreeOneProgress')}
+              </Text>
+            </TouchableOpacity>
             {program.latest_cycle_status === 'complete' && program.latest_cycle_id !== null ? (
               <TouchableOpacity
                 style={[styles.generateButton, { backgroundColor: theme.buttonBackground }]}
@@ -289,6 +305,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'flex-start',
+  },
+  progressButton: {
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+  },
+  progressButtonText: {
+    fontSize: 15,
+    fontWeight: '800',
+    marginLeft: 7,
   },
   generateButtonText: {
     fontSize: 15,

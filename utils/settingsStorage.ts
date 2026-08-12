@@ -1,4 +1,4 @@
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 // Make sure to use backticks here:
 const SETTINGS_FILE = `${FileSystem.documentDirectory}userSettings.json`;

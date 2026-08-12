@@ -14,7 +14,7 @@ import { useSettings } from '../context/SettingsContext';
 import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import { useNotifications } from '../utils/useNotifications';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 
@@ -654,11 +654,15 @@ export default function Settings() {
                 styles.dataManagementButton,
                 { backgroundColor: '#121212' },
               ]}
-              onPress={() => Linking.openURL('https://discord.gg/A38Ny7UggP')}
+              onPress={() =>
+                Linking.openURL(
+                  'https://github.com/Lutmak/simple-gym-tracker/issues',
+                )
+              }
             >
               <View style={styles.dataManagementButtonContent}>
                 <Ionicons
-                  name='logo-discord'
+                  name='bug'
                   size={25}
                   color={'#FFFFFF'}
                   style={styles.dataButtonIcon}
@@ -670,7 +674,7 @@ export default function Settings() {
                   ]}
                   numberOfLines={3}
                 >
-                  {t('Discord')}
+                  {t('reportIssue')}
                 </Text>
               </View>
             </TouchableOpacity>
@@ -682,7 +686,7 @@ export default function Settings() {
               ]}
               onPress={() =>
                 Linking.openURL(
-                  'https://github.com/basarsubasi/simplefitnessapp',
+                  'https://github.com/Lutmak/simple-gym-tracker',
                 )
               }
             >

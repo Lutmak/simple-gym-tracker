@@ -1,8 +1,8 @@
   // App.tsx
   import React, {useState, useEffect, useRef } from 'react';
   import { View, ActivityIndicator, StatusBar, StyleSheet, Pressable, Text, Platform } from 'react-native'; // Import Platform
-  import * as FileSystem from 'expo-file-system';
-  import { SQLiteProvider} from 'expo-sqlite';
+  import * as FileSystem from 'expo-file-system/legacy';
+  import { SQLiteProvider, type SQLiteDatabase } from 'expo-sqlite';
   import { Asset } from 'expo-asset';
   import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
   import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
@@ -37,6 +37,7 @@
   import TemplateDetails from './screens/TemplateDetails';
   import * as Notifications from 'expo-notifications';
   import { useRecurringWorkouts } from './utils/recurringWorkoutUtils';
+  import { addRecurringTable, createUpdateTriggers } from './utils/addRecurringTable';
   import { checkAndSyncPermissions } from './utils/notificationUtils';
   import { AppState } from 'react-native';
   import GraphsWorkoutDetails from './screens/GraphsWorkoutDetails';
@@ -158,11 +159,12 @@
     StartedWorkoutInterface: { workout_log_id: number };
   }
 
+  // No SQLiteProvider here: AppContent's provider already wraps every tab. expo-sqlite's suspense
+  // path keeps one module-level database instance and reopens it whenever a provider mounts with
+  // props that differ from the current one, so a second provider closes the database out from
+  // under screens that are still querying it.
   function WorkoutStack() {
     return (
-
-      <SQLiteProvider databaseName="SimpleDB.db" useSuspense>
-
       <WorkoutStackScreen.Navigator screenOptions={{
         headerShown: false, // Disable headers for all screens in this stack
       }}
@@ -203,7 +205,6 @@
           options={{title: 'TemplateDetails'}}
           />
       </WorkoutStackScreen.Navigator>
-      </SQLiteProvider>
     );
   }
 
@@ -325,6 +326,15 @@
     );
   }*/
 
+// The bundled assets/SimpleDB.db predates Recurring_Workouts, so a fresh install opens a
+// database without it. RecurringWorkoutManager queries the table on mount, which is why the
+// schema has to exist before any screen renders rather than being created lazily by whichever
+// screen happens to be visited first.
+const initialiseSchema = async (db: SQLiteDatabase) => {
+  await addRecurringTable(db);
+  await createUpdateTriggers(db);
+};
+
 // First, create a component that will handle the recurring workout checks
 function RecurringWorkoutManager() {
   const { checkRecurringWorkouts } = useRecurringWorkouts();
@@ -374,7 +384,7 @@ const AppContent = () => {
           </View>
         }
       />
-      <SQLiteProvider databaseName="SimpleDB.db" useSuspense>
+      <SQLiteProvider databaseName="SimpleDB.db" useSuspense onInit={initialiseSchema}>
         <RecurringWorkoutManager />
         
         <Bottom.Navigator
@@ -459,7 +469,8 @@ const AppContent = () => {
         // Don't request permissions on app start - this will be handled when needed
         await Notifications.setNotificationHandler({
           handleNotification: async () => ({
-            shouldShowAlert: true,
+            shouldShowBanner: true,
+            shouldShowList: true,
             shouldPlaySound: true,
             shouldSetBadge: false,
           }),

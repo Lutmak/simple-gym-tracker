@@ -27,7 +27,6 @@
   "submit": {
     "production": {
       "android": {
-        "serviceAccountKeyPath": "./keys/simple-fitness-app-444923-010e6f0a87b0.json",
         "track": "production",
         "releaseStatus": "completed"
       }

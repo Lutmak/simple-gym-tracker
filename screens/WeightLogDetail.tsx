@@ -629,7 +629,6 @@ export default function WeightLogDetail() {
       <Modal visible={showLogEditModal} animationType="fade" onRequestClose={closeLogEditModal} transparent>
         {showLogEditModal && (
           <StatusBar
-            backgroundColor={theme.type === 'light' ? "rgba(0, 0, 0, 0.5)" : "black"}
             barStyle={theme.type === 'light' ? 'light-content' : 'dark-content'}
           />
         )}

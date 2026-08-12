@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useContext, ReactNode } from 'react';
-import { Appearance } from 'react-native';
+import { Appearance, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as NavigationBar from 'expo-navigation-bar';
 
 // Define the themes
 const LightTheme = {
@@ -76,6 +77,12 @@ export const ThemeProvider = ({ children }: ThemeProviderProps) => {
     };
     loadTheme();
   }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      NavigationBar.setStyle(theme.type === 'light' ? 'light' : 'dark');
+    }
+  }, [theme.type]);
 
   const toggleTheme = async () => {
     const newTheme = theme === LightTheme ? DarkTheme : LightTheme;

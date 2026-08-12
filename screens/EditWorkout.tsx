@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
-  ScrollView,
   Keyboard,
   TouchableWithoutFeedback,
 } from 'react-native';
@@ -14,7 +13,11 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
-import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
+import {
+  NestableDraggableFlatList,
+  NestableScrollContainer,
+  RenderItemParams,
+} from 'react-native-draggable-flatlist';
 import AppTextInput from '../components/AppTextInput';
 
 type Exercise = { exercise_id: number; exercise_name: string; sets: number; reps: number; web_link: string | null; muscle_group: string | null; exercise_notes: string | null };
@@ -356,7 +359,7 @@ export default function EditWorkout() {
 
   return (
     <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
+      <NestableScrollContainer contentContainerStyle={{ flexGrow: 1 }} showsVerticalScrollIndicator={false}>
         <View style={[styles.container, { backgroundColor: theme.background }]}>
           {/* Back Button */}
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
@@ -390,7 +393,7 @@ export default function EditWorkout() {
 
               {/* Exercises as DraggableFlatList */}
               <View style={styles.exercisesContainer}>
-                <DraggableFlatList
+                <NestableDraggableFlatList
                   scrollEnabled={false}
                   data={day.exercises}
                   renderItem={(props) => renderExerciseItem(props, day)}
@@ -414,7 +417,7 @@ export default function EditWorkout() {
             </Text>
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      </NestableScrollContainer>
     </TouchableWithoutFeedback>
   );
 }

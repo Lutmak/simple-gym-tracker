@@ -572,7 +572,15 @@
      "cycleGeneratedMessage": "Cycle {{cycle}} generated: {{weeks}} weeks across {{workouts}} workouts.",
      "cycleAlreadyGeneratedMessage": "Cycle {{cycle}} already exists. Complete it before generating another.",
      "failedToGenerateCycle": "The cycle could not be generated. Check the program settings and try again.",
-     "viewGeneratedWorkouts": "View Generated Workouts"
+     "viewGeneratedWorkouts": "View Generated Workouts",
+     "fiveThreeOneAmrap": "AMRAP",
+     "fiveThreeOneAmrapPrompt": "AMRAP: enter the reps you achieved",
+     "fiveThreeOneAmrapRepsPlaceholder": "Actual reps",
+     "fiveThreeOneWarmupTarget": "Warm-up target",
+     "fiveThreeOneCompleteWarmup": "Complete warm-up",
+     "fiveThreeOneWarmupError": "The warm-up could not be marked complete.",
+     "fiveThreeOneBelowTarget": "Below target. Log the reps you completed.",
+     "failedToSaveWorkout": "There was an error saving your workout. Please try again."
 
     }
   

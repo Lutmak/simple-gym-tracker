@@ -40,6 +40,15 @@ import {
   TimerState 
 } from '../utils/timerPersistenceUtils';
 import { AutoSizeText, ResizeTextMode } from 'react-native-auto-size-text';
+import { estimate1RM, type WeightUnit } from '../utils/fiveThreeOne';
+import { advanceFiveThreeOneCycleAfterSession } from '../utils/fiveThreeOneGenerationPersistence';
+import {
+  describeFiveThreeOneLink,
+  isFiveThreeOneAmrapPr,
+  isFiveThreeOneBelowTarget,
+  type FiveThreeOneLinkForLogging,
+  type FiveThreeOneSetDescription,
+} from '../utils/fiveThreeOneLogging';
 
 type StartedWorkoutRouteProps = RouteProp<
   StartWorkoutStackParamList,
@@ -70,6 +79,35 @@ interface ExerciseSet {
   web_link: string | null;
   muscle_group: string | null;
   exercise_notes: string | null;
+  five_three_one: FiveThreeOneSetContext | null;
+}
+
+interface FiveThreeOneSetContext {
+  description: FiveThreeOneSetDescription;
+  programId: number;
+  cycleId: number;
+  liftId: number;
+  liftName: string;
+  unit: WeightUnit;
+  weekNumber: number;
+}
+
+interface FiveThreeOneLinkRow {
+  program_id: number | null;
+  cycle_id: number | null;
+  lift_id: number | null;
+  lift_name: string | null;
+  unit: WeightUnit;
+  week_number: number;
+  exercise_name: string | null;
+  is_amrap: number;
+  is_warmup: number;
+  workout_link_id: number;
+  set_number: number;
+  work_set_number: number | null;
+  target_weight: number;
+  target_reps: number;
+  warmup_completed_at: number | null;
 }
 
 const hasPositiveIntegerPart = (value: string): boolean =>
@@ -425,7 +463,73 @@ export default function StartedWorkoutInterface() {
            WHERE workout_log_id = ?;`,
           [workout_log_id]
         );
-        
+
+        const fiveThreeOneLinkRows = await db.getAllAsync<FiveThreeOneLinkRow>(
+          `SELECT wl.workout_link_id, wl.set_number, wl.work_set_number,
+                  wl.target_weight, wl.target_reps, wl.is_amrap, wl.is_warmup,
+                  wl.warmup_completed_at, wl.week_number,
+                  c.program_id, wl.cycle_id, wl.lift_id, l.lift_name, p.unit,
+                  e.exercise_name
+           FROM FiveThreeOne_WorkoutLink wl
+           JOIN Workouts w ON w.workout_id = wl.workout_id
+           JOIN Days d ON d.day_id = wl.day_id
+           JOIN Workout_Log log
+             ON log.workout_log_id = ?
+            AND log.workout_name = w.workout_name
+            AND log.day_name = d.day_name
+           JOIN FiveThreeOne_Cycles c ON c.cycle_id = wl.cycle_id
+           JOIN FiveThreeOne_Programs p ON p.program_id = c.program_id
+           JOIN FiveThreeOne_Lifts l ON l.lift_id = wl.lift_id
+           LEFT JOIN Exercises e ON e.exercise_id = wl.exercise_id
+           ORDER BY wl.set_number;`,
+          [workout_log_id],
+        );
+
+        const fiveThreeOneLinks = fiveThreeOneLinkRows.map((row): {
+          context: FiveThreeOneSetContext;
+          exerciseName: string | null;
+        } => {
+          if (row.program_id === null || row.cycle_id === null || row.lift_id === null) {
+            throw new Error('The generated 5/3/1 link is missing its program metadata.');
+          }
+          if (row.unit !== 'kg' && row.unit !== 'lb') {
+            throw new Error('The generated 5/3/1 link is missing a valid program unit.');
+          }
+
+          const description = describeFiveThreeOneLink({
+            workoutLinkId: row.workout_link_id,
+            setNumber: row.set_number,
+            workSetNumber: row.work_set_number,
+            targetWeight: row.target_weight,
+            targetReps: row.target_reps,
+            isAmrap: row.is_amrap === 1,
+            isWarmup: row.is_warmup === 1,
+            warmupCompletedAt: row.warmup_completed_at,
+          });
+
+          return {
+            context: {
+              description,
+              programId: row.program_id,
+              cycleId: row.cycle_id,
+              liftId: row.lift_id,
+              liftName: row.lift_name ?? row.exercise_name ?? '',
+              unit: row.unit,
+              weekNumber: row.week_number,
+            },
+            exerciseName: row.exercise_name,
+          };
+        });
+        const generatedMainExerciseName = fiveThreeOneLinkRows.find(
+          (row) => row.is_warmup === 0,
+        )?.exercise_name;
+        const generatedWarmups = fiveThreeOneLinks
+          .filter((link) => link.context.description.isWarmup)
+          .map((link) => link.context);
+        const generatedWorkLinks = fiveThreeOneLinks.filter(
+          (link) => !link.context.description.isWarmup,
+        );
+
         setExercises(exercisesResult.map(e => ({ ...e, exercise_fully_logged: false })));
         
         weightMapRef.current.clear();
@@ -459,6 +563,54 @@ export default function StartedWorkoutInterface() {
         // Prepare all sets data structure
         const setsData: ExerciseSet[] = [];
         exercisesResult.forEach(exercise => {
+          const workLinks = generatedWorkLinks
+            .filter((link) => (link.exerciseName ?? '') === exercise.exercise_name)
+            .map((link) => link.context);
+          const isGeneratedMainLift =
+            generatedMainExerciseName !== undefined &&
+            exercise.exercise_name === generatedMainExerciseName &&
+            (generatedWarmups.length > 0 || workLinks.length > 0);
+          const generatedLinks = isGeneratedMainLift
+            ? [...generatedWarmups, ...workLinks]
+            : [];
+
+          if (generatedLinks.length > 0) {
+            generatedLinks.forEach((link) => {
+              const { description } = link;
+              const databaseSetNumber = description.databaseSetNumber;
+              const weight = description.targetWeight.toString();
+              let repsDone = '';
+              if (description.isWarmup) {
+                repsDone = description.targetReps.toString();
+              } else if (description.isAmrap) {
+                if (shouldAutoFillReps && shouldUseLogsForReps) {
+                  repsDone =
+                    repsMapRef.current.get(`${exercise.exercise_name}-${databaseSetNumber}`) || '';
+                }
+              } else if (shouldAutoFillReps) {
+                repsDone = shouldUseLogsForReps
+                  ? repsMapRef.current.get(`${exercise.exercise_name}-${databaseSetNumber}`) || ''
+                  : description.targetReps.toString();
+              }
+
+              setsData.push({
+                exercise_name: exercise.exercise_name,
+                exercise_id: exercise.logged_exercise_id,
+                set_number: description.displaySetNumber,
+                total_sets: generatedLinks.length,
+                reps_goal: description.targetReps,
+                reps_done: repsDone,
+                weight,
+                set_logged: description.isWarmup && description.warmupCompletedAt !== null,
+                web_link: exercise.web_link || null,
+                muscle_group: exercise.muscle_group || null,
+                exercise_notes: exercise.exercise_notes || null,
+                five_three_one: link,
+              });
+            });
+            return;
+          }
+
           for (let i = 1; i <= exercise.sets; i++) {
             const weight = shouldAutoFill ? (weightMapRef.current.get(`${exercise.exercise_name}-${i}`) || '') : '';
             
@@ -482,12 +634,19 @@ export default function StartedWorkoutInterface() {
               set_logged: false,
               web_link: exercise.web_link || null,
               muscle_group: exercise.muscle_group || null,
-              exercise_notes: exercise.exercise_notes || null
+              exercise_notes: exercise.exercise_notes || null,
+              five_three_one: null,
             });
           }
         });
         
         setAllSets(setsData);
+        const firstUnloggedSetIndex = setsData.findIndex((set) => !set.set_logged);
+        setTimerState((prev) =>
+          updateTimerState(prev, {
+            currentSetIndex: firstUnloggedSetIndex === -1 ? 0 : firstUnloggedSetIndex,
+          }),
+        );
       }
       
       setLoading(false);
@@ -573,11 +732,16 @@ export default function StartedWorkoutInterface() {
     setAutoFillWeight(newValue);
     setAllSets(currentSets => 
       currentSets.map(set => {
-        if (set.set_logged) {
+        if (set.set_logged || set.five_three_one?.description.isWarmup) {
           return set;
         }
 
-        const newWeight = newValue ? (weightMapRef.current.get(`${set.exercise_name}-${set.set_number}`) || '') : '';
+        const databaseSetNumber = set.five_three_one?.description.databaseSetNumber ?? set.set_number;
+        const newWeight = newValue
+          ? set.five_three_one?.description.targetWeight.toString() ||
+            weightMapRef.current.get(`${set.exercise_name}-${databaseSetNumber}`) ||
+            ''
+          : '';
 
         return {
           ...set,
@@ -591,15 +755,17 @@ export default function StartedWorkoutInterface() {
     setAutoFillReps(newValue);
     setAllSets(currentSets =>
       currentSets.map(set => {
-        if (set.set_logged) {
+        if (set.set_logged || set.five_three_one?.description.isWarmup) {
           return set;
         }
 
         let newReps = '';
         if (newValue) {
+          const databaseSetNumber =
+            set.five_three_one?.description.databaseSetNumber ?? set.set_number;
           if (useLogsForRepInput) {
-            newReps = repsMapRef.current.get(`${set.exercise_name}-${set.set_number}`) || '';
-          } else {
+            newReps = repsMapRef.current.get(`${set.exercise_name}-${databaseSetNumber}`) || '';
+          } else if (!set.five_three_one?.description.isAmrap) {
             newReps = set.reps_goal.toString();
           }
         }
@@ -617,14 +783,16 @@ export default function StartedWorkoutInterface() {
     if (autoFillReps) {
       setAllSets(currentSets =>
         currentSets.map(set => {
-          if (set.set_logged) {
+          if (set.set_logged || set.five_three_one?.description.isWarmup) {
             return set;
           }
 
           let newReps = '';
           if (newValue) {
-            newReps = repsMapRef.current.get(`${set.exercise_name}-${set.set_number}`) || '';
-          } else {
+            const databaseSetNumber =
+              set.five_three_one?.description.databaseSetNumber ?? set.set_number;
+            newReps = repsMapRef.current.get(`${set.exercise_name}-${databaseSetNumber}`) || '';
+          } else if (!set.five_three_one?.description.isAmrap) {
             newReps = set.reps_goal.toString();
           }
 
@@ -710,6 +878,68 @@ export default function StartedWorkoutInterface() {
   const isDifferentExercise = (currentIndex: number, nextIndex: number): boolean => {
     if (nextIndex >= allSets.length) return false;
     return allSets[currentIndex].exercise_name !== allSets[nextIndex].exercise_name;
+  };
+
+  const completeWarmupSet = async (setIndex: number) => {
+    const currentSet = allSets[setIndex];
+    const fiveThreeOne = currentSet?.five_three_one;
+    if (!currentSet || !fiveThreeOne?.description.isWarmup || currentSet.set_logged) {
+      return;
+    }
+
+    setIsCompletingSet(true);
+    try {
+      const completedAt = Math.floor(Date.now() / 1000);
+      await db.withTransactionAsync(async () => {
+        await db.runAsync(
+          `UPDATE FiveThreeOne_WorkoutLink
+           SET warmup_completed_at = ?
+           WHERE workout_link_id = ? AND is_warmup = 1;`,
+          [completedAt, fiveThreeOne.description.workoutLinkId],
+        );
+      });
+
+      const updatedSets = [...allSets];
+      updatedSets[setIndex] = {
+        ...currentSet,
+        set_logged: true,
+        five_three_one: {
+          ...fiveThreeOne,
+          description: { ...fiveThreeOne.description, warmupCompletedAt: completedAt },
+        },
+      };
+      setAllSets(updatedSets);
+      updateExerciseLoggedStatus(currentSet.exercise_id, updatedSets);
+
+      let nextSetIndex = updatedSets.findIndex(
+        (set, index) => index > setIndex && !set.set_logged,
+      );
+      if (nextSetIndex === -1) {
+        nextSetIndex = updatedSets.findIndex((set) => !set.set_logged);
+      }
+
+      if (nextSetIndex === -1) {
+        setTimerState(prev => updateTimerState(prev, { workoutStage: 'completed' }));
+        stopWorkoutTimer();
+        return;
+      }
+
+      const differentExercise =
+        updatedSets[setIndex].exercise_name !== updatedSets[nextSetIndex].exercise_name;
+      setTimerState(prev => updateTimerState(prev, {
+        workoutStage: 'rest',
+        isExerciseRest: differentExercise,
+        currentSetIndex: nextSetIndex,
+      }));
+
+      const restValue = parseNumericInput(differentExercise ? exerciseRestTime : restTime);
+      startRestTimer(restValue === null ? 0 : Math.trunc(restValue));
+    } catch (error) {
+      console.error('Error completing 5/3/1 warm-up:', error);
+      Alert.alert(t('errorTitle'), t('fiveThreeOneWarmupError'));
+    } finally {
+      setIsCompletingSet(false);
+    }
   };
 
   const muscleGroupData = [
@@ -922,9 +1152,23 @@ export default function StartedWorkoutInterface() {
     const currentSet = allSets[timerState.currentSetIndex];
     if (!currentSet) return null;
 
-    const currentSetHasValidInputs =
+    const fiveThreeOneDescription = currentSet.five_three_one?.description ?? null;
+    const isWarmupSet = fiveThreeOneDescription?.isWarmup ?? false;
+    const isAmrapSet = fiveThreeOneDescription?.isAmrap ?? false;
+    const currentWeightUnit = currentSet.five_three_one?.unit ?? weightFormat;
+    const actualRepsValue = parseNumericInput(currentSet.reps_done);
+    const actualReps =
+      actualRepsValue === null ? null : Math.trunc(actualRepsValue);
+    const isBelowTarget =
+      fiveThreeOneDescription !== null &&
+      !isWarmupSet &&
+      actualReps !== null &&
+      actualReps > 0 &&
+      isFiveThreeOneBelowTarget(currentSet.reps_goal, actualReps);
+    const currentSetHasValidInputs = isWarmupSet || (
       hasPositiveIntegerPart(currentSet.reps_done) &&
-      hasPositiveDecimalInput(currentSet.weight);
+      hasPositiveDecimalInput(currentSet.weight)
+    );
     
     const muscleGroupInfo = muscleGroupData.find(mg => mg.value === currentSet.muscle_group);
     
@@ -948,12 +1192,29 @@ export default function StartedWorkoutInterface() {
           </Text>
         </View>
         
-        <View style={[styles.currentExerciseCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <View style={[
+          styles.currentExerciseCard,
+          {
+            backgroundColor: theme.card,
+            borderColor: isAmrapSet ? theme.buttonBackground : theme.border,
+          },
+          isAmrapSet && styles.amrapCard,
+        ]}>
           <Text style={[styles.currentExerciseName, { color: theme.text }]}>
             {currentSet.exercise_name}
           </Text>
 
           <View style={styles.badgeAndIconsContainer}>
+            {isAmrapSet && (
+              <View style={[styles.amrapBadge, { backgroundColor: theme.buttonBackground }]}>
+                <Text
+                  maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                  style={[styles.amrapBadgeText, { color: theme.buttonText }]}
+                >
+                  {t('fiveThreeOneAmrap')}
+                </Text>
+              </View>
+            )}
             {muscleGroupInfo && muscleGroupInfo.value && (
               <View style={[styles.muscleGroupBadgeMain, { backgroundColor: theme.card, borderColor: theme.border, marginRight: 8 }]}>
                 <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
@@ -977,62 +1238,76 @@ export default function StartedWorkoutInterface() {
            {currentSet.set_number}/{currentSet.total_sets}
           </Text>
           <Text style={[styles.repInfo, { color: theme.text }]}>
-            {t('goal')}: {currentSet.reps_goal} {t('Reps')}
+            {isAmrapSet ? t('fiveThreeOneAmrapPrompt') : `${t('goal')}: ${currentSet.reps_goal} ${t('Reps')}`}
           </Text>
-          
-          <View style={styles.inputContainer}>
-            <View style={styles.inputGroup}>
-              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text }]}>{t('repsDone')}</Text>
-              <AppTextInput
-                variant="numeric"
-                  style={[styles.input, { 
-                  backgroundColor: theme.card,
-              color: theme.text,
-              borderColor: theme.border
-            }]}
-             value={currentSet.reps_done}
-             onRawChange={(text) => {
-              const updatedSets = [...allSets];
-              updatedSets[timerState.currentSetIndex] = {
-                ...updatedSets[timerState.currentSetIndex],
-                reps_done: text
-              };
-              setAllSets(updatedSets);
-            }}
-            keyboardType="number-pad"
-            maxLength={4}
-            placeholder={"> 0"}
-            placeholderTextColor={theme.type === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'}
-          />
+
+          {isWarmupSet ? (
+            <View style={[styles.warmupTarget, { backgroundColor: theme.inactivetint, borderColor: theme.border }]}>
+              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.warmupTargetLabel, { color: theme.text }]}>
+                {t('fiveThreeOneWarmupTarget')}
+              </Text>
+              <Text style={[styles.warmupTargetValue, { color: theme.text }]}>
+                {currentSet.weight} {currentWeightUnit} × {currentSet.reps_goal} {t('Reps')}
+              </Text>
             </View>
-            
-            <View style={styles.inputGroup}>
-              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text }]}> {t('Weight')} ({weightFormat})</Text>
-              <AppTextInput
-                variant="numeric"
-                style={[styles.input, { 
-                  backgroundColor: theme.card,
-                  color: theme.text,
-                  borderColor: theme.border
-                }]}
-                value={currentSet.weight}
-                onRawChange={(text) => {
+          ) : (
+            <View style={styles.inputContainer}>
+              <View style={styles.inputGroup}>
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text }]}>{t('repsDone')}</Text>
+                <AppTextInput
+                  variant="numeric"
+                  style={[styles.input, {
+                    backgroundColor: theme.card,
+                    color: theme.text,
+                    borderColor: theme.border
+                  }]}
+                  value={currentSet.reps_done}
+                  onRawChange={(text) => {
+                    const updatedSets = [...allSets];
+                    updatedSets[timerState.currentSetIndex] = {
+                      ...updatedSets[timerState.currentSetIndex],
+                      reps_done: text
+                    };
+                    setAllSets(updatedSets);
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  placeholder={isAmrapSet ? t('fiveThreeOneAmrapRepsPlaceholder') : "> 0"}
+                  placeholderTextColor={theme.type === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'}
+                />
+              </View>
 
-
-
-                  const updatedSets = [...allSets];
-                  updatedSets[timerState.currentSetIndex] = {
-                    ...updatedSets[timerState.currentSetIndex],
-                    weight: text
-                  };
-                  setAllSets(updatedSets);
-                }}
-                keyboardType="decimal-pad"
-                placeholder="> 0.0"
-                placeholderTextColor={theme.type === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'}
-              />
+              <View style={styles.inputGroup}>
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text }]}> {t('Weight')} ({currentWeightUnit})</Text>
+                <AppTextInput
+                  variant="numeric"
+                  style={[styles.input, {
+                    backgroundColor: theme.card,
+                    color: theme.text,
+                    borderColor: theme.border
+                  }]}
+                  value={currentSet.weight}
+                  onRawChange={(text) => {
+                    const updatedSets = [...allSets];
+                    updatedSets[timerState.currentSetIndex] = {
+                      ...updatedSets[timerState.currentSetIndex],
+                      weight: text
+                    };
+                    setAllSets(updatedSets);
+                  }}
+                  keyboardType="decimal-pad"
+                  placeholder="> 0.0"
+                  placeholderTextColor={theme.type === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'}
+                />
+              </View>
             </View>
-          </View>
+          )}
+
+          {isBelowTarget && (
+            <Text style={[styles.belowTargetNote, { color: theme.text, backgroundColor: theme.inactivetint, borderColor: theme.border }]}>
+              {t('fiveThreeOneBelowTarget')}
+            </Text>
+          )}
         </View>
         
         <View style={styles.controlsContainer}>
@@ -1046,6 +1321,10 @@ export default function StartedWorkoutInterface() {
                 }]}
                 onPress={() => {
                 const pressCurrentSet = allSets[timerState.currentSetIndex];
+                if (pressCurrentSet?.five_three_one?.description.isWarmup) {
+                  void completeWarmupSet(timerState.currentSetIndex);
+                  return;
+                }
                 const repsValue = pressCurrentSet
                   ? parseNumericInput(pressCurrentSet.reps_done)
                   : null;
@@ -1149,7 +1428,11 @@ export default function StartedWorkoutInterface() {
                 }
             >
                 <Text style={[styles.buttonText, { color: theme.buttonText }]}>
-                {isCompletingSet ? `${t('completing')}...` : (isLastUnloggedSet ? t('finishWorkout') : t('completeSet'))}
+                {isCompletingSet
+                  ? `${t('completing')}...`
+                  : isWarmupSet
+                    ? t('fiveThreeOneCompleteWarmup')
+                    : (isLastUnloggedSet ? t('finishWorkout') : t('completeSet'))}
                 </Text>
             </TouchableOpacity>
             }
@@ -1218,11 +1501,14 @@ export default function StartedWorkoutInterface() {
 
     let previousSetReps = null;
     let previousSetWeight = null;
-    if (nextSet) {
-      const setKey = `${nextSet.exercise_name}-${nextSet.set_number}`;
+    if (nextSet && !nextSet.five_three_one?.description.isWarmup) {
+      const databaseSetNumber =
+        nextSet.five_three_one?.description.databaseSetNumber ?? nextSet.set_number;
+      const setKey = `${nextSet.exercise_name}-${databaseSetNumber}`;
       previousSetReps = repsMapRef.current.get(setKey) || null;
       previousSetWeight = weightMapRef.current.get(setKey) || null;
     }
+    const nextSetWeightUnit = nextSet?.five_three_one?.unit ?? weightFormat;
     
     return (
       <View style={styles.restScreenContainer}>
@@ -1287,7 +1573,7 @@ export default function StartedWorkoutInterface() {
                 {t('lastWorkoutInfo')}:{' '}
                 {previousSetReps ? `${previousSetReps} ${t('Reps')}` : ''}
                 {previousSetReps && previousSetWeight ? ' / ' : ''}
-                {previousSetWeight ? `${previousSetWeight} ${weightFormat}` : ''}
+                {previousSetWeight ? `${previousSetWeight} ${nextSetWeightUnit}` : ''}
               </Text>
             )}
           </View>
@@ -1310,56 +1596,137 @@ export default function StartedWorkoutInterface() {
   
   const renderCompletedScreen = () => {
     const loggedSets = allSets.filter(set => set.set_logged);
+    const generatedSets = allSets.filter(set => set.five_three_one !== null);
+    const generatedSessionFullyLogged =
+      generatedSets.length > 0 &&
+      generatedSets.every((set) => {
+        const description = set.five_three_one?.description;
+        return (
+          set.set_logged &&
+          description !== undefined &&
+          (!description.isWarmup || description.warmupCompletedAt !== null)
+        );
+      });
     
     const saveWorkout = async () => {
       try {
-        console.log('Starting workout save process...');
-        
-        await db.runAsync('BEGIN TRANSACTION;');
-        
-        console.log('Saving completion time to Workout_Log:', timerState.workoutDuration);
-        await db.runAsync(
-          `UPDATE Workout_Log 
-           SET completion_time = ? 
-           WHERE workout_log_id = ?;`,
-          [timerState.workoutDuration, workout_log_id]
-        );
-        
-        console.log('Saving completed sets:', loggedSets.length);
-        for (let i = 0; i < loggedSets.length; i++) {
-          const set = loggedSets[i];
-          const weight = parseNumericInput(set.weight);
-          const repsValue = parseNumericInput(set.reps_done);
-          const repsDone = repsValue === null ? null : Math.trunc(repsValue);
+        await db.withTransactionAsync(async () => {
+          await db.runAsync(
+            `UPDATE Workout_Log
+             SET completion_time = ?
+             WHERE workout_log_id = ?;`,
+            [timerState.workoutDuration, workout_log_id],
+          );
 
-          if (weight === null || repsDone === null) {
-            throw new Error('Numeric input became invalid before saving');
+          for (const set of loggedSets) {
+            const fiveThreeOne = set.five_three_one;
+            if (fiveThreeOne?.description.isWarmup) {
+              if (fiveThreeOne.description.warmupCompletedAt === null) {
+                throw new Error('A completed warm-up is missing its completion timestamp.');
+              }
+              continue;
+            }
+
+            const weight = parseNumericInput(set.weight);
+            const repsValue = parseNumericInput(set.reps_done);
+            const repsDone = repsValue === null ? null : Math.trunc(repsValue);
+            if (weight === null || weight <= 0 || repsDone === null || repsDone <= 0) {
+              throw new Error('Numeric input became invalid before saving.');
+            }
+
+            const databaseSetNumber = fiveThreeOne?.description.databaseSetNumber ?? set.set_number;
+            if (databaseSetNumber === null) {
+              throw new Error('A work set is missing its database set number.');
+            }
+
+            const weightLogInsert = await db.runAsync(
+              `INSERT INTO Weight_Log (
+                workout_log_id,
+                logged_exercise_id,
+                exercise_name,
+                set_number,
+                weight_logged,
+                reps_logged,
+                muscle_group
+              ) VALUES (?, ?, ?, ?, ?, ?, ?);`,
+              [
+                workout_log_id,
+                set.exercise_id,
+                set.exercise_name,
+                databaseSetNumber,
+                weight,
+                repsDone,
+                set.muscle_group,
+              ],
+            );
+
+            if (!fiveThreeOne) {
+              continue;
+            }
+
+            await db.runAsync(
+              `UPDATE FiveThreeOne_WorkoutLink
+               SET weight_log_id = ?
+               WHERE workout_link_id = ? AND is_warmup = 0;`,
+              [weightLogInsert.lastInsertRowId, fiveThreeOne.description.workoutLinkId],
+            );
+
+            if (fiveThreeOne.description.isAmrap) {
+              if (!workout) {
+                throw new Error('The workout date is missing for the AMRAP result.');
+              }
+
+              const priorBest = await db.getFirstAsync<{ best_estimated_1rm: number | null }>(
+                `SELECT MAX(estimated_1rm) AS best_estimated_1rm
+                 FROM FiveThreeOne_AmrapResults
+                 WHERE program_id = ? AND lift_id = ?;`,
+                [fiveThreeOne.programId, fiveThreeOne.liftId],
+              );
+              const estimated1rm = estimate1RM(weight, repsDone);
+              const isPr = isFiveThreeOneAmrapPr(
+                estimated1rm,
+                priorBest?.best_estimated_1rm ?? null,
+              );
+
+              await db.runAsync(
+                `INSERT INTO FiveThreeOne_AmrapResults (
+                  workout_link_id,
+                  weight_log_id,
+                  program_id,
+                  cycle_id,
+                  lift_id,
+                  lift_name,
+                  workout_date,
+                  week_number,
+                  work_set_number,
+                  weight,
+                  reps,
+                  estimated_1rm,
+                  is_pr
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+                [
+                  fiveThreeOne.description.workoutLinkId,
+                  weightLogInsert.lastInsertRowId,
+                  fiveThreeOne.programId,
+                  fiveThreeOne.cycleId,
+                  fiveThreeOne.liftId,
+                  fiveThreeOne.liftName || set.exercise_name,
+                  workout.workout_date,
+                  fiveThreeOne.weekNumber,
+                  databaseSetNumber,
+                  weight,
+                  repsDone,
+                  estimated1rm,
+                  isPr ? 1 : 0,
+                ],
+              );
+            }
           }
 
-          await db.runAsync(
-            `INSERT INTO Weight_Log (
-              workout_log_id, 
-              logged_exercise_id, 
-              exercise_name, 
-              set_number, 
-              weight_logged, 
-              reps_logged,
-              muscle_group
-            ) VALUES (?, ?, ?, ?, ?, ?, ?);`,
-            [
-              workout_log_id,
-              set.exercise_id,
-              set.exercise_name,
-              set.set_number,
-              weight,
-              repsDone,
-              set.muscle_group
-            ]
-          );
-        }
-        
-        await db.runAsync('COMMIT;');
-        console.log('Workout save completed successfully!');
+          if (generatedSessionFullyLogged) {
+            await advanceFiveThreeOneCycleAfterSession(db, workout_log_id);
+          }
+        });
         
         Alert.alert(
           t('workoutSaved'),
@@ -1367,11 +1734,10 @@ export default function StartedWorkoutInterface() {
           [{ text: t('OK'), onPress: () => navigation.goBack() }]
         );
       } catch (error) {
-        await db.runAsync('ROLLBACK;');
         console.error('Error saving workout:', error);
         Alert.alert(
-          'Error',
-          'There was an error saving your workout. Please try again.'
+          t('savingError'),
+          t('failedToSaveWorkout'),
         );
       }
     };
@@ -1678,6 +2044,11 @@ export default function StartedWorkoutInterface() {
   const handleFinishWorkout = () => {
     const currentSetIndex = timerState.currentSetIndex;
     const currentSet = allSets[currentSetIndex];
+    if (currentSet?.five_three_one?.description.isWarmup) {
+      void completeWarmupSet(currentSetIndex);
+      return;
+    }
+
     const repsValue = currentSet
       ? parseNumericInput(currentSet.reps_done)
       : null;
@@ -1941,11 +2312,24 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     minHeight: 24, // To prevent layout shifts
   },
+  amrapBadge: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginRight: 8,
+  },
+  amrapBadgeText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
   currentExerciseCard: {
     borderRadius: 15,
     borderWidth: 1,
     padding: 20,
     marginBottom: 20,
+  },
+  amrapCard: {
+    borderWidth: 2,
   },
   currentExerciseName: {
     fontSize: 22,
@@ -1980,6 +2364,29 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 15,
     fontSize: 18,
+  },
+  warmupTarget: {
+    borderRadius: 10,
+    borderWidth: 1,
+    padding: 15,
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  warmupTargetLabel: {
+    fontSize: 14,
+    marginBottom: 6,
+  },
+  warmupTargetValue: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  belowTargetNote: {
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginTop: 12,
+    fontSize: 14,
   },
   controlsContainer: {
     marginTop: 10,

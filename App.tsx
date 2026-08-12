@@ -376,7 +376,7 @@ const AppContent = () => {
 
   return (
     <>
-      <StatusBar barStyle={theme.type === 'light' ? "dark-content" : "light-content"} backgroundColor={theme.background} />
+      <StatusBar barStyle={theme.type === 'light' ? "dark-content" : "light-content"} />
       <React.Suspense
         fallback={
           <View style={{ flex:1 }}>

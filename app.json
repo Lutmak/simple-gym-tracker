@@ -29,6 +29,10 @@
       },
       "package": "dev.lutmak.simplegymtracker"
     },
+    "androidNavigationBar": {
+      "barStyle": "dark-content",
+      "enforceContrast": false
+    },
     "web": {
       "favicon": "./assets/simpleicon.png"
     },

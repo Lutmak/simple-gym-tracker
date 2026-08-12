@@ -830,7 +830,6 @@ export default function MyCalendar() {
       >
          {modalVisible && (
           <StatusBar
-            backgroundColor={theme.type === 'light' ? "rgba(0, 0, 0, 0.5)" : "black"}
             barStyle={'light-content'}          />
         )}
         
@@ -1121,7 +1120,6 @@ export default function MyCalendar() {
 
     {untrackedChoiceModalVisible && (
           <StatusBar
-            backgroundColor={theme.type === 'light' ? "rgba(0, 0, 0, 0.5)" : "black"}
             barStyle={'light-content'}          />
         )}
 

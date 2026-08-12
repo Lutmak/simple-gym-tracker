@@ -3085,7 +3085,6 @@ const calculateCES = (sets: LogData[]): number => {
       >
          {tooltipVisible && (
           <StatusBar
-            backgroundColor={theme.type === 'light' ? "rgba(0, 0, 0, 0.5)" : "black"}
             barStyle={theme.type === 'light' ? 'light-content' : 'dark-content'}
           />
         )}

@@ -20,24 +20,39 @@ import AppTextInput, {
   APP_TEXT_MAX_FONT_SIZE_MULTIPLIER,
   parseNumericInput,
 } from '../components/AppTextInput';
+import FiveThreeOneDayCard, {
+  createAccessoryDraft,
+  type AccessoryDraft,
+  type AssistanceTemplateOption,
+  type TrainingDayState,
+} from '../components/FiveThreeOneDayCard';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
 import { useTranslation } from 'react-i18next';
 import { WorkoutStackParamList } from '../App';
 import {
+  calcSetWeight,
   estimate1RM,
+  warmupSets,
+  waveForWeek,
   type LiftCategory,
   type RoundingDirection,
+  type WarmupSet,
   type WeightUnit,
 } from '../utils/fiveThreeOne';
 import {
-  DEFAULT_SETUP_LIFTS,
+  DEFAULT_TRAINING_DAYS,
+  assignDaySlots,
+  getAssistanceInsertParams,
   getFiveThreeOneProgramInsertParams,
-  normalizeDaySlots,
-  validateSetup,
+  orderByWeek,
+  orderedWeekdays,
+  validateWeeklyPlan,
+  type FirstWeekday,
   type FiveThreeOneProgramSettings,
-  type SetupValidationInput,
-  type SetupValidationIssue,
+  type Weekday,
+  type WeeklyPlanIssue,
+  type WeeklyPlanValidationInput,
 } from '../utils/fiveThreeOneSetup';
 import { DEFAULT_FIVE_THREE_ONE_DEFAULTS } from '../utils/settingsStorage';
 
@@ -46,47 +61,28 @@ type FiveThreeOneSetupNavigationProp = StackNavigationProp<
   'FiveThreeOneSetup'
 >;
 
-type TrainingMaxMode = 'direct' | 'estimate';
-
-interface SetupLiftState {
-  id: string;
-  name: string;
-  category: LiftCategory;
-  tmMode: TrainingMaxMode;
-  trainingMaxText: string;
-  recentWeightText: string;
-  recentRepsText: string;
-  daySlot: number | null;
-  assistanceTemplateId: number | null;
-}
-
-interface AssistanceTemplate {
-  template_id: number;
-  template_name: string;
-  description: string | null;
-}
-
-interface PersistedLift {
-  name: string;
+interface PersistedDay {
+  liftName: string;
   category: LiftCategory;
   trainingMax: number;
   daySlot: number;
-  assistanceTemplateId: number;
+  weekday: Weekday;
+  warmupEnabled: boolean;
+  assistanceTemplateId: number | null;
+  accessories: { name: string; sets: number; reps: number }[];
 }
 
-const TOTAL_STEPS = 4;
+const TOTAL_STEPS = 3;
 
-const createInitialLifts = (): SetupLiftState[] =>
-  DEFAULT_SETUP_LIFTS.map((lift) => ({
-    ...lift,
-    tmMode: 'direct',
-    trainingMaxText: '',
-    recentWeightText: '',
-    recentRepsText: '',
-    assistanceTemplateId: null,
-  }));
-
-const formatWeight = (weight: number): string => Number(weight.toFixed(2)).toString();
+const WEEKDAY_TRANSLATION_KEYS: Record<Weekday, string> = {
+  0: 'Sunday',
+  1: 'Monday',
+  2: 'Tuesday',
+  3: 'Wednesday',
+  4: 'Thursday',
+  5: 'Friday',
+  6: 'Saturday',
+};
 
 const UNIT_PROGRAM_DEFAULTS: Record<
   WeightUnit,
@@ -96,10 +92,40 @@ const UNIT_PROGRAM_DEFAULTS: Record<
   lb: { roundingIncrement: 5, upperTmIncrement: 5, lowerTmIncrement: 10 },
 };
 
+const formatWeight = (weight: number): string => Number(weight.toFixed(2)).toString();
+
+const createDay = (
+  weekday: Weekday,
+  liftName: string,
+  category: LiftCategory,
+  warmupEnabled: boolean,
+): TrainingDayState => ({
+  weekday,
+  liftName,
+  category,
+  tmMode: 'direct',
+  trainingMaxText: '',
+  recentWeightText: '',
+  recentRepsText: '',
+  warmupEnabled,
+  assistanceTemplateId: null,
+  accessories: [],
+});
+
+const createInitialDays = (): TrainingDayState[] =>
+  DEFAULT_TRAINING_DAYS.map((day) =>
+    createDay(
+      day.weekday,
+      day.liftName,
+      day.category,
+      DEFAULT_FIVE_THREE_ONE_DEFAULTS.warmupEnabled,
+    ),
+  );
+
 async function saveFiveThreeOneProgram(
   db: SQLiteDatabase,
   program: FiveThreeOneProgramSettings,
-  lifts: readonly PersistedLift[],
+  days: readonly PersistedDay[],
 ): Promise<void> {
   await db.withTransactionAsync(async () => {
     const programResult = await db.runAsync(
@@ -114,28 +140,46 @@ async function saveFiveThreeOneProgram(
       throw new Error('Failed to create the 5/3/1 program.');
     }
 
-    for (const lift of lifts) {
-      await db.runAsync(
+    for (const day of days) {
+      const liftResult = await db.runAsync(
         `INSERT INTO FiveThreeOne_Lifts
-         (program_id, lift_name, lift_type, training_max, day_slot, assistance_template_id,
-          suggested_training_max, suggestion_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+         (program_id, lift_name, lift_type, training_max, day_slot, weekday, warmup_enabled,
+          assistance_template_id, suggested_training_max, suggestion_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           programResult.lastInsertRowId,
-          lift.name,
-          lift.category,
-          lift.trainingMax,
-          lift.daySlot,
-          lift.assistanceTemplateId,
+          day.liftName,
+          day.category,
+          day.trainingMax,
+          day.daySlot,
+          day.weekday,
+          day.warmupEnabled ? 1 : 0,
+          day.assistanceTemplateId,
           null,
           null,
         ],
       );
+
+      if (liftResult.lastInsertRowId <= 0) {
+        throw new Error(`Failed to create the training day for ${day.liftName}.`);
+      }
+
+      for (const params of getAssistanceInsertParams(
+        liftResult.lastInsertRowId,
+        day.accessories,
+      )) {
+        await db.runAsync(
+          `INSERT INTO FiveThreeOne_LiftAssistance
+           (lift_id, exercise_name, sets, reps, sort_order)
+           VALUES (?, ?, ?, ?, ?);`,
+          params,
+        );
+      }
     }
   });
 }
 
-const validationMessages: Record<SetupValidationIssue, string> = {
+const validationMessages: Record<WeeklyPlanIssue, string> = {
   'program-name-required': 'programNameRequired',
   'unit-invalid': 'programUnitInvalid',
   'rounding-increment-positive': 'roundingIncrementRequired',
@@ -143,38 +187,36 @@ const validationMessages: Record<SetupValidationIssue, string> = {
   'tm-percentage-invalid': 'tmPercentageInvalid',
   'upper-tm-increment-positive': 'upperTmIncrementRequired',
   'lower-tm-increment-positive': 'lowerTmIncrementRequired',
-  'lift-required': 'liftRequired',
+  'training-day-required': 'trainingDayRequired',
+  'weekday-invalid': 'weekdayInvalid',
+  'duplicate-weekday': 'duplicateWeekday',
   'lift-name-required': 'liftNameRequired',
   'duplicate-lift-name': 'duplicateLiftName',
   'lift-category-invalid': 'liftCategoryInvalid',
   'training-max-positive': 'trainingMaxRequired',
-  'day-slot-positive-integer': 'daySlotRequired',
-  'duplicate-day-slot': 'duplicateDaySlot',
-  'assistance-template-required': 'assistanceTemplateRequired',
+  'assistance-name-required': 'assistanceNameRequired',
+  'assistance-sets-positive': 'assistanceSetsPositive',
+  'assistance-reps-positive': 'assistanceRepsPositive',
 };
 
-const getIssueStep = (issue: SetupValidationIssue): number => {
-  switch (issue) {
-    case 'program-name-required':
-    case 'unit-invalid':
-    case 'rounding-increment-positive':
-    case 'rounding-direction-invalid':
-    case 'tm-percentage-invalid':
-    case 'upper-tm-increment-positive':
-    case 'lower-tm-increment-positive':
-      return 0;
-    case 'assistance-template-required':
-      return 2;
-    default:
-      return 1;
-  }
-};
+const PROGRAM_ISSUES: readonly WeeklyPlanIssue[] = [
+  'program-name-required',
+  'unit-invalid',
+  'rounding-increment-positive',
+  'rounding-direction-invalid',
+  'tm-percentage-invalid',
+  'upper-tm-increment-positive',
+  'lower-tm-increment-positive',
+];
+
+const getIssueStep = (issue: WeeklyPlanIssue): number =>
+  PROGRAM_ISSUES.includes(issue) ? 0 : 1;
 
 export default function FiveThreeOneSetup() {
   const navigation = useNavigation<FiveThreeOneSetupNavigationProp>();
   const db = useSQLiteContext();
   const { theme } = useTheme();
-  const { fiveThreeOneDefaults } = useSettings();
+  const { fiveThreeOneDefaults, firstWeekday } = useSettings();
   const { t } = useTranslation();
 
   const [step, setStep] = useState(0);
@@ -199,12 +241,12 @@ export default function FiveThreeOneSetup() {
   const [warmupEnabled, setWarmupEnabled] = useState(
     DEFAULT_FIVE_THREE_ONE_DEFAULTS.warmupEnabled,
   );
-  const [lifts, setLifts] = useState<SetupLiftState[]>(createInitialLifts);
-  const [templates, setTemplates] = useState<AssistanceTemplate[]>([]);
+  const [days, setDays] = useState<TrainingDayState[]>(createInitialDays);
+  const [expandedWeekday, setExpandedWeekday] = useState<Weekday | null>(null);
+  const [templates, setTemplates] = useState<AssistanceTemplateOption[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const nextLiftId = useRef(1);
   const hasEditedWizard = useRef(false);
 
   const markWizardEdited = () => {
@@ -223,6 +265,12 @@ export default function FiveThreeOneSetup() {
     setUpperTmIncrementText(formatWeight(fiveThreeOneDefaults.upperTmIncrement));
     setLowerTmIncrementText(formatWeight(fiveThreeOneDefaults.lowerTmIncrement));
     setWarmupEnabled(fiveThreeOneDefaults.warmupEnabled);
+    setDays((currentDays) =>
+      currentDays.map((day) => ({
+        ...day,
+        warmupEnabled: fiveThreeOneDefaults.warmupEnabled,
+      })),
+    );
   }, [fiveThreeOneDefaults]);
 
   useEffect(() => {
@@ -230,25 +278,15 @@ export default function FiveThreeOneSetup() {
 
     const loadTemplates = async () => {
       try {
-        const result = await db.getAllAsync<AssistanceTemplate>(
+        const result = await db.getAllAsync<AssistanceTemplateOption>(
           `SELECT template_id, template_name, description
            FROM FiveThreeOne_AssistanceTemplates
            WHERE is_builtin = 1
            ORDER BY template_name;`,
         );
 
-        if (!isMounted) {
-          return;
-        }
-
-        setTemplates(result);
-        if (result[0]) {
-          setLifts((currentLifts) =>
-            currentLifts.map((lift) => ({
-              ...lift,
-              assistanceTemplateId: lift.assistanceTemplateId ?? result[0].template_id,
-            })),
-          );
+        if (isMounted) {
+          setTemplates(result);
         }
       } catch (loadError) {
         console.error('Error loading 5/3/1 assistance templates:', loadError);
@@ -269,18 +307,22 @@ export default function FiveThreeOneSetup() {
     };
   }, [db]);
 
+  const weekStart: FirstWeekday = firstWeekday === 'Sunday' ? 'Sunday' : 'Monday';
+  const weekdayLabel = (weekday: Weekday): string => t(WEEKDAY_TRANSLATION_KEYS[weekday]);
+  const orderedDays = orderByWeek(days, weekStart);
+
   const getTmPercentage = (): number | null => {
     const percentage = parseNumericInput(tmPercentageText);
     return percentage === null ? null : percentage / 100;
   };
 
-  const getTrainingMax = (lift: SetupLiftState): number | null => {
-    if (lift.tmMode === 'direct') {
-      return parseNumericInput(lift.trainingMaxText);
+  const getTrainingMax = (day: TrainingDayState): number | null => {
+    if (day.tmMode === 'direct') {
+      return parseNumericInput(day.trainingMaxText);
     }
 
-    const recentWeight = parseNumericInput(lift.recentWeightText);
-    const recentReps = parseNumericInput(lift.recentRepsText);
+    const recentWeight = parseNumericInput(day.recentWeightText);
+    const recentReps = parseNumericInput(day.recentRepsText);
     const tmPercentage = getTmPercentage();
     if (
       recentWeight === null ||
@@ -299,7 +341,42 @@ export default function FiveThreeOneSetup() {
     }
   };
 
-  const getValidationInput = (): SetupValidationInput => ({
+  const getWarmupPreview = (day: TrainingDayState): WarmupSet[] => {
+    const trainingMax = getTrainingMax(day);
+    const increment = parseNumericInput(roundingIncrementText);
+    if (!day.warmupEnabled || trainingMax === null || increment === null || increment <= 0) {
+      return [];
+    }
+
+    try {
+      return warmupSets(trainingMax, { unit, increment, direction: roundingDirection });
+    } catch {
+      return [];
+    }
+  };
+
+  const getWorkSetPreview = (
+    day: TrainingDayState,
+  ): { percent: number; weight: number; reps: number; isAmrap: boolean }[] => {
+    const trainingMax = getTrainingMax(day);
+    const increment = parseNumericInput(roundingIncrementText);
+    if (trainingMax === null || increment === null || increment <= 0) {
+      return [];
+    }
+
+    try {
+      return waveForWeek(1).sets.map((set) => ({
+        percent: set.percent,
+        weight: calcSetWeight(trainingMax, set.percent, increment, roundingDirection),
+        reps: set.targetReps,
+        isAmrap: set.isAmrap,
+      }));
+    } catch {
+      return [];
+    }
+  };
+
+  const getValidationInput = (): WeeklyPlanValidationInput => ({
     programName,
     unit,
     roundingIncrement: parseNumericInput(roundingIncrementText),
@@ -309,102 +386,149 @@ export default function FiveThreeOneSetup() {
     upperTmIncrement: parseNumericInput(upperTmIncrementText),
     lowerTmIncrement: parseNumericInput(lowerTmIncrementText),
     warmupEnabled,
-    lifts: lifts.map((lift) => ({
-      name: lift.name,
-      category: lift.category,
-      trainingMax: getTrainingMax(lift),
-      daySlot: lift.daySlot,
-      assistanceTemplateId: lift.assistanceTemplateId,
+    days: orderedDays.map((day) => ({
+      weekday: day.weekday,
+      liftName: day.liftName,
+      category: day.category,
+      trainingMax: getTrainingMax(day),
+      warmupEnabled: day.warmupEnabled,
+      assistanceTemplateId: day.assistanceTemplateId,
+      assistance: day.accessories.map((accessory) => ({
+        name: accessory.name,
+        sets: parseNumericInput(accessory.setsText),
+        reps: parseNumericInput(accessory.repsText),
+      })),
     })),
   });
 
-  const showValidationError = (issue: SetupValidationIssue) => {
+  const showValidationError = (issue: WeeklyPlanIssue) => {
     setError(t(validationMessages[issue]));
   };
 
-  const validateCurrentStep = (): SetupValidationIssue | null => {
+  const validateCurrentStep = (): WeeklyPlanIssue | null => {
     const input = getValidationInput();
 
+    // Step 0 owns the program settings only, so it is checked against a stand-in week.
     if (step === 0) {
-      return validateSetup({
+      return validateWeeklyPlan({
         ...input,
-        lifts: [
+        days: [
           {
-            name: 'Lift',
+            weekday: 1,
+            liftName: 'Lift',
             category: 'upper',
             trainingMax: 1,
-            daySlot: 1,
-            assistanceTemplateId: 1,
+            warmupEnabled: true,
+            assistanceTemplateId: null,
+            assistance: [],
           },
         ],
       });
     }
 
-    if (step === 1) {
-      return validateSetup({
-        ...input,
-        lifts: input.lifts.map((lift) => ({
-          ...lift,
-          assistanceTemplateId: lift.assistanceTemplateId ?? 1,
-        })),
-      });
+    return validateWeeklyPlan(input);
+  };
+
+  const updateDay = (weekday: Weekday, update: Partial<TrainingDayState>) => {
+    markWizardEdited();
+    setDays((currentDays) =>
+      currentDays.map((day) => (day.weekday === weekday ? { ...day, ...update } : day)),
+    );
+    setError(null);
+  };
+
+  const removeDay = (weekday: Weekday) => {
+    markWizardEdited();
+    setDays((currentDays) => currentDays.filter((day) => day.weekday !== weekday));
+    setExpandedWeekday((current) => (current === weekday ? null : current));
+    setError(null);
+  };
+
+  const confirmRemoveDay = (day: TrainingDayState) => {
+    if (!day.liftName.trim() && day.accessories.length === 0) {
+      removeDay(day.weekday);
+      return;
     }
 
-    return validateSetup(input);
+    Alert.alert(
+      t('removeTrainingDayTitle'),
+      t('removeTrainingDayMessage', {
+        day: weekdayLabel(day.weekday),
+        lift: day.liftName.trim() || t('unnamedLift'),
+      }),
+      [
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('Delete'), style: 'destructive', onPress: () => removeDay(day.weekday) },
+      ],
+    );
   };
 
-  const updateLift = (id: string, update: Partial<SetupLiftState>) => {
+  const toggleWeekday = (weekday: Weekday) => {
+    const existing = days.find((day) => day.weekday === weekday);
+    if (existing) {
+      confirmRemoveDay(existing);
+      return;
+    }
+
     markWizardEdited();
-    setLifts((currentLifts) =>
-      currentLifts.map((lift) => (lift.id === id ? { ...lift, ...update } : lift)),
-    );
+    setDays((currentDays) => [...currentDays, createDay(weekday, '', 'upper', warmupEnabled)]);
+    setExpandedWeekday(weekday);
     setError(null);
   };
 
-  const addLift = () => {
-    markWizardEdited();
-    const id = `custom-${nextLiftId.current}`;
-    nextLiftId.current += 1;
-    setLifts((currentLifts) =>
-      normalizeDaySlots([
-        ...currentLifts,
-        {
-          id,
-          name: '',
-          category: 'upper',
-          tmMode: 'direct',
-          trainingMaxText: '',
-          recentWeightText: '',
-          recentRepsText: '',
-          daySlot: null,
-          assistanceTemplateId: templates[0]?.template_id ?? null,
-        },
-      ]),
-    );
-    setError(null);
-  };
+  const applyTemplate = (weekday: Weekday, templateId: number) => {
+    const day = days.find((entry) => entry.weekday === weekday);
+    if (!day) {
+      return;
+    }
 
-  const removeLift = (id: string) => {
-    markWizardEdited();
-    setLifts((currentLifts) =>
-      normalizeDaySlots(currentLifts.filter((lift) => lift.id !== id)),
-    );
-    setError(null);
-  };
+    const seed = async () => {
+      try {
+        const exercises = await db.getAllAsync<{
+          exercise_name: string;
+          sets: number;
+          reps: number;
+        }>(
+          `SELECT exercise_name, sets, reps
+           FROM FiveThreeOne_AssistanceExercises
+           WHERE template_id = ?
+           ORDER BY sort_order;`,
+          [templateId],
+        );
 
-  const moveLift = (index: number, direction: -1 | 1) => {
-    markWizardEdited();
-    setLifts((currentLifts) => {
-      const targetIndex = index + direction;
-      if (targetIndex < 0 || targetIndex >= currentLifts.length) {
-        return currentLifts;
+        updateDay(weekday, {
+          assistanceTemplateId: templateId,
+          accessories: exercises.map((exercise) =>
+            createAccessoryDraft(exercise.exercise_name, exercise.sets, exercise.reps),
+          ),
+        });
+      } catch (seedError) {
+        console.error('Error loading 5/3/1 assistance template exercises:', seedError);
+        setError(t('assistanceTemplatesLoadError'));
       }
+    };
 
-      const reordered = [...currentLifts];
-      [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
-      return normalizeDaySlots(reordered);
-    });
-    setError(null);
+    if (day.accessories.length === 0) {
+      void seed();
+      return;
+    }
+
+    const templateName =
+      templates.find((template) => template.template_id === templateId)?.template_name ?? '';
+    Alert.alert(
+      t('replaceAccessoriesTitle'),
+      t('replaceAccessoriesMessage', { template: templateName }),
+      [
+        { text: t('Cancel'), style: 'cancel' },
+        { text: t('replace'), onPress: () => void seed() },
+      ],
+    );
+  };
+
+  const openNextDay = (weekday: Weekday) => {
+    const position = orderedDays.findIndex((day) => day.weekday === weekday);
+    const next = orderedDays[position + 1];
+    setExpandedWeekday(next ? next.weekday : null);
   };
 
   const handleUnitChange = (nextUnit: WeightUnit) => {
@@ -431,19 +555,7 @@ export default function FiveThreeOneSetup() {
     setError(null);
   };
 
-  const handleTmPercentageChange = (value: string) => {
-    markWizardEdited();
-    setTmPercentageText(value);
-    setError(null);
-  };
-
-  const handleDeloadChange = (value: boolean) => {
-    markWizardEdited();
-    setIncludeDeload(value);
-    setError(null);
-  };
-
-  const handleWarmupChange = (value: boolean) => {
+  const handleWarmupDefaultChange = (value: boolean) => {
     markWizardEdited();
     setWarmupEnabled(value);
     setError(null);
@@ -471,7 +583,7 @@ export default function FiveThreeOneSetup() {
 
   const handleConfirm = async () => {
     const input = getValidationInput();
-    const issue = validateSetup(input);
+    const issue = validateWeeklyPlan(input);
     if (issue) {
       setStep(getIssueStep(issue));
       showValidationError(issue);
@@ -489,12 +601,19 @@ export default function FiveThreeOneSetup() {
       lowerTmIncrement: input.lowerTmIncrement as number,
       warmupEnabled: input.warmupEnabled,
     };
-    const persistedLifts: PersistedLift[] = input.lifts.map((lift) => ({
-      name: lift.name.trim(),
-      category: lift.category as LiftCategory,
-      trainingMax: lift.trainingMax as number,
-      daySlot: lift.daySlot as number,
-      assistanceTemplateId: lift.assistanceTemplateId as number,
+    const persistedDays: PersistedDay[] = assignDaySlots(input.days, weekStart).map((day) => ({
+      liftName: day.liftName.trim(),
+      category: day.category as LiftCategory,
+      trainingMax: day.trainingMax as number,
+      daySlot: day.daySlot,
+      weekday: day.weekday as Weekday,
+      warmupEnabled: day.warmupEnabled,
+      assistanceTemplateId: day.assistanceTemplateId,
+      accessories: day.assistance.map((accessory) => ({
+        name: accessory.name,
+        sets: accessory.sets as number,
+        reps: accessory.reps as number,
+      })),
     }));
 
     setIsSaving(true);
@@ -511,7 +630,7 @@ export default function FiveThreeOneSetup() {
         return;
       }
 
-      await saveFiveThreeOneProgram(db, program, persistedLifts);
+      await saveFiveThreeOneProgram(db, program, persistedDays);
       Alert.alert(t('programCreated'), t('programCreatedMessage'));
       navigation.navigate('Programs');
     } catch (saveError) {
@@ -521,10 +640,6 @@ export default function FiveThreeOneSetup() {
       setIsSaving(false);
     }
   };
-
-  const templateName = (templateId: number | null): string =>
-    templates.find((template) => template.template_id === templateId)?.template_name ??
-    t('noAssistanceTemplate');
 
   const renderChoice = (
     label: string,
@@ -543,6 +658,7 @@ export default function FiveThreeOneSetup() {
       ]}
       onPress={onPress}
       accessibilityRole="button"
+      accessibilityState={{ selected }}
       accessibilityLabel={accessibilityLabel}
     >
       <Text
@@ -648,7 +764,11 @@ export default function FiveThreeOneSetup() {
         placeholder={t('tmPercentagePlaceholder')}
         value={tmPercentageText}
         onFocus={markWizardEdited}
-        onRawChange={handleTmPercentageChange}
+        onRawChange={(value) => {
+          markWizardEdited();
+          setTmPercentageText(value);
+          setError(null);
+        }}
         keyboardType="decimal-pad"
       />
 
@@ -656,7 +776,11 @@ export default function FiveThreeOneSetup() {
         <Text style={styles.programToggleText}>{t('includeDeload')}</Text>
         <Switch
           value={includeDeload}
-          onValueChange={handleDeloadChange}
+          onValueChange={(value) => {
+            markWizardEdited();
+            setIncludeDeload(value);
+            setError(null);
+          }}
           trackColor={{ false: '#767577', true: '#FFFFFF' }}
           thumbColor={includeDeload ? '#ffffff' : '#f4f3f4'}
         />
@@ -703,10 +827,10 @@ export default function FiveThreeOneSetup() {
       />
 
       <View style={styles.programToggleRow}>
-        <Text style={styles.programToggleText}>{t('warmupGeneration')}</Text>
+        <Text style={styles.programToggleText}>{t('warmupDefaultForNewDays')}</Text>
         <Switch
           value={warmupEnabled}
-          onValueChange={handleWarmupChange}
+          onValueChange={handleWarmupDefaultChange}
           trackColor={{ false: '#767577', true: '#FFFFFF' }}
           thumbColor={warmupEnabled ? '#ffffff' : '#f4f3f4'}
         />
@@ -718,263 +842,57 @@ export default function FiveThreeOneSetup() {
     </View>
   );
 
-  const renderLift = (lift: SetupLiftState, index: number) => {
-    const estimatedTrainingMax = getTrainingMax({ ...lift, tmMode: 'estimate' });
-
-    return (
-      <View
-        key={lift.id}
-        style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-      >
-        <View style={styles.cardHeader}>
-          <Text
-            maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            style={[styles.cardTitle, { color: theme.text }]}
-          >
-            {t('liftNumber', { number: index + 1 })}
-          </Text>
-          <View style={styles.cardActions}>
-            <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() => moveLift(index, -1)}
-              disabled={index === 0}
-              accessibilityRole="button"
-              accessibilityLabel={t('moveLiftUp', { name: lift.name || t('unnamedLift') })}
-            >
-              <Ionicons
-                name="chevron-up"
-                size={22}
-                color={index === 0 ? theme.border : theme.text}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() => moveLift(index, 1)}
-              disabled={index === lifts.length - 1}
-              accessibilityRole="button"
-              accessibilityLabel={t('moveLiftDown', { name: lift.name || t('unnamedLift') })}
-            >
-              <Ionicons
-                name="chevron-down"
-                size={22}
-                color={index === lifts.length - 1 ? theme.border : theme.text}
-              />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.iconButton}
-              onPress={() => removeLift(lift.id)}
-              accessibilityRole="button"
-              accessibilityLabel={t('removeLift', { name: lift.name || t('unnamedLift') })}
-            >
-              <Ionicons name="trash-outline" size={21} color={theme.text} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <Text
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[styles.label, { color: theme.text }]}
-        >
-          {t('liftName')}
-        </Text>
-        <AppTextInput
-          variant="text"
-          style={styles.fullInput}
-          placeholder={t('liftNamePlaceholder')}
-          value={lift.name}
-          onFocus={markWizardEdited}
-          onChangeText={(value) => updateLift(lift.id, { name: value })}
-          autoCapitalize="words"
-        />
-
-        <Text
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[styles.label, { color: theme.text }]}
-        >
-          {t('liftCategory')}
-        </Text>
-        <View style={styles.choiceRow}>
-          {renderChoice(
-            t('upper'),
-            lift.category === 'upper',
-            () => updateLift(lift.id, { category: 'upper' }),
-            t('upper'),
-          )}
-          {renderChoice(
-            t('lower'),
-            lift.category === 'lower',
-            () => updateLift(lift.id, { category: 'lower' }),
-            t('lower'),
-          )}
-        </View>
-
-        <Text
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[styles.label, { color: theme.text }]}
-        >
-          {t('trainingMax')}
-        </Text>
-        <View style={styles.choiceRow}>
-          {renderChoice(
-            t('enterDirectly'),
-            lift.tmMode === 'direct',
-            () => updateLift(lift.id, { tmMode: 'direct' }),
-            t('enterDirectly'),
-          )}
-          {renderChoice(
-            t('estimateFromRecentSet'),
-            lift.tmMode === 'estimate',
-            () => updateLift(lift.id, { tmMode: 'estimate' }),
-            t('estimateFromRecentSet'),
-          )}
-        </View>
-
-        {lift.tmMode === 'direct' ? (
-          <AppTextInput
-            variant="numeric"
-            style={styles.fullInput}
-            placeholder={t('trainingMaxPlaceholder', { unit })}
-            value={lift.trainingMaxText}
-            onFocus={markWizardEdited}
-            onRawChange={(value) => updateLift(lift.id, { trainingMaxText: value })}
-            keyboardType="decimal-pad"
-          />
-        ) : (
-          <View>
-            <View style={styles.inputRow}>
-              <AppTextInput
-                variant="numeric"
-                style={[styles.halfInput, styles.inputSpacing]}
-                placeholder={t('recentWeight')}
-                value={lift.recentWeightText}
-                onFocus={markWizardEdited}
-                onRawChange={(value) => updateLift(lift.id, { recentWeightText: value })}
-                keyboardType="decimal-pad"
-              />
-              <AppTextInput
-                variant="numeric"
-                style={styles.halfInput}
-                placeholder={t('recentReps')}
-                value={lift.recentRepsText}
-                onFocus={markWizardEdited}
-                onRawChange={(value) => updateLift(lift.id, { recentRepsText: value })}
-                keyboardType="number-pad"
-              />
-            </View>
-            <Text style={[styles.helperText, { color: theme.text }]}>
-              {estimatedTrainingMax === null
-                ? t('enterRecentSet')
-                : `${t('estimatedTrainingMax')}: ${formatWeight(estimatedTrainingMax)} ${unit}`}
-            </Text>
-          </View>
-        )}
-
-        <Text
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[styles.label, { color: theme.text }]}
-        >
-          {t('daySlot')}
-        </Text>
-        <AppTextInput
-          variant="numeric"
-          style={styles.slotInput}
-          placeholder={t('daySlotPlaceholder')}
-          value={lift.daySlot === null ? '' : String(lift.daySlot)}
-          onFocus={markWizardEdited}
-          onRawChange={(value) => updateLift(lift.id, { daySlot: parseNumericInput(value) })}
-          keyboardType="number-pad"
-        />
-      </View>
-    );
-  };
-
-  const renderLifts = () => (
+  const renderWeek = () => (
     <View>
-      <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('trainingMaxes')}</Text>
-      <Text style={[styles.helperText, { color: theme.text }]}>{t('trainingMaxesDescription')}</Text>
-      {lifts.map(renderLift)}
-      <TouchableOpacity
-        style={[styles.secondaryButton, { borderColor: theme.border }]}
-        onPress={addLift}
-        accessibilityRole="button"
-        accessibilityLabel={t('addLift')}
-      >
-        <Ionicons name="add" size={22} color={theme.text} />
-        <Text
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[styles.secondaryButtonText, { color: theme.text }]}
-        >
-          {t('addLift')}
-        </Text>
-      </TouchableOpacity>
-    </View>
-  );
+      <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('yourWeek')}</Text>
+      <Text style={[styles.helperText, { color: theme.text }]}>{t('yourWeekDescription')}</Text>
 
-  const renderAssistance = () => (
-    <View>
-      <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('assistanceTemplates')}</Text>
-      <Text style={[styles.helperText, { color: theme.text }]}>
-        {t('assistanceTemplatesDescription')}
+      <Text
+        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+        style={[styles.label, { color: theme.text }]}
+      >
+        {t('trainingDays')}
       </Text>
+      <View style={styles.choiceRow}>
+        {orderedWeekdays(weekStart).map((weekday) => {
+          const selected = days.some((day) => day.weekday === weekday);
+          return renderChoice(
+            weekdayLabel(weekday),
+            selected,
+            () => toggleWeekday(weekday),
+            selected
+              ? t('removeTrainingDay', { day: weekdayLabel(weekday) })
+              : t('addTrainingDay', { day: weekdayLabel(weekday) }),
+          );
+        })}
+      </View>
+
       {isLoadingTemplates ? (
         <ActivityIndicator size="large" color={theme.buttonBackground} />
-      ) : templates.length === 0 ? (
+      ) : orderedDays.length === 0 ? (
         <Text style={[styles.helperText, { color: theme.text }]}>
-          {t('noAssistanceTemplates')}
+          {t('noTrainingDaysSelected')}
         </Text>
       ) : (
-        lifts.map((lift) => (
-          <View
-            key={lift.id}
-            style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-          >
-            <Text style={[styles.cardTitle, { color: theme.text }]}>
-              {lift.name || t('unnamedLift')} - {t('daySlot')} {lift.daySlot ?? '?'}
-            </Text>
-            {templates.map((template) => {
-              const selected = lift.assistanceTemplateId === template.template_id;
-              return (
-                <TouchableOpacity
-                  key={template.template_id}
-                  style={[
-                    styles.templateChoice,
-                    {
-                      backgroundColor: selected ? theme.buttonBackground : theme.card,
-                      borderColor: theme.border,
-                    },
-                  ]}
-                  onPress={() =>
-                    updateLift(lift.id, { assistanceTemplateId: template.template_id })
-                  }
-                  accessibilityRole="button"
-                  accessibilityLabel={template.template_name}
-                >
-                  <View style={styles.templateInfo}>
-                    <Text
-                      maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                      style={{ color: selected ? theme.buttonText : theme.text, fontWeight: '700' }}
-                    >
-                      {template.template_name}
-                    </Text>
-                    {template.description && (
-                      <Text
-                        style={{
-                          color: selected ? theme.buttonText : theme.text,
-                          opacity: selected ? 0.8 : 0.65,
-                          marginTop: 3,
-                        }}
-                      >
-                        {template.description}
-                      </Text>
-                    )}
-                  </View>
-                  {selected && (
-                    <Ionicons name="checkmark-circle" size={22} color={theme.buttonText} />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+        orderedDays.map((day, index) => (
+          <FiveThreeOneDayCard
+            key={day.weekday}
+            day={day}
+            dayLabel={weekdayLabel(day.weekday)}
+            unit={unit}
+            trainingMax={getTrainingMax(day)}
+            warmupPreview={getWarmupPreview(day)}
+            templates={templates}
+            expanded={expandedWeekday === day.weekday}
+            isLastDay={index === orderedDays.length - 1}
+            onToggleExpanded={() =>
+              setExpandedWeekday((current) => (current === day.weekday ? null : day.weekday))
+            }
+            onChange={(update) => updateDay(day.weekday, update)}
+            onSeedFromTemplate={(templateId) => applyTemplate(day.weekday, templateId)}
+            onRemove={() => confirmRemoveDay(day)}
+            onDone={() => openNextDay(day.weekday)}
+          />
         ))
       )}
     </View>
@@ -1005,42 +923,65 @@ export default function FiveThreeOneSetup() {
           {t('includeDeload')}: {includeDeload ? t('deloadIncluded') : t('deloadNotIncluded')}
         </Text>
         <Text style={[styles.reviewLine, { color: theme.text }]}>
-          {t('upperTmIncrement')}: {upperTmIncrementText} / {t('lowerTmIncrement')}: {lowerTmIncrementText}
-        </Text>
-        <Text style={[styles.reviewLine, { color: theme.text }]}>
-          {t('warmupGeneration')}: {warmupEnabled ? t('warmupsIncluded') : t('warmupsNotIncluded')}
+          {t('upperTmIncrement')}: {upperTmIncrementText} / {t('lowerTmIncrement')}:{' '}
+          {lowerTmIncrementText}
         </Text>
       </View>
 
-      {lifts.map((lift) => (
-        <View
-          key={lift.id}
-          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-        >
-          <Text style={[styles.cardTitle, { color: theme.text }]}>
-            {lift.name || t('unnamedLift')}
-          </Text>
-          <Text style={[styles.reviewLine, { color: theme.text }]}>
-            {t('daySlot')}: {lift.daySlot ?? '?'} / {t(lift.category)}
-          </Text>
-          <Text style={[styles.reviewLine, { color: theme.text }]}>
-            {t('trainingMax')}: {getTrainingMax(lift) === null ? '?' : formatWeight(getTrainingMax(lift) as number)}{' '}
-            {unit}
-          </Text>
-          <Text style={[styles.reviewLine, { color: theme.text }]}>
-            {t('assistanceTemplate')}: {templateName(lift.assistanceTemplateId)}
-          </Text>
-        </View>
-      ))}
+      <Text style={[styles.sectionSubtitle, { color: theme.text }]}>{t('weekOverview')}</Text>
+      {orderedDays.map((day) => {
+        const trainingMax = getTrainingMax(day);
+        const workSets = getWorkSetPreview(day);
+
+        return (
+          <View
+            key={day.weekday}
+            style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+          >
+            <Text style={[styles.cardTitle, { color: theme.text }]}>
+              {weekdayLabel(day.weekday)} — {day.liftName.trim() || t('unnamedLift')}
+            </Text>
+            <Text style={[styles.reviewLine, { color: theme.text }]}>
+              {t('trainingMax')}: {trainingMax === null ? '?' : formatWeight(trainingMax)} {unit} /{' '}
+              {t(day.category)}
+            </Text>
+            <Text style={[styles.reviewLine, { color: theme.text }]}>
+              {t('warmupForThisDay')}:{' '}
+              {day.warmupEnabled ? t('warmupsIncluded') : t('warmupsNotIncluded')}
+            </Text>
+            {workSets.length > 0 && (
+              <Text style={[styles.reviewLine, { color: theme.text }]}>
+                {t('workSetsWeekOne')}:{' '}
+                {workSets
+                  .map(
+                    (set) =>
+                      `${formatWeight(set.weight)} ${unit} × ${set.reps}${
+                        set.isAmrap ? '+' : ''
+                      }`,
+                  )
+                  .join(', ')}
+              </Text>
+            )}
+            <Text style={[styles.reviewLine, { color: theme.text }]}>
+              {t('accessoriesSection')}:{' '}
+              {day.accessories.length === 0
+                ? t('noAccessories')
+                : day.accessories
+                    .map(
+                      (accessory: AccessoryDraft) =>
+                        `${accessory.name.trim() || t('unnamedAccessory')} ${accessory.setsText}×${
+                          accessory.repsText
+                        }`,
+                    )
+                    .join(', ')}
+            </Text>
+          </View>
+        );
+      })}
     </View>
   );
 
-  const stepNames = [
-    t('programBasics'),
-    t('trainingMaxes'),
-    t('assistanceTemplates'),
-    t('review'),
-  ];
+  const stepNames = [t('programBasics'), t('yourWeek'), t('review')];
 
   return (
     <KeyboardAvoidingView
@@ -1091,9 +1032,8 @@ export default function FiveThreeOneSetup() {
         )}
 
         {step === 0 && renderBasics()}
-        {step === 1 && renderLifts()}
-        {step === 2 && renderAssistance()}
-        {step === 3 && renderReview()}
+        {step === 1 && renderWeek()}
+        {step === 2 && renderReview()}
 
         <View style={styles.navigationButtons}>
           {step > 0 && (
@@ -1184,6 +1124,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 18,
   },
+  sectionSubtitle: {
+    fontSize: 19,
+    fontWeight: '800',
+    marginTop: 6,
+    marginBottom: 12,
+  },
   label: {
     fontSize: 16,
     fontWeight: '700',
@@ -1246,39 +1192,20 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
   },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 2,
-  },
   cardTitle: {
     fontSize: 18,
     fontWeight: '800',
     flexShrink: 1,
   },
-  cardActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  reviewTitle: {
+    fontSize: 21,
+    fontWeight: '800',
+    marginBottom: 8,
   },
-  iconButton: {
-    minWidth: 40,
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  halfInput: {
-    flex: 1,
-  },
-  inputSpacing: {
-    marginRight: 10,
-  },
-  slotInput: {
-    maxWidth: 120,
+  reviewLine: {
+    fontSize: 15,
+    lineHeight: 22,
+    marginTop: 4,
   },
   secondaryButton: {
     minHeight: 46,
@@ -1293,30 +1220,6 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     fontSize: 16,
     fontWeight: '700',
-  },
-  templateChoice: {
-    minHeight: 58,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginTop: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  templateInfo: {
-    flex: 1,
-    marginRight: 8,
-  },
-  reviewTitle: {
-    fontSize: 21,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  reviewLine: {
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 4,
   },
   navigationButtons: {
     flexDirection: 'row',

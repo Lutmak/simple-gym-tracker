@@ -147,7 +147,14 @@ CREATE TABLE IF NOT EXISTS FiveThreeOne_Lifts (
     lift_name TEXT NOT NULL,
     lift_type TEXT NOT NULL CHECK (lift_type IN ('upper', 'lower')),
     training_max REAL NOT NULL CHECK (training_max > 0),
+    -- day_slot is derived: the 1..N position of this training day within the week, recomputed
+    -- from weekday whenever the program is saved. weekday (Date.getDay(): 0 = Sunday) is what
+    -- the user actually chose, and is nullable only because programs predating it exist.
     day_slot INTEGER NOT NULL CHECK (day_slot > 0),
+    weekday INTEGER CHECK (weekday IS NULL OR weekday BETWEEN 0 AND 6),
+    warmup_enabled INTEGER NOT NULL DEFAULT 1 CHECK (warmup_enabled IN (0, 1)),
+    -- Records which built-in template seeded FiveThreeOne_LiftAssistance. Not read when a cycle
+    -- is generated: the day owns its accessory list once it has been seeded.
     assistance_template_id INTEGER,
     suggested_training_max REAL CHECK (suggested_training_max IS NULL OR suggested_training_max > 0),
     suggestion_status TEXT CHECK (
@@ -160,6 +167,23 @@ CREATE TABLE IF NOT EXISTS FiveThreeOne_Lifts (
         ON DELETE SET NULL,
     UNIQUE (program_id, lift_name),
     UNIQUE (program_id, day_slot)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS FiveThreeOne_Lifts_program_weekday
+    ON FiveThreeOne_Lifts (program_id, weekday);
+
+-- The resolved accessory list for one training day. Cascading from the lift is safe here in a way
+-- it is not for FiveThreeOne_AmrapResults: this is the plan, not the log.
+CREATE TABLE IF NOT EXISTS FiveThreeOne_LiftAssistance (
+    lift_assistance_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    lift_id INTEGER NOT NULL,
+    exercise_name TEXT NOT NULL,
+    sets INTEGER NOT NULL CHECK (sets > 0),
+    reps INTEGER NOT NULL CHECK (reps > 0),
+    sort_order INTEGER NOT NULL CHECK (sort_order > 0),
+    FOREIGN KEY (lift_id) REFERENCES FiveThreeOne_Lifts(lift_id)
+        ON DELETE CASCADE,
+    UNIQUE (lift_id, sort_order)
 );
 
 CREATE TABLE IF NOT EXISTS FiveThreeOne_Cycles (

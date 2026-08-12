@@ -43,6 +43,7 @@
   import * as Notifications from 'expo-notifications';
   import { useRecurringWorkouts } from './utils/recurringWorkoutUtils';
   import { addRecurringTable, createUpdateTriggers } from './utils/addRecurringTable';
+  import { assignLegacyWeekdays } from './utils/fiveThreeOneSetup';
   import { checkAndSyncPermissions } from './utils/notificationUtils';
   import { AppState } from 'react-native';
   import GraphsWorkoutDetails from './screens/GraphsWorkoutDetails';
@@ -418,6 +419,8 @@ const initialiseSchema = async (db: SQLiteDatabase) => {
       lift_type TEXT NOT NULL CHECK (lift_type IN ('upper', 'lower')),
       training_max REAL NOT NULL CHECK (training_max > 0),
       day_slot INTEGER NOT NULL CHECK (day_slot > 0),
+      weekday INTEGER CHECK (weekday IS NULL OR weekday BETWEEN 0 AND 6),
+      warmup_enabled INTEGER NOT NULL DEFAULT 1 CHECK (warmup_enabled IN (0, 1)),
       assistance_template_id INTEGER,
       suggested_training_max REAL CHECK (suggested_training_max IS NULL OR suggested_training_max > 0),
       suggestion_status TEXT CHECK (
@@ -491,6 +494,23 @@ const initialiseSchema = async (db: SQLiteDatabase) => {
       ),
       CHECK (is_amrap = 0 OR is_warmup = 0),
       CHECK (warmup_completed_at IS NULL OR is_warmup = 1)
+    );
+  `);
+
+  // The resolved accessory list for one training day. Built-in templates only seed this list;
+  // once seeded it belongs to the day and the user edits it freely. Cascading from the lift is
+  // safe here in a way it is not for FiveThreeOne_AmrapResults: this is the plan, not the log.
+  await db.runAsync(`
+    CREATE TABLE IF NOT EXISTS FiveThreeOne_LiftAssistance (
+      lift_assistance_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+      lift_id INTEGER NOT NULL,
+      exercise_name TEXT NOT NULL,
+      sets INTEGER NOT NULL CHECK (sets > 0),
+      reps INTEGER NOT NULL CHECK (reps > 0),
+      sort_order INTEGER NOT NULL CHECK (sort_order > 0),
+      FOREIGN KEY (lift_id) REFERENCES FiveThreeOne_Lifts(lift_id)
+        ON DELETE CASCADE,
+      UNIQUE (lift_id, sort_order)
     );
   `);
 
@@ -592,6 +612,69 @@ const initialiseSchema = async (db: SQLiteDatabase) => {
       );
     }
   }
+
+  await migrateFiveThreeOneWeekPlan(db);
+};
+
+// Programs created before the week-first setup schedule their lifts by an abstract day_slot, own
+// no weekday, and resolve their accessories from a template at generation time. This migration
+// gives them all three. It runs exactly once, gated on the weekday column being absent: re-seeding
+// FiveThreeOne_LiftAssistance on every launch would silently undo a user who cleared a day.
+const migrateFiveThreeOneWeekPlan = async (db: SQLiteDatabase) => {
+  const liftColumns = await db.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(FiveThreeOne_Lifts);'
+  );
+  const liftColumnNames = new Set(liftColumns.map((column) => column.name));
+
+  if (!liftColumnNames.has('warmup_enabled')) {
+    await db.runAsync(
+      `ALTER TABLE FiveThreeOne_Lifts
+       ADD COLUMN warmup_enabled INTEGER NOT NULL DEFAULT 1 CHECK (warmup_enabled IN (0, 1));`
+    );
+  }
+
+  if (!liftColumnNames.has('weekday')) {
+    await db.runAsync(
+      `ALTER TABLE FiveThreeOne_Lifts
+       ADD COLUMN weekday INTEGER CHECK (weekday IS NULL OR weekday BETWEEN 0 AND 6);`
+    );
+
+    const programs = await db.getAllAsync<{ program_id: number }>(
+      'SELECT program_id FROM FiveThreeOne_Programs;'
+    );
+
+    for (const program of programs) {
+      const lifts = await db.getAllAsync<{ lift_id: number; day_slot: number }>(
+        'SELECT lift_id, day_slot FROM FiveThreeOne_Lifts WHERE program_id = ?;',
+        [program.program_id]
+      );
+      const assignments = assignLegacyWeekdays(
+        lifts.map((lift) => ({ liftId: lift.lift_id, daySlot: lift.day_slot }))
+      );
+
+      for (const assignment of assignments) {
+        await db.runAsync('UPDATE FiveThreeOne_Lifts SET weekday = ? WHERE lift_id = ?;', [
+          assignment.weekday,
+          assignment.liftId,
+        ]);
+      }
+    }
+
+    await db.runAsync(
+      `INSERT INTO FiveThreeOne_LiftAssistance (lift_id, exercise_name, sets, reps, sort_order)
+       SELECT lift.lift_id, exercise.exercise_name, exercise.sets, exercise.reps,
+              exercise.sort_order
+       FROM FiveThreeOne_Lifts lift
+       JOIN FiveThreeOne_AssistanceExercises exercise
+         ON exercise.template_id = lift.assistance_template_id
+       WHERE lift.assistance_template_id IS NOT NULL;`
+    );
+  }
+
+  await db.runAsync(
+    `CREATE UNIQUE INDEX IF NOT EXISTS FiveThreeOne_Lifts_program_weekday
+     ON FiveThreeOne_Lifts (program_id, weekday);`
+  );
 };
 
 // First, create a component that will handle the recurring workout checks

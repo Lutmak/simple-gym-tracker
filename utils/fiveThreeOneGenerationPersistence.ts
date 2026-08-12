@@ -45,7 +45,6 @@ interface ProgramRow {
   rounding_increment: number;
   rounding_direction: string;
   include_deload: number;
-  warmup_enabled: number;
 }
 
 interface LiftRow {
@@ -54,17 +53,11 @@ interface LiftRow {
   lift_type: string;
   training_max: number;
   day_slot: number;
-  assistance_template_id: number | null;
+  warmup_enabled: number;
 }
 
-interface TemplateRow {
-  template_id: number;
-  template_name: string;
-}
-
-interface AssistanceExerciseRow {
-  assistance_exercise_id: number;
-  template_id: number;
+interface AssistanceRow {
+  lift_id: number;
   exercise_name: string;
   sets: number;
   reps: number;
@@ -130,7 +123,7 @@ export async function loadFiveThreeOneGenerationSource(
 
   const program = await db.getFirstAsync<ProgramRow>(
     `SELECT program_id, program_name, unit, rounding_increment, rounding_direction,
-            include_deload, warmup_enabled
+            include_deload
      FROM FiveThreeOne_Programs
      WHERE program_id = ?;`,
     [programId],
@@ -140,7 +133,7 @@ export async function loadFiveThreeOneGenerationSource(
   }
 
   const lifts = await db.getAllAsync<LiftRow>(
-    `SELECT lift_id, lift_name, lift_type, training_max, day_slot, assistance_template_id
+    `SELECT lift_id, lift_name, lift_type, training_max, day_slot, warmup_enabled
      FROM FiveThreeOne_Lifts
      WHERE program_id = ?
      ORDER BY day_slot;`,
@@ -150,29 +143,15 @@ export async function loadFiveThreeOneGenerationSource(
     throw new Error('The selected 5/3/1 program has no configured lifts.');
   }
 
-  const templateIds = lifts
-    .map((lift) => lift.assistance_template_id)
-    .filter((templateId): templateId is number => templateId !== null);
-  const uniqueTemplateIds = [...new Set(templateIds)];
-  let templateRows: TemplateRow[] = [];
-  let exerciseRows: AssistanceExerciseRow[] = [];
-
-  if (uniqueTemplateIds.length > 0) {
-    const placeholders = uniqueTemplateIds.map(() => '?').join(', ');
-    templateRows = await db.getAllAsync<TemplateRow>(
-      `SELECT template_id, template_name
-       FROM FiveThreeOne_AssistanceTemplates
-       WHERE template_id IN (${placeholders});`,
-      uniqueTemplateIds,
-    );
-    exerciseRows = await db.getAllAsync<AssistanceExerciseRow>(
-      `SELECT assistance_exercise_id, template_id, exercise_name, sets, reps, sort_order
-       FROM FiveThreeOne_AssistanceExercises
-       WHERE template_id IN (${placeholders})
-       ORDER BY template_id, sort_order;`,
-      uniqueTemplateIds,
-    );
-  }
+  const assistance = await db.getAllAsync<AssistanceRow>(
+    `SELECT assistance.lift_id, assistance.exercise_name, assistance.sets, assistance.reps,
+            assistance.sort_order
+     FROM FiveThreeOne_LiftAssistance assistance
+     JOIN FiveThreeOne_Lifts lift ON lift.lift_id = assistance.lift_id
+     WHERE lift.program_id = ?
+     ORDER BY assistance.lift_id, assistance.sort_order;`,
+    [programId],
+  );
 
   return {
     program: {
@@ -183,7 +162,6 @@ export async function loadFiveThreeOneGenerationSource(
       roundingDirection:
         program.rounding_direction as FiveThreeOneGenerationSource['program']['roundingDirection'],
       includeDeload: booleanFromDatabase(program.include_deload, 'Program deload setting'),
-      warmupEnabled: booleanFromDatabase(program.warmup_enabled, 'Program warm-up setting'),
     },
     lifts: lifts.map((lift) => ({
       liftId: lift.lift_id,
@@ -191,15 +169,10 @@ export async function loadFiveThreeOneGenerationSource(
       category: lift.lift_type as FiveThreeOneGenerationSource['lifts'][number]['category'],
       trainingMax: lift.training_max,
       daySlot: lift.day_slot,
-      assistanceTemplateId: lift.assistance_template_id,
-    })),
-    assistanceTemplates: templateRows.map((template) => ({
-      templateId: template.template_id,
-      name: template.template_name,
-      exercises: exerciseRows
-        .filter((exercise) => exercise.template_id === template.template_id)
+      warmupEnabled: booleanFromDatabase(lift.warmup_enabled, 'Lift warm-up setting'),
+      assistanceExercises: assistance
+        .filter((exercise) => exercise.lift_id === lift.lift_id)
         .map((exercise) => ({
-          assistanceExerciseId: exercise.assistance_exercise_id,
           name: exercise.exercise_name,
           sets: exercise.sets,
           reps: exercise.reps,

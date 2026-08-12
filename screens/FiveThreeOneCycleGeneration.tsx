@@ -138,7 +138,10 @@ export default function FiveThreeOneCycleGeneration() {
               {source.program.includeDeload ? t('deloadIncluded') : t('deloadNotIncluded')}
             </Text>
             <Text style={[styles.detail, { color: theme.text }]}>
-              {source.program.warmupEnabled ? t('warmupsIncluded') : t('warmupsNotIncluded')}
+              {t('warmupDaysCount', {
+                count: source.lifts.filter((lift) => lift.warmupEnabled).length,
+                total: source.lifts.length,
+              })}
             </Text>
           </View>
 

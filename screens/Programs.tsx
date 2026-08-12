@@ -17,6 +17,8 @@ interface SavedProgram {
   program_name: string;
   unit: 'kg' | 'lb';
   include_deload: number;
+  latest_cycle_id: number | null;
+  latest_cycle_status: 'planned' | 'active' | 'complete' | null;
 }
 
 export default function Programs() {
@@ -36,10 +38,20 @@ export default function Programs() {
         setIsLoading(true);
         try {
           const savedPrograms = await db.getAllAsync<SavedProgram>(
-            `SELECT program_id, program_name, unit, include_deload
-             FROM FiveThreeOne_Programs
-             ORDER BY program_id;`,
-          );
+            `SELECT p.program_id, p.program_name, p.unit, p.include_deload,
+                    c.cycle_id AS latest_cycle_id,
+                    c.status AS latest_cycle_status
+             FROM FiveThreeOne_Programs p
+             LEFT JOIN FiveThreeOne_Cycles c
+               ON c.cycle_id = (
+                 SELECT latest.cycle_id
+                 FROM FiveThreeOne_Cycles latest
+                 WHERE latest.program_id = p.program_id
+                 ORDER BY latest.cycle_number DESC
+                 LIMIT 1
+               )
+             ORDER BY p.program_id;`,
+           );
           if (isMounted) {
             setPrograms(savedPrograms);
             setError(null);
@@ -128,24 +140,51 @@ export default function Programs() {
               >
                 {program.program_name}
               </Text>
-              <Text style={[styles.savedProgramDetails, { color: theme.text }]}>
+              <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                style={[styles.savedProgramDetails, { color: theme.text }]}
+              >
                 {program.unit} / {program.include_deload === 1 ? t('deloadIncluded') : t('deloadNotIncluded')}
               </Text>
             </View>
-            <TouchableOpacity
-              style={[styles.generateButton, { backgroundColor: theme.buttonBackground }]}
-              onPress={() => navigation.navigate('FiveThreeOneGeneration', { programId: program.program_id })}
-              accessibilityRole="button"
-              accessibilityLabel={`${t('generateCycle')}: ${program.program_name}`}
-            >
-              <Ionicons name="flash" size={19} color={theme.buttonText} />
-              <Text
-                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                style={[styles.generateButtonText, { color: theme.buttonText }]}
+            {program.latest_cycle_status === 'complete' && program.latest_cycle_id !== null ? (
+              <TouchableOpacity
+                style={[styles.generateButton, { backgroundColor: theme.buttonBackground }]}
+                onPress={() =>
+                  navigation.navigate('FiveThreeOneReview', {
+                    programId: program.program_id,
+                    cycleId: program.latest_cycle_id as number,
+                  })
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`${t('reviewCycle')}: ${program.program_name}`}
               >
-                {t('generateCycle')}
-              </Text>
-            </TouchableOpacity>
+                <Ionicons name="document-text" size={19} color={theme.buttonText} />
+                <Text
+                  maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                  style={[styles.generateButtonText, { color: theme.buttonText }]}
+                >
+                  {t('reviewCycle')}
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.generateButton, { backgroundColor: theme.buttonBackground }]}
+                onPress={() =>
+                  navigation.navigate('FiveThreeOneGeneration', { programId: program.program_id })
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`${t('generateCycle')}: ${program.program_name}`}
+              >
+                <Ionicons name="flash" size={19} color={theme.buttonText} />
+                <Text
+                  maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                  style={[styles.generateButtonText, { color: theme.buttonText }]}
+                >
+                  {t('generateCycle')}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
         ))
       )}

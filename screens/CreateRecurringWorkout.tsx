@@ -22,7 +22,10 @@ import { useSQLiteContext } from 'expo-sqlite';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRecurringWorkouts } from '../utils/recurringWorkoutUtils';
 import { useSettings } from '../context/SettingsContext';
-import AppTextInput, { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
+import AppTextInput, {
+  APP_TEXT_MAX_FONT_SIZE_MULTIPLIER,
+  parseNumericInput,
+} from '../components/AppTextInput';
 
 type NavigationProp = StackNavigationProp<
   WorkoutLogStackParamList,
@@ -38,6 +41,9 @@ type Day = {
   day_id: number;
   day_name: string;
 };
+
+const hasPositiveIntegerPart = (value: string): boolean =>
+  /^[0-9]*[1-9][0-9]*$/.test(value.split('.')[0]);
 
 export default function CreateRecurringWorkout() {
   const navigation = useNavigation<NavigationProp>();
@@ -172,7 +178,10 @@ export default function CreateRecurringWorkout() {
       case 'everyday':
         return 1; // Everyday = 1 day interval
       case 'custom':
-        return parseInt(customDaysInterval); // Parse custom interval, default to 2
+        {
+          const interval = parseNumericInput(customDaysInterval);
+          return interval === null ? 0 : Math.trunc(interval);
+        }
       case 'weekly':
         return 0; // 0 indicates to use recurring_days instead
       default:
@@ -283,8 +292,7 @@ export default function CreateRecurringWorkout() {
     if (!selectedWorkout || !selectedDay) return false;
     
     if (intervalType === 'custom') {
-      const interval = parseInt(customDaysInterval);
-      if (interval < 1) return false;
+      if (!hasPositiveIntegerPart(customDaysInterval)) return false;
     }
 
     if (intervalType === 'weekly' && selectedWeekdays.length === 0) {
@@ -496,6 +504,7 @@ export default function CreateRecurringWorkout() {
                   {t('everyXDays')}
                 </Text>
                 <AppTextInput
+                  variant="numeric"
                   style={[
                     styles.dayInput,
                     { 
@@ -504,7 +513,7 @@ export default function CreateRecurringWorkout() {
                     }
                   ]}
                   value={customDaysInterval}
-                  onChangeText={setCustomDaysInterval}
+                  onRawChange={setCustomDaysInterval}
                   keyboardType="numeric"
                   onFocus={() => setIntervalType('custom')}
                   maxLength={3}

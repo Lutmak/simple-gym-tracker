@@ -10,7 +10,10 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useRecurringWorkouts } from '../utils/recurringWorkoutUtils';
 import { useSettings } from '../context/SettingsContext';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import AppTextInput, { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
+import AppTextInput, {
+  APP_TEXT_MAX_FONT_SIZE_MULTIPLIER,
+  parseNumericInput,
+} from '../components/AppTextInput';
 
 // Add this to your WorkoutLogStackParamList in App.tsx
 // EditRecurringWorkout: { recurring_workout_id: number };
@@ -37,6 +40,9 @@ interface RecurringWorkout {
   notification_enabled: number;
   notification_time: string | null;
 }
+
+const hasPositiveIntegerPart = (value: string): boolean =>
+  /^[0-9]*[1-9][0-9]*$/.test(value.split('.')[0]);
 
 export default function EditRecurringWorkout() {
   const navigation = useNavigation<NavigationProp>();
@@ -198,7 +204,10 @@ export default function EditRecurringWorkout() {
       case 'everyday':
         return 1; // Everyday = 1 day interval
       case 'custom':
-        return parseInt(customDaysInterval); // Parse custom interval, default to 2
+        {
+          const interval = parseNumericInput(customDaysInterval);
+          return interval === null ? 0 : Math.trunc(interval);
+        }
       case 'weekly':
         return 0; // 0 indicates to use recurring_days instead
       default:
@@ -307,8 +316,7 @@ export default function EditRecurringWorkout() {
   // Check if form is valid and can be submitted
   const isFormValid = (): boolean => {
     if (intervalType === 'custom') {
-      const interval = parseInt(customDaysInterval);
-      if ( interval < 1) return false;
+      if (!hasPositiveIntegerPart(customDaysInterval)) return false;
     }
 
     if (intervalType === 'weekly' && selectedWeekdays.length === 0) {
@@ -436,6 +444,7 @@ export default function EditRecurringWorkout() {
                 {t('everyXDays')}
               </Text>
               <AppTextInput
+                variant="numeric"
                 style={[
                   styles.dayInput,
                   { 
@@ -444,7 +453,7 @@ export default function EditRecurringWorkout() {
                   }
                 ]}  
                 value={customDaysInterval}
-                onChangeText={setCustomDaysInterval}
+                onRawChange={setCustomDaysInterval}
                 keyboardType="numeric"
                 onFocus={() => setIntervalType('custom')}
                 maxLength={3}

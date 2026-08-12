@@ -6,7 +6,6 @@ import {
   TouchableOpacity, 
   ScrollView, 
   Switch, 
-  TextInput,
   Platform,
   Modal,
   Alert,
@@ -23,6 +22,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useRecurringWorkouts } from '../utils/recurringWorkoutUtils';
 import { useSettings } from '../context/SettingsContext';
+import AppTextInput, { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 
 type NavigationProp = StackNavigationProp<
   WorkoutLogStackParamList,
@@ -343,7 +343,7 @@ export default function CreateRecurringWorkout() {
             style={styles.selector}
             onPress={() => setShowWorkoutList(!showWorkoutList)}
           >
-            <Text style={[styles.selectorText, { color: theme.text }]}>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.selectorText, { color: theme.text }]}>
               {selectedWorkoutName || t('selectWorkout')}
             </Text>
             <Ionicons 
@@ -398,7 +398,7 @@ export default function CreateRecurringWorkout() {
               style={styles.selector}
               onPress={() => setShowDayList(!showDayList)}
             >
-              <Text style={[styles.selectorText, { color: theme.text }]}>
+              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.selectorText, { color: theme.text }]}>
                 {selectedDayName || t('selectDay')}
               </Text>
               <Ionicons 
@@ -425,6 +425,7 @@ export default function CreateRecurringWorkout() {
                   >
                     <View style={styles.dropdownItemContent}>
                       <Text
+                        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                         style={[
                           styles.dropdownText,
                           { color: theme.text },
@@ -461,6 +462,7 @@ export default function CreateRecurringWorkout() {
               onPress={() => setIntervalType('everyday')}
             >
               <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                 style={[
                   styles.intervalText,
                   { color: theme.text },
@@ -485,6 +487,7 @@ export default function CreateRecurringWorkout() {
             >
               <View style={styles.customIntervalRow}>
                 <Text
+                  maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                   style={[
                     styles.intervalText,
                     { color: intervalType === 'custom' ? theme.buttonText : theme.text },
@@ -492,7 +495,7 @@ export default function CreateRecurringWorkout() {
                 >
                   {t('everyXDays')}
                 </Text>
-                <TextInput
+                <AppTextInput
                   style={[
                     styles.dayInput,
                     { 
@@ -507,6 +510,7 @@ export default function CreateRecurringWorkout() {
                   maxLength={3}
                 />
                 <Text
+                  maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                   style={[
                     styles.intervalText,
                     { color: intervalType === 'custom' ? theme.buttonText : theme.text },
@@ -533,6 +537,7 @@ export default function CreateRecurringWorkout() {
               }}
             >
               <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                 style={[
                   styles.intervalText,
                   { color: theme.text },
@@ -583,7 +588,8 @@ export default function CreateRecurringWorkout() {
                       ]}
                       onPress={() => toggleWeekday(day.id)}
                     >
-                      <Text 
+                      <Text
+                        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                         style={[
                           styles.weekdayText, 
                           { color: selectedWeekdays.includes(day.id) ? theme.buttonText : theme.text }
@@ -619,7 +625,7 @@ export default function CreateRecurringWorkout() {
             </Text>
             
             <View style={styles.switchRow}>
-              <Text style={[styles.switchLabel, { color: theme.text }]}>
+              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.switchLabel, { color: theme.text }]}>
                 {t('enableNotifications')}
               </Text>
               <Switch
@@ -635,7 +641,7 @@ export default function CreateRecurringWorkout() {
                 style={styles.timeSelector}
                 onPress={() => setShowTimePicker(true)}
               >
-                <Text style={[styles.timeSelectorText, { color: theme.text }]}>
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.timeSelectorText, { color: theme.text }]}>
                   {t('notificationTime')}: {formatTime(notificationTime)}
                 </Text>
                 <Ionicons name="time-outline" size={22} color={theme.text} />
@@ -786,7 +792,7 @@ const styles = StyleSheet.create({
   },
   dayInput: {
     width: 40,
-    height: 30,
+    minHeight: 30,
     borderWidth: 1,
     borderRadius: 4,
     marginHorizontal: 8,

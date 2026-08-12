@@ -1,6 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native'; // Import useFocusEffect
 import React, { useState, useRef, useEffect } from 'react';
-import { View, ScrollView, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Modal, TextInput, Animated, Linking, Keyboard, TouchableWithoutFeedback, StatusBar } from 'react-native'; // Import StatusBar
+import { View, ScrollView, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Modal, Animated, Linking, Keyboard, TouchableWithoutFeedback, StatusBar } from 'react-native'; // Import StatusBar
 import { useRoute, useNavigation } from '@react-navigation/native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -10,6 +10,8 @@ import { WorkoutStackParamList } from '../App';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useTranslation } from 'react-i18next';
 import { exportWorkout } from '../utils/workoutSharingUtils';
+import AppTextInput, { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
+import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 
 type WorkoutListNavigationProp = StackNavigationProp<WorkoutStackParamList, 'WorkoutDetails'>;
 
@@ -772,7 +774,7 @@ export default function WorkoutDetails() {
                           </AutoSizeText>
                           {muscleGroupInfo && muscleGroupInfo.value && (
                             <View style={[styles.muscleGroupBadge, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                              <Text style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
+                              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
                                 {muscleGroupInfo.label}
                               </Text>
                             </View>
@@ -827,7 +829,7 @@ export default function WorkoutDetails() {
           <View style={[styles.modalContainer, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
             <View style={[styles.dayModalContent, { backgroundColor: theme.card }]}>
               <Text style={[styles.dayModalTitle, { color: theme.text }]}>{t('addDayFromDetails')}</Text>
-              <TextInput
+              <AppTextInput
                 style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                 placeholder={t('dayNamePlaceholder')}
                 placeholderTextColor={theme.text}
@@ -854,9 +856,9 @@ export default function WorkoutDetails() {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={[styles.modalContainer, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
             <View style={[styles.modalContent, { backgroundColor: theme.card, maxHeight: '100%' }]}>
-              <ScrollView style={{width: '100%'}} contentContainerStyle={{padding: 20, alignItems: 'center'}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <KeyboardAwareScrollView style={{width: '100%'}} contentContainerStyle={{padding: 20, alignItems: 'center'}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} enableOnAndroid={true}>
                 <Text style={[styles.modalTitle, { color: theme.text }]}>{t('addExerciseFromDetails')}</Text>
-                <TextInput
+                <AppTextInput
                   style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                   placeholder={t('exerciseNamePlaceholder')}
                   placeholderTextColor={theme.text}
@@ -864,7 +866,7 @@ export default function WorkoutDetails() {
                   autoCapitalize="words"
                   onChangeText={setExerciseName}
                 />
-                <TextInput
+                <AppTextInput
                   style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                   placeholder={t('setsPlaceholder') + ' (> 0)'}
                   placeholderTextColor={theme.text}
@@ -872,7 +874,7 @@ export default function WorkoutDetails() {
                   value={exerciseSets}
                   onChangeText={setExerciseSets}
                 />
-                <TextInput
+                <AppTextInput
                   style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                   placeholder={t('repsPlaceholder') + ' (> 0)'}
                   placeholderTextColor={theme.text}
@@ -880,8 +882,8 @@ export default function WorkoutDetails() {
                   value={exerciseReps}
                   onChangeText={setExerciseReps}
                 />
-                <Text style={[styles.inputLabel, { color: theme.text, marginTop: 10 }]}>{t('webLink')}</Text>
-                <TextInput
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text, marginTop: 10 }]}>{t('webLink')}</Text>
+                <AppTextInput
                   style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                   placeholder={t('webLinkPlaceholder')}
                   placeholderTextColor={theme.text}
@@ -890,7 +892,7 @@ export default function WorkoutDetails() {
                   autoCapitalize="none"
                   keyboardType="url"
                 />
-                <Text style={[styles.inputLabel, { color: theme.text, marginTop: 10 }]}>{t('muscleGroup')}</Text>
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text, marginTop: 10 }]}>{t('muscleGroup')}</Text>
                 <FlatList
                   data={muscleGroupData}
                   horizontal
@@ -916,9 +918,9 @@ export default function WorkoutDetails() {
                   }}
                   style={{ marginBottom: 15 }}
                 />
-                <Text style={[styles.inputLabel, { color: theme.text, marginTop: 10 }]}>{t('exerciseNotes')}</Text>
-                <TextInput
-                    style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border, height: 100, textAlignVertical: 'top' }]}
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text, marginTop: 10 }]}>{t('exerciseNotes')}</Text>
+                <AppTextInput
+                    style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border, minHeight: 100, textAlignVertical: 'top' }]}
                     placeholder={t('exerciseNotesPlaceholder')}
                     placeholderTextColor={theme.text}
                     value={exerciseNotesInput}
@@ -932,7 +934,7 @@ export default function WorkoutDetails() {
                 <TouchableOpacity style={[styles.cancelButton, { backgroundColor: theme.card }]} onPress={closeAddExerciseModal}>
                   <Text style={[styles.cancelButtonText, { color: theme.text }]}>{t('Cancel')}</Text>
                 </TouchableOpacity>
-              </ScrollView>
+              </KeyboardAwareScrollView>
             </View>
           </View>
         </TouchableWithoutFeedback>
@@ -947,22 +949,22 @@ export default function WorkoutDetails() {
         <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
           <View style={[styles.modalContainer, { backgroundColor: 'rgba(0, 0, 0, 0.5)' }]}>
             <View style={[styles.modalContent, { backgroundColor: theme.card, maxHeight: '100%' }]}>
-              <ScrollView style={{width: '100%'}} contentContainerStyle={{padding: 20, alignItems: 'center'}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+              <KeyboardAwareScrollView style={{width: '100%'}} contentContainerStyle={{padding: 20, alignItems: 'center'}} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false} enableOnAndroid={true}>
                 <Text style={[styles.modalTitle, { color: theme.text }]}>{t('exerciseDetails')}</Text>
                 
-                <Text style={[styles.inputLabel, { color: theme.text }]}>{t('exerciseNamePlaceholder')}</Text>
-                <TextInput
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text }]}>{t('exerciseNamePlaceholder')}</Text>
+                <AppTextInput
                     style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                     placeholder={t('exerciseNamePlaceholder')}
                     placeholderTextColor={theme.text}
                     value={exerciseName}
                     onChangeText={setExerciseName}
                     autoCapitalize="words"
-                    keyboardType="url"
+                    keyboardType="default"
                 />
 
-                <Text style={[styles.inputLabel, {color: theme.text, marginTop: 15}]}>{t('setsPlaceholder')}</Text>
-                <TextInput
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, {color: theme.text, marginTop: 15}]}>{t('setsPlaceholder')}</Text>
+                <AppTextInput
                   style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                   placeholder={t('setsPlaceholder') + ' (> 0)'}
                   placeholderTextColor={theme.text}
@@ -970,8 +972,8 @@ export default function WorkoutDetails() {
                   value={exerciseSets}
                   onChangeText={setExerciseSets}
                 />
-                <Text style={[styles.inputLabel, {color: theme.text, marginTop: 15}]}>{t('repsPlaceholder')}</Text>
-                <TextInput
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, {color: theme.text, marginTop: 15}]}>{t('repsPlaceholder')}</Text>
+                <AppTextInput
                   style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                   placeholder={t('repsPlaceholder') + ' (> 0)'}
                   placeholderTextColor={theme.text}
@@ -979,8 +981,8 @@ export default function WorkoutDetails() {
                   value={exerciseReps}
                   onChangeText={setExerciseReps}
                 />
-                <Text style={[styles.inputLabel, { color: theme.text }]}>{t('webLink')}</Text>
-                <TextInput
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text }]}>{t('webLink')}</Text>
+                <AppTextInput
                     style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                     placeholder={t('webLinkPlaceholder')}
                     placeholderTextColor={theme.text}
@@ -989,7 +991,7 @@ export default function WorkoutDetails() {
                     autoCapitalize="none"
                     keyboardType="url"
                 />
-                <Text style={[styles.inputLabel, { color: theme.text, marginTop: 15 }]}>{t('muscleGroup')}</Text>
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text, marginTop: 15 }]}>{t('muscleGroup')}</Text>
                 <FlatList
                   data={muscleGroupData}
                   horizontal
@@ -1015,9 +1017,9 @@ export default function WorkoutDetails() {
                   }}
                   style={{ marginBottom: 15 }}
                 />
-                <Text style={[styles.inputLabel, { color: theme.text, marginTop: 15 }]}>{t('exerciseNotes')}</Text>
-               <TextInput
-                   style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border, height: 100, textAlignVertical: 'top' }]}
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text, marginTop: 15 }]}>{t('exerciseNotes')}</Text>
+                <AppTextInput
+                    style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border, minHeight: 100, textAlignVertical: 'top' }]}
                    placeholder={t('exerciseNotesPlaceholder')}
                    placeholderTextColor={theme.text}
                    value={exerciseNotesInput}
@@ -1031,7 +1033,7 @@ export default function WorkoutDetails() {
                 <TouchableOpacity style={[styles.cancelButton, { backgroundColor: theme.card }]} onPress={closeWebLinkModal}>
                     <Text style={[styles.cancelButtonText, { color: theme.text }]}>{t('Cancel')}</Text>
                 </TouchableOpacity>
-              </ScrollView>
+               </KeyboardAwareScrollView>
             </View>
           </View>
         </TouchableWithoutFeedback>
@@ -1248,7 +1250,7 @@ const styles = StyleSheet.create({
       paddingVertical: 8,
       paddingHorizontal: 12,
       borderRadius: 20,
-      height: 40,
+      minHeight: 40,
       elevation: 1,
       shadowOpacity: 0,
       borderWidth: 1,

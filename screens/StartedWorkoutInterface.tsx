@@ -7,7 +7,6 @@ import {
   TouchableWithoutFeedback,
   ScrollView, 
   ActivityIndicator,
-  TextInput,
   Alert,
   FlatList,
   Vibration,
@@ -29,6 +28,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSettings } from '../context/SettingsContext';
 import { loadRestTimerPreferences, saveRestTimerPreferences } from '../utils/startedWorkoutPreferenceUtils';
 import { useAudioPlayer, setAudioModeAsync } from 'expo-audio';
+import AppTextInput, { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 import { 
   useTimerPersistence, 
   createTimerState, 
@@ -750,7 +750,7 @@ export default function StartedWorkoutInterface() {
                     <Text style={[styles.exerciseName, { color: theme.text, marginRight: 8 }]}>{item.exercise_name}</Text>
                     {muscleGroupInfo && muscleGroupInfo.value && (
                       <View style={[styles.muscleGroupBadgeOverview, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                        <Text style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
+                        <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
                           {t(muscleGroupInfo.label)}
                         </Text>
                       </View>
@@ -780,8 +780,8 @@ export default function StartedWorkoutInterface() {
         />
         
         <View style={styles.setupSection}>
-          <Text style={[styles.setupLabel, { color: theme.text }]}>{t('restTimeBetweenSets')}:</Text>
-          <TextInput
+          <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.setupLabel, { color: theme.text }]}>{t('restTimeBetweenSets')}:</Text>
+          <AppTextInput
             style={[styles.restTimeInput, { 
               backgroundColor: theme.card,
               color: theme.text,
@@ -794,8 +794,8 @@ export default function StartedWorkoutInterface() {
             placeholderTextColor={theme.type === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'}
           />
           
-          <Text style={[styles.setupLabel, { color: theme.text }]}>{t('restTimeBetweenExercises')}:</Text>
-          <TextInput
+          <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.setupLabel, { color: theme.text }]}>{t('restTimeBetweenExercises')}:</Text>
+          <AppTextInput
             style={[styles.restTimeInput, { 
               backgroundColor: theme.card,
               color: theme.text,
@@ -808,13 +808,13 @@ export default function StartedWorkoutInterface() {
             placeholderTextColor={theme.type === 'dark' ? 'rgba(255,255,255,0.5)' : 'rgba(0,0,0,0.5)'}
           />
           
-          <Text style={[styles.setupLabel, { color: theme.text, marginTop: 15 }]}>{t('workoutSettings')}:</Text>
+          <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.setupLabel, { color: theme.text, marginTop: 15 }]}>{t('workoutSettings')}:</Text>
           
           <View style={[styles.toggleRow, { 
             backgroundColor: theme.type === 'dark' ? '#121212' : '#f0f0f0',
             borderColor: theme.type === 'dark' ? '#000000' : '#e0e0e0'
           }]}>
-            <Text style={[styles.toggleText, { color: theme.text }]}>{t('autoFillWeights')}</Text>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.toggleText, { color: theme.text }]}>{t('autoFillWeights')}</Text>
             <Switch
               value={autoFillWeight}
               onValueChange={handleAutoFillToggle}
@@ -827,7 +827,7 @@ export default function StartedWorkoutInterface() {
             backgroundColor: theme.type === 'dark' ? '#121212' : '#f0f0f0',
             borderColor: theme.type === 'dark' ? '#000000' : '#e0e0e0'
           }]}>
-            <Text style={[styles.toggleText, { color: theme.text }]}>{t('autoFillReps')}</Text>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.toggleText, { color: theme.text }]}>{t('autoFillReps')}</Text>
             <Switch
               value={autoFillReps}
               onValueChange={handleAutoFillRepsToggle}
@@ -841,7 +841,7 @@ export default function StartedWorkoutInterface() {
               backgroundColor: theme.type === 'dark' ? '#121212' : '#f0f0f0',
               borderColor: theme.type === 'dark' ? '#000000' : '#e0e0e0'
             }]}>
-              <Text style={[styles.toggleText, { color: theme.text }]}>{t('useLogsForRepsTitle')}</Text>
+              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.toggleText, { color: theme.text }]}>{t('useLogsForRepsTitle')}</Text>
               <Switch
                 value={useLogsForRepInput}
                 onValueChange={handleUseLogsForRepsToggle}
@@ -855,7 +855,7 @@ export default function StartedWorkoutInterface() {
             backgroundColor: theme.type === 'dark' ? '#121212' : '#f0f0f0',
             borderColor: theme.type === 'dark' ? '#000000' : '#e0e0e0'
           }]}>
-            <Text style={[styles.toggleText, { color: theme.text }]}>{t('vibration')}</Text>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.toggleText, { color: theme.text }]}>{t('vibration')}</Text>
             <Switch
               value={enableVibration}
               onValueChange={setEnableVibration}
@@ -868,7 +868,7 @@ export default function StartedWorkoutInterface() {
             backgroundColor: theme.type === 'dark' ? '#121212' : '#f0f0f0',
             borderColor: theme.type === 'dark' ? '#000000' : '#e0e0e0'
           }]}>
-            <Text style={[styles.toggleText, { color: theme.text }]}>{t('enableSetSwitchSound')}</Text>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.toggleText, { color: theme.text }]}>{t('enableSetSwitchSound')}</Text>
             <Switch
               value={enableSetSwitchSound}
               onValueChange={setEnableSetSwitchSound}
@@ -881,7 +881,7 @@ export default function StartedWorkoutInterface() {
             backgroundColor: theme.type === 'dark' ? '#121212' : '#f0f0f0',
             borderColor: theme.type === 'dark' ? '#000000' : '#e0e0e0'
           }]}>
-            <Text style={[styles.toggleText, { color: theme.text }]}>{t('notifications')}</Text>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.toggleText, { color: theme.text }]}>{t('notifications')}</Text>
             <Switch
               value={enableNotifications}
               onValueChange={() => handleNotificationToggle()}
@@ -938,7 +938,7 @@ export default function StartedWorkoutInterface() {
           <View style={styles.badgeAndIconsContainer}>
             {muscleGroupInfo && muscleGroupInfo.value && (
               <View style={[styles.muscleGroupBadgeMain, { backgroundColor: theme.card, borderColor: theme.border, marginRight: 8 }]}>
-                <Text style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
+                <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
                   {t(muscleGroupInfo.label)}
                 </Text>
               </View>
@@ -964,8 +964,8 @@ export default function StartedWorkoutInterface() {
           
           <View style={styles.inputContainer}>
             <View style={styles.inputGroup}>
-              <Text style={[styles.inputLabel, { color: theme.text }]}>{t('repsDone')}</Text>
-              <TextInput
+              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text }]}>{t('repsDone')}</Text>
+              <AppTextInput
                   style={[styles.input, { 
                   backgroundColor: theme.card,
               color: theme.text,
@@ -988,8 +988,8 @@ export default function StartedWorkoutInterface() {
             </View>
             
             <View style={styles.inputGroup}>
-              <Text style={[styles.inputLabel, { color: theme.text }]}> {t('Weight')} ({weightFormat})</Text>
-              <TextInput
+              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text }]}> {t('Weight')} ({weightFormat})</Text>
+              <AppTextInput
                 style={[styles.input, { 
                   backgroundColor: theme.card,
                   color: theme.text,
@@ -1225,7 +1225,7 @@ export default function StartedWorkoutInterface() {
                 </Text>
                 {muscleGroupInfo && muscleGroupInfo.value && (
                   <View style={[styles.muscleGroupBadgeModal, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                    <Text style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
+                    <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
                       {t(muscleGroupInfo.label)}
                     </Text>
                   </View>
@@ -1837,7 +1837,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   restTimeInput: {
-    height: 50,
+    minHeight: 50,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 15,
@@ -1921,7 +1921,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
-    height: 50,
+    minHeight: 50,
     borderWidth: 1,
     borderRadius: 10,
     paddingHorizontal: 15,

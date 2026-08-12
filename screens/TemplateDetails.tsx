@@ -1,6 +1,6 @@
 import { useFocusEffect } from '@react-navigation/native'; // Import useFocusEffect
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Modal, TextInput, Linking } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, Modal, Linking } from 'react-native';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -32,8 +32,7 @@ interface LastRowIdResult {
 }
   const { theme } = useTheme();
   const { t } = useTranslation(); // Initialize translations
-  
-  
+
   const { workout_id } = route.params as { workout_id: number };
 
   const [workoutName, setWorkoutName] = useState('');
@@ -471,4 +470,3 @@ const styles = StyleSheet.create({
       fontWeight: 'bold',
     },
   });
-  

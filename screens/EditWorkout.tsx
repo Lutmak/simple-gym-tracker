@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   Alert,
   ScrollView,
@@ -16,6 +15,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
+import AppTextInput from '../components/AppTextInput';
 
 type Exercise = { exercise_id: number; exercise_name: string; sets: number; reps: number; web_link: string | null; muscle_group: string | null; exercise_notes: string | null };
 type Day = { day_id: number; day_name: string; exercises: Exercise[] };
@@ -317,7 +317,7 @@ export default function EditWorkout() {
         </TouchableOpacity>
         
         {/* Exercise Name */}
-        <TextInput
+        <AppTextInput
           style={[styles.exerciseInput, { color: theme.text }]}
           value={item.exercise_name}
           onChangeText={(text) =>
@@ -328,7 +328,7 @@ export default function EditWorkout() {
         />
         
         {/* Sets */}
-        <TextInput
+        <AppTextInput
           style={[styles.numberInput, { color: theme.text }]}
           value={item.sets.toString()}
           onChangeText={(text) =>
@@ -340,7 +340,7 @@ export default function EditWorkout() {
         />
         
         {/* Reps */}
-        <TextInput
+        <AppTextInput
           style={[styles.numberInput, { color: theme.text }]}
           value={item.reps.toString()}
           onChangeText={(text) =>
@@ -367,7 +367,7 @@ export default function EditWorkout() {
           <Text style={[styles.title, { color: theme.text }]}>{t('editWorkout')}</Text>
 
           {/* Workout Name */}
-          <TextInput
+          <AppTextInput
             style={[styles.inputWorkoutName, { color: theme.text, backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border }]}
             value={workoutName}
             onChangeText={setWorkoutName}
@@ -380,7 +380,7 @@ export default function EditWorkout() {
           {days.map((day) => (
             <View key={day.day_id} style={[styles.dayContainer, { backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border }]}>
               {/* Day Name */}
-              <TextInput
+              <AppTextInput
                 style={[styles.dayInput, { color: theme.text }]}
                 value={day.day_name}
                 onChangeText={(text) => handleDayNameChange(day.day_id, text)}

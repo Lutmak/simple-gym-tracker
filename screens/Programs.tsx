@@ -5,6 +5,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 
 import { WorkoutStackParamList } from '../App';
+import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
 
@@ -39,11 +40,16 @@ export default function Programs() {
         accessibilityRole="button"
         accessibilityLabel={t('fiveThreeOne')}
       >
-        <View style={styles.programIcon}>
+        <View style={[styles.programIcon, { backgroundColor: theme.buttonBackground }]}>
           <Ionicons name="barbell" size={28} color={theme.buttonText} />
         </View>
         <View style={styles.programInfo}>
-          <Text style={[styles.programName, { color: theme.text }]}>{t('fiveThreeOne')}</Text>
+          <Text
+            maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+            style={[styles.programName, { color: theme.text }]}
+          >
+            {t('fiveThreeOne')}
+          </Text>
           <Text style={[styles.programDescription, { color: theme.text }]}>
             {t('fiveThreeOneDescription')}
           </Text>
@@ -96,7 +102,6 @@ const styles = StyleSheet.create({
     borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#000000',
     marginRight: 14,
   },
   programInfo: {

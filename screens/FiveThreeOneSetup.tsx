@@ -15,7 +15,10 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { useSQLiteContext, type SQLiteDatabase } from 'expo-sqlite';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 
-import AppTextInput, { parseNumericInput } from '../components/AppTextInput';
+import AppTextInput, {
+  APP_TEXT_MAX_FONT_SIZE_MULTIPLIER,
+  parseNumericInput,
+} from '../components/AppTextInput';
 import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import { WorkoutStackParamList } from '../App';
@@ -457,14 +460,24 @@ export default function FiveThreeOneSetup() {
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
     >
-      <Text style={{ color: selected ? theme.buttonText : theme.text }}>{label}</Text>
+      <Text
+        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+        style={{ color: selected ? theme.buttonText : theme.text }}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 
   const renderBasics = () => (
     <View>
       <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('programBasics')}</Text>
-      <Text style={[styles.label, { color: theme.text }]}>{t('programName')}</Text>
+      <Text
+        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+        style={[styles.label, { color: theme.text }]}
+      >
+        {t('programName')}
+      </Text>
       <AppTextInput
         variant="text"
         style={styles.fullInput}
@@ -477,13 +490,23 @@ export default function FiveThreeOneSetup() {
         autoCapitalize="words"
       />
 
-      <Text style={[styles.label, { color: theme.text }]}>{t('unit')}</Text>
+      <Text
+        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+        style={[styles.label, { color: theme.text }]}
+      >
+        {t('unit')}
+      </Text>
       <View style={styles.choiceRow}>
         {renderChoice(t('kilograms'), unit === 'kg', () => handleUnitChange('kg'), t('kilograms'))}
         {renderChoice(t('pounds'), unit === 'lb', () => handleUnitChange('lb'), t('pounds'))}
       </View>
 
-      <Text style={[styles.label, { color: theme.text }]}>{t('roundingIncrement')}</Text>
+      <Text
+        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+        style={[styles.label, { color: theme.text }]}
+      >
+        {t('roundingIncrement')}
+      </Text>
       <AppTextInput
         variant="numeric"
         style={styles.fullInput}
@@ -496,7 +519,12 @@ export default function FiveThreeOneSetup() {
         keyboardType="decimal-pad"
       />
 
-      <Text style={[styles.label, { color: theme.text }]}>{t('roundingDirection')}</Text>
+      <Text
+        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+        style={[styles.label, { color: theme.text }]}
+      >
+        {t('roundingDirection')}
+      </Text>
       <View style={styles.choiceRow}>
         {renderChoice(
           t('roundUp'),
@@ -518,7 +546,12 @@ export default function FiveThreeOneSetup() {
         )}
       </View>
 
-      <Text style={[styles.label, { color: theme.text }]}>{t('tmPercentage')}</Text>
+      <Text
+        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+        style={[styles.label, { color: theme.text }]}
+      >
+        {t('tmPercentage')}
+      </Text>
       <Text style={[styles.helperText, { color: theme.text }]}>{t('tmPercentageDescription')}</Text>
       <View style={styles.choiceRow}>
         {renderChoice('85%', tmPercentage === 0.85, () => setTmPercentage(0.85), '85%')}
@@ -540,7 +573,10 @@ export default function FiveThreeOneSetup() {
         style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
       >
         <View style={styles.cardHeader}>
-          <Text style={[styles.cardTitle, { color: theme.text }]}>
+          <Text
+            maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+            style={[styles.cardTitle, { color: theme.text }]}
+          >
             {t('liftNumber', { number: index + 1 })}
           </Text>
           <View style={styles.cardActions}>
@@ -581,7 +617,12 @@ export default function FiveThreeOneSetup() {
           </View>
         </View>
 
-        <Text style={[styles.label, { color: theme.text }]}>{t('liftName')}</Text>
+        <Text
+          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          style={[styles.label, { color: theme.text }]}
+        >
+          {t('liftName')}
+        </Text>
         <AppTextInput
           variant="text"
           style={styles.fullInput}
@@ -591,7 +632,12 @@ export default function FiveThreeOneSetup() {
           autoCapitalize="words"
         />
 
-        <Text style={[styles.label, { color: theme.text }]}>{t('liftCategory')}</Text>
+        <Text
+          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          style={[styles.label, { color: theme.text }]}
+        >
+          {t('liftCategory')}
+        </Text>
         <View style={styles.choiceRow}>
           {renderChoice(
             t('upper'),
@@ -607,7 +653,12 @@ export default function FiveThreeOneSetup() {
           )}
         </View>
 
-        <Text style={[styles.label, { color: theme.text }]}>{t('trainingMax')}</Text>
+        <Text
+          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          style={[styles.label, { color: theme.text }]}
+        >
+          {t('trainingMax')}
+        </Text>
         <View style={styles.choiceRow}>
           {renderChoice(
             t('enterDirectly'),
@@ -660,7 +711,12 @@ export default function FiveThreeOneSetup() {
           </View>
         )}
 
-        <Text style={[styles.label, { color: theme.text }]}>{t('daySlot')}</Text>
+        <Text
+          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          style={[styles.label, { color: theme.text }]}
+        >
+          {t('daySlot')}
+        </Text>
         <AppTextInput
           variant="numeric"
           style={styles.slotInput}
@@ -685,7 +741,12 @@ export default function FiveThreeOneSetup() {
         accessibilityLabel={t('addLift')}
       >
         <Ionicons name="add" size={22} color={theme.text} />
-        <Text style={[styles.secondaryButtonText, { color: theme.text }]}>{t('addLift')}</Text>
+        <Text
+          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          style={[styles.secondaryButtonText, { color: theme.text }]}
+        >
+          {t('addLift')}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -730,7 +791,10 @@ export default function FiveThreeOneSetup() {
                   accessibilityLabel={template.template_name}
                 >
                   <View style={styles.templateInfo}>
-                    <Text style={{ color: selected ? theme.buttonText : theme.text, fontWeight: '700' }}>
+                    <Text
+                      maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                      style={{ color: selected ? theme.buttonText : theme.text, fontWeight: '700' }}
+                    >
                       {template.template_name}
                     </Text>
                     {template.description && (
@@ -833,7 +897,10 @@ export default function FiveThreeOneSetup() {
         </View>
 
         <View style={styles.progressHeader}>
-          <Text style={[styles.progressText, { color: theme.text }]}>
+          <Text
+            maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+            style={[styles.progressText, { color: theme.text }]}
+          >
             {t('stepOf', { current: step + 1, total: TOTAL_STEPS })}: {stepNames[step]}
           </Text>
           <View style={[styles.progressTrack, { backgroundColor: theme.card }]}>
@@ -868,7 +935,12 @@ export default function FiveThreeOneSetup() {
               accessibilityRole="button"
               accessibilityLabel={t('back')}
             >
-              <Text style={[styles.secondaryButtonText, { color: theme.text }]}>{t('back')}</Text>
+              <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                style={[styles.secondaryButtonText, { color: theme.text }]}
+              >
+                {t('back')}
+              </Text>
             </TouchableOpacity>
           )}
           <TouchableOpacity
@@ -885,7 +957,10 @@ export default function FiveThreeOneSetup() {
             {isSaving ? (
               <ActivityIndicator color={theme.buttonText} />
             ) : (
-              <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
+              <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                style={[styles.primaryButtonText, { color: theme.buttonText }]}
+              >
                 {step === TOTAL_STEPS - 1 ? t('saveProgram') : t('next')}
               </Text>
             )}

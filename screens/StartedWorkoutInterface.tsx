@@ -28,7 +28,7 @@ import * as Notifications from 'expo-notifications';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useSettings } from '../context/SettingsContext';
 import { loadRestTimerPreferences, saveRestTimerPreferences } from '../utils/startedWorkoutPreferenceUtils';
-import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
+import { useAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { 
   useTimerPersistence, 
   createTimerState, 
@@ -315,7 +315,8 @@ export default function StartedWorkoutInterface() {
           const notificationType = notification.request.content.data?.type;
           
           return {
-            shouldShowAlert: true,
+            shouldShowBanner: true,
+            shouldShowList: true,
             shouldPlaySound: notificationType === 'rest_complete',
             shouldSetBadge: false,
           };
@@ -1574,14 +1575,16 @@ export default function StartedWorkoutInterface() {
     }));
   };
   
+  // Preloaded once so each set switch just rewinds and replays.
+  const setSwitchPlayer = useAudioPlayer(require('../assets/sounds/switch.mp3'));
+
   useEffect(() => {
     const configureAudio = async () => {
       try {
-        await Audio.setAudioModeAsync({
-          playsInSilentModeIOS: true,
-          interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
-          interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-          playThroughEarpieceAndroid: false,
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          interruptionMode: 'mixWithOthers',
+          shouldRouteThroughEarpiece: false,
         });
       } catch (error) {
         console.error("Error configuring audio mode: ", error);
@@ -1592,17 +1595,10 @@ export default function StartedWorkoutInterface() {
   }, []);
 
   const playSound = async () => {
-    
     try {
-      const { sound } = await Audio.Sound.createAsync(
-         require('../assets/sounds/switch.mp3')
-      );
-      sound.setOnPlaybackStatusUpdate(async (status) => {
-        if (status.isLoaded && status.didJustFinish) {
-          await sound.unloadAsync();
-        }
-      });
-      await sound.playAsync();
+      // Rewind first so repeated set switches replay the clip from the start.
+      await setSwitchPlayer.seekTo(0);
+      setSwitchPlayer.play();
     } catch (error) {
         console.log('Error playing sound', error);
     }

@@ -5,7 +5,8 @@ import i18n from './i18n'; // Import i18n
 // Configure the notification handler to show alerts when received
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: false,
     shouldSetBadge: false,
   }),

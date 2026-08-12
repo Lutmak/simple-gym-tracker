@@ -4,7 +4,13 @@ import React, {
   useEffect,
   useState,
 } from 'react';
-import { loadSettings, saveSettings } from '../utils/settingsStorage';
+import {
+  DEFAULT_FIVE_THREE_ONE_DEFAULTS,
+  loadSettings,
+  mergeFiveThreeOneDefaults,
+  saveSettings,
+  type FiveThreeOneDefaults,
+} from '../utils/settingsStorage';
 import i18n from '../utils/i18n';
 import * as Localization from 'expo-localization';
 import { requestNotificationPermissions } from '../utils/notificationUtils';
@@ -68,6 +74,8 @@ type SettingsContextType = {
   notificationPermissionGranted: boolean;
   setNotificationPermissionGranted: (granted: boolean) => void;
   requestNotificationPermission: () => Promise<boolean>;
+  fiveThreeOneDefaults: FiveThreeOneDefaults;
+  setFiveThreeOneDefaults: (defaults: FiveThreeOneDefaults) => void;
 };
 
 // 2) Declare the actual context:
@@ -87,6 +95,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   );
   const [notificationPermissionGranted, setNotificationPermissionGranted] =
     useState(false);
+  const [fiveThreeOneDefaults, setFiveThreeOneDefaults] =
+    useState<FiveThreeOneDefaults>(() => ({ ...DEFAULT_FIVE_THREE_ONE_DEFAULTS }));
 
   // Function to request notification permission
   const requestNotificationPermission = async (): Promise<boolean> => {
@@ -107,20 +117,39 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
 
       if (savedSettings) {
         setLanguage(savedSettings.language || 'en');
-        // MODIFIED: Use device format as fallback
-        setDateFormat(savedSettings.dateFormat || deviceDateFormat);
-        setWeightFormat(savedSettings.weightFormat || deviceWeightFormat);
-        setFirstWeekday(savedSettings.firstWeekday || deviceFirstWeekday);
+        const savedDateFormat =
+          savedSettings.dateFormat === 'mm-dd-yyyy' ||
+          savedSettings.dateFormat === 'dd-mm-yyyy'
+            ? savedSettings.dateFormat
+            : deviceDateFormat;
+        const savedWeightFormat =
+          savedSettings.weightFormat === 'lbs' ||
+          savedSettings.weightFormat === 'kg'
+            ? savedSettings.weightFormat
+            : deviceWeightFormat;
+        const savedFirstWeekday =
+          savedSettings.firstWeekday === 'Sunday' ||
+          savedSettings.firstWeekday === 'Monday'
+            ? savedSettings.firstWeekday
+            : deviceFirstWeekday;
+        const savedTimeFormat =
+          savedSettings.timeFormat === '24-Hour'
+            ? '24h'
+            : savedSettings.timeFormat === '24h' ||
+                savedSettings.timeFormat === 'AM/PM'
+              ? savedSettings.timeFormat
+              : deviceTimeFormat;
 
-        let timeFormatToSet = savedSettings.timeFormat;
-        if (timeFormatToSet === '24-Hour') {
-          // Migration from old value
-          timeFormatToSet = '24h';
-        }
-        setTimeFormat(timeFormatToSet || deviceTimeFormat);
+        setDateFormat(savedDateFormat);
+        setWeightFormat(savedWeightFormat);
+        setFirstWeekday(savedFirstWeekday);
+        setTimeFormat(savedTimeFormat);
 
         setNotificationPermissionGranted(
-          savedSettings.notificationPermissionGranted || false,
+          Boolean(savedSettings.notificationPermissionGranted),
+        );
+        setFiveThreeOneDefaults(
+          mergeFiveThreeOneDefaults(savedSettings.fiveThreeOneDefaults),
         );
       } else {
         const fallbackLng = 'en';
@@ -132,6 +161,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         setDateFormat(deviceDateFormat);
         setWeightFormat(deviceWeightFormat);
         setFirstWeekday(deviceFirstWeekday);
+        setFiveThreeOneDefaults({ ...DEFAULT_FIVE_THREE_ONE_DEFAULTS });
       }
       setIsInitialized(true);
     };
@@ -154,6 +184,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         weightFormat,
         firstWeekday,
         notificationPermissionGranted,
+        fiveThreeOneDefaults,
       });
     };
     persistSettings();
@@ -164,6 +195,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     weightFormat,
     firstWeekday,
     notificationPermissionGranted,
+    fiveThreeOneDefaults,
     isInitialized,
   ]);
 
@@ -183,6 +215,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         notificationPermissionGranted,
         setNotificationPermissionGranted,
         requestNotificationPermission,
+        fiveThreeOneDefaults,
+        setFiveThreeOneDefaults,
       }}
     >
       {children}

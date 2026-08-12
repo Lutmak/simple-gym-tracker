@@ -6,6 +6,7 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TouchableOpacity,
   View,
@@ -20,6 +21,7 @@ import AppTextInput, {
   parseNumericInput,
 } from '../components/AppTextInput';
 import { useTheme } from '../context/ThemeContext';
+import { useSettings } from '../context/SettingsContext';
 import { useTranslation } from 'react-i18next';
 import { WorkoutStackParamList } from '../App';
 import {
@@ -30,11 +32,14 @@ import {
 } from '../utils/fiveThreeOne';
 import {
   DEFAULT_SETUP_LIFTS,
+  getFiveThreeOneProgramInsertParams,
   normalizeDaySlots,
   validateSetup,
+  type FiveThreeOneProgramSettings,
   type SetupValidationInput,
   type SetupValidationIssue,
 } from '../utils/fiveThreeOneSetup';
+import { DEFAULT_FIVE_THREE_ONE_DEFAULTS } from '../utils/settingsStorage';
 
 type FiveThreeOneSetupNavigationProp = StackNavigationProp<
   WorkoutStackParamList,
@@ -69,14 +74,6 @@ interface PersistedLift {
   assistanceTemplateId: number;
 }
 
-interface PersistedProgram {
-  name: string;
-  unit: WeightUnit;
-  roundingIncrement: number;
-  roundingDirection: RoundingDirection;
-  tmPercentage: number;
-}
-
 const TOTAL_STEPS = 4;
 
 const createInitialLifts = (): SetupLiftState[] =>
@@ -91,9 +88,17 @@ const createInitialLifts = (): SetupLiftState[] =>
 
 const formatWeight = (weight: number): string => Number(weight.toFixed(2)).toString();
 
+const UNIT_PROGRAM_DEFAULTS: Record<
+  WeightUnit,
+  { roundingIncrement: number; upperTmIncrement: number; lowerTmIncrement: number }
+> = {
+  kg: { roundingIncrement: 2.5, upperTmIncrement: 2.5, lowerTmIncrement: 5 },
+  lb: { roundingIncrement: 5, upperTmIncrement: 5, lowerTmIncrement: 10 },
+};
+
 async function saveFiveThreeOneProgram(
   db: SQLiteDatabase,
-  program: PersistedProgram,
+  program: FiveThreeOneProgramSettings,
   lifts: readonly PersistedLift[],
 ): Promise<void> {
   await db.withTransactionAsync(async () => {
@@ -102,17 +107,7 @@ async function saveFiveThreeOneProgram(
        (program_name, unit, rounding_increment, rounding_direction, tm_percentage,
         include_deload, upper_tm_increment, lower_tm_increment, warmup_enabled)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-      [
-        program.name,
-        program.unit,
-        program.roundingIncrement,
-        program.roundingDirection,
-        program.tmPercentage,
-        1,
-        program.unit === 'kg' ? 2.5 : 5,
-        program.unit === 'kg' ? 5 : 10,
-        1,
-      ],
+      getFiveThreeOneProgramInsertParams(program),
     );
 
     if (programResult.lastInsertRowId <= 0) {
@@ -146,6 +141,8 @@ const validationMessages: Record<SetupValidationIssue, string> = {
   'rounding-increment-positive': 'roundingIncrementRequired',
   'rounding-direction-invalid': 'roundingDirectionInvalid',
   'tm-percentage-invalid': 'tmPercentageInvalid',
+  'upper-tm-increment-positive': 'upperTmIncrementRequired',
+  'lower-tm-increment-positive': 'lowerTmIncrementRequired',
   'lift-required': 'liftRequired',
   'lift-name-required': 'liftNameRequired',
   'duplicate-lift-name': 'duplicateLiftName',
@@ -163,6 +160,8 @@ const getIssueStep = (issue: SetupValidationIssue): number => {
     case 'rounding-increment-positive':
     case 'rounding-direction-invalid':
     case 'tm-percentage-invalid':
+    case 'upper-tm-increment-positive':
+    case 'lower-tm-increment-positive':
       return 0;
     case 'assistance-template-required':
       return 2;
@@ -175,20 +174,56 @@ export default function FiveThreeOneSetup() {
   const navigation = useNavigation<FiveThreeOneSetupNavigationProp>();
   const db = useSQLiteContext();
   const { theme } = useTheme();
+  const { fiveThreeOneDefaults } = useSettings();
   const { t } = useTranslation();
 
   const [step, setStep] = useState(0);
   const [programName, setProgramName] = useState('');
   const [unit, setUnit] = useState<WeightUnit>('kg');
-  const [roundingIncrementText, setRoundingIncrementText] = useState('2.5');
+  const [roundingIncrementText, setRoundingIncrementText] = useState(() =>
+    formatWeight(DEFAULT_FIVE_THREE_ONE_DEFAULTS.roundingIncrement),
+  );
   const [roundingDirection, setRoundingDirection] = useState<RoundingDirection>('nearest');
-  const [tmPercentage, setTmPercentage] = useState(0.9);
+  const [tmPercentageText, setTmPercentageText] = useState(() =>
+    formatWeight(DEFAULT_FIVE_THREE_ONE_DEFAULTS.tmPercentage * 100),
+  );
+  const [includeDeload, setIncludeDeload] = useState(
+    DEFAULT_FIVE_THREE_ONE_DEFAULTS.includeDeload,
+  );
+  const [upperTmIncrementText, setUpperTmIncrementText] = useState(() =>
+    formatWeight(DEFAULT_FIVE_THREE_ONE_DEFAULTS.upperTmIncrement),
+  );
+  const [lowerTmIncrementText, setLowerTmIncrementText] = useState(() =>
+    formatWeight(DEFAULT_FIVE_THREE_ONE_DEFAULTS.lowerTmIncrement),
+  );
+  const [warmupEnabled, setWarmupEnabled] = useState(
+    DEFAULT_FIVE_THREE_ONE_DEFAULTS.warmupEnabled,
+  );
   const [lifts, setLifts] = useState<SetupLiftState[]>(createInitialLifts);
   const [templates, setTemplates] = useState<AssistanceTemplate[]>([]);
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nextLiftId = useRef(1);
+  const hasEditedWizard = useRef(false);
+
+  const markWizardEdited = () => {
+    hasEditedWizard.current = true;
+  };
+
+  useEffect(() => {
+    if (hasEditedWizard.current) {
+      return;
+    }
+
+    setRoundingIncrementText(formatWeight(fiveThreeOneDefaults.roundingIncrement));
+    setRoundingDirection(fiveThreeOneDefaults.roundingDirection);
+    setTmPercentageText(formatWeight(fiveThreeOneDefaults.tmPercentage * 100));
+    setIncludeDeload(fiveThreeOneDefaults.includeDeload);
+    setUpperTmIncrementText(formatWeight(fiveThreeOneDefaults.upperTmIncrement));
+    setLowerTmIncrementText(formatWeight(fiveThreeOneDefaults.lowerTmIncrement));
+    setWarmupEnabled(fiveThreeOneDefaults.warmupEnabled);
+  }, [fiveThreeOneDefaults]);
 
   useEffect(() => {
     let isMounted = true;
@@ -234,6 +269,11 @@ export default function FiveThreeOneSetup() {
     };
   }, [db]);
 
+  const getTmPercentage = (): number | null => {
+    const percentage = parseNumericInput(tmPercentageText);
+    return percentage === null ? null : percentage / 100;
+  };
+
   const getTrainingMax = (lift: SetupLiftState): number | null => {
     if (lift.tmMode === 'direct') {
       return parseNumericInput(lift.trainingMaxText);
@@ -241,11 +281,13 @@ export default function FiveThreeOneSetup() {
 
     const recentWeight = parseNumericInput(lift.recentWeightText);
     const recentReps = parseNumericInput(lift.recentRepsText);
+    const tmPercentage = getTmPercentage();
     if (
       recentWeight === null ||
       recentReps === null ||
       !Number.isInteger(recentReps) ||
-      recentReps <= 0
+      recentReps <= 0 ||
+      tmPercentage === null
     ) {
       return null;
     }
@@ -262,7 +304,11 @@ export default function FiveThreeOneSetup() {
     unit,
     roundingIncrement: parseNumericInput(roundingIncrementText),
     roundingDirection,
-    tmPercentage,
+    tmPercentage: getTmPercentage(),
+    includeDeload,
+    upperTmIncrement: parseNumericInput(upperTmIncrementText),
+    lowerTmIncrement: parseNumericInput(lowerTmIncrementText),
+    warmupEnabled,
     lifts: lifts.map((lift) => ({
       name: lift.name,
       category: lift.category,
@@ -308,6 +354,7 @@ export default function FiveThreeOneSetup() {
   };
 
   const updateLift = (id: string, update: Partial<SetupLiftState>) => {
+    markWizardEdited();
     setLifts((currentLifts) =>
       currentLifts.map((lift) => (lift.id === id ? { ...lift, ...update } : lift)),
     );
@@ -315,6 +362,7 @@ export default function FiveThreeOneSetup() {
   };
 
   const addLift = () => {
+    markWizardEdited();
     const id = `custom-${nextLiftId.current}`;
     nextLiftId.current += 1;
     setLifts((currentLifts) =>
@@ -337,6 +385,7 @@ export default function FiveThreeOneSetup() {
   };
 
   const removeLift = (id: string) => {
+    markWizardEdited();
     setLifts((currentLifts) =>
       normalizeDaySlots(currentLifts.filter((lift) => lift.id !== id)),
     );
@@ -344,6 +393,7 @@ export default function FiveThreeOneSetup() {
   };
 
   const moveLift = (index: number, direction: -1 | 1) => {
+    markWizardEdited();
     setLifts((currentLifts) => {
       const targetIndex = index + direction;
       if (targetIndex < 0 || targetIndex >= currentLifts.length) {
@@ -358,13 +408,44 @@ export default function FiveThreeOneSetup() {
   };
 
   const handleUnitChange = (nextUnit: WeightUnit) => {
+    markWizardEdited();
+    const currentUnitDefaults = UNIT_PROGRAM_DEFAULTS[unit];
+    const nextUnitDefaults = UNIT_PROGRAM_DEFAULTS[nextUnit];
+
     setUnit(nextUnit);
-    if (
-      (unit === 'kg' && roundingIncrementText === '2.5') ||
-      (unit === 'lb' && roundingIncrementText === '5')
-    ) {
-      setRoundingIncrementText(nextUnit === 'kg' ? '2.5' : '5');
+    if (parseNumericInput(roundingIncrementText) === currentUnitDefaults.roundingIncrement) {
+      setRoundingIncrementText(formatWeight(nextUnitDefaults.roundingIncrement));
     }
+    if (parseNumericInput(upperTmIncrementText) === currentUnitDefaults.upperTmIncrement) {
+      setUpperTmIncrementText(formatWeight(nextUnitDefaults.upperTmIncrement));
+    }
+    if (parseNumericInput(lowerTmIncrementText) === currentUnitDefaults.lowerTmIncrement) {
+      setLowerTmIncrementText(formatWeight(nextUnitDefaults.lowerTmIncrement));
+    }
+    setError(null);
+  };
+
+  const handleRoundingDirectionChange = (direction: RoundingDirection) => {
+    markWizardEdited();
+    setRoundingDirection(direction);
+    setError(null);
+  };
+
+  const handleTmPercentageChange = (value: string) => {
+    markWizardEdited();
+    setTmPercentageText(value);
+    setError(null);
+  };
+
+  const handleDeloadChange = (value: boolean) => {
+    markWizardEdited();
+    setIncludeDeload(value);
+    setError(null);
+  };
+
+  const handleWarmupChange = (value: boolean) => {
+    markWizardEdited();
+    setWarmupEnabled(value);
     setError(null);
   };
 
@@ -397,12 +478,16 @@ export default function FiveThreeOneSetup() {
       return;
     }
 
-    const program: PersistedProgram = {
+    const program: FiveThreeOneProgramSettings = {
       name: input.programName.trim(),
       unit: input.unit as WeightUnit,
       roundingIncrement: input.roundingIncrement as number,
       roundingDirection: input.roundingDirection as RoundingDirection,
-      tmPercentage: input.tmPercentage,
+      tmPercentage: input.tmPercentage as number,
+      includeDeload: input.includeDeload,
+      upperTmIncrement: input.upperTmIncrement as number,
+      lowerTmIncrement: input.lowerTmIncrement as number,
+      warmupEnabled: input.warmupEnabled,
     };
     const persistedLifts: PersistedLift[] = input.lifts.map((lift) => ({
       name: lift.name.trim(),
@@ -483,7 +568,9 @@ export default function FiveThreeOneSetup() {
         style={styles.fullInput}
         placeholder={t('programNamePlaceholder')}
         value={programName}
+        onFocus={markWizardEdited}
         onChangeText={(value) => {
+          markWizardEdited();
           setProgramName(value);
           setError(null);
         }}
@@ -512,7 +599,9 @@ export default function FiveThreeOneSetup() {
         style={styles.fullInput}
         placeholder={t('roundingIncrementPlaceholder')}
         value={roundingIncrementText}
+        onFocus={markWizardEdited}
         onRawChange={(value) => {
+          markWizardEdited();
           setRoundingIncrementText(value);
           setError(null);
         }}
@@ -529,19 +618,19 @@ export default function FiveThreeOneSetup() {
         {renderChoice(
           t('roundUp'),
           roundingDirection === 'up',
-          () => setRoundingDirection('up'),
+          () => handleRoundingDirectionChange('up'),
           t('roundUp'),
         )}
         {renderChoice(
           t('roundDown'),
           roundingDirection === 'down',
-          () => setRoundingDirection('down'),
+          () => handleRoundingDirectionChange('down'),
           t('roundDown'),
         )}
         {renderChoice(
           t('roundNearest'),
           roundingDirection === 'nearest',
-          () => setRoundingDirection('nearest'),
+          () => handleRoundingDirectionChange('nearest'),
           t('roundNearest'),
         )}
       </View>
@@ -553,9 +642,74 @@ export default function FiveThreeOneSetup() {
         {t('tmPercentage')}
       </Text>
       <Text style={[styles.helperText, { color: theme.text }]}>{t('tmPercentageDescription')}</Text>
-      <View style={styles.choiceRow}>
-        {renderChoice('85%', tmPercentage === 0.85, () => setTmPercentage(0.85), '85%')}
-        {renderChoice('90%', tmPercentage === 0.9, () => setTmPercentage(0.9), '90%')}
+      <AppTextInput
+        variant="numeric"
+        style={styles.fullInput}
+        placeholder={t('tmPercentagePlaceholder')}
+        value={tmPercentageText}
+        onFocus={markWizardEdited}
+        onRawChange={handleTmPercentageChange}
+        keyboardType="decimal-pad"
+      />
+
+      <View style={styles.programToggleRow}>
+        <Text style={styles.programToggleText}>{t('includeDeload')}</Text>
+        <Switch
+          value={includeDeload}
+          onValueChange={handleDeloadChange}
+          trackColor={{ false: '#767577', true: '#FFFFFF' }}
+          thumbColor={includeDeload ? '#ffffff' : '#f4f3f4'}
+        />
+      </View>
+
+      <Text
+        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+        style={[styles.label, { color: theme.text }]}
+      >
+        {t('upperTmIncrement')}
+      </Text>
+      <AppTextInput
+        variant="numeric"
+        style={styles.fullInput}
+        placeholder={t('upperTmIncrement')}
+        value={upperTmIncrementText}
+        onFocus={markWizardEdited}
+        onRawChange={(value) => {
+          markWizardEdited();
+          setUpperTmIncrementText(value);
+          setError(null);
+        }}
+        keyboardType="decimal-pad"
+      />
+
+      <Text
+        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+        style={[styles.label, { color: theme.text }]}
+      >
+        {t('lowerTmIncrement')}
+      </Text>
+      <AppTextInput
+        variant="numeric"
+        style={styles.fullInput}
+        placeholder={t('lowerTmIncrement')}
+        value={lowerTmIncrementText}
+        onFocus={markWizardEdited}
+        onRawChange={(value) => {
+          markWizardEdited();
+          setLowerTmIncrementText(value);
+          setError(null);
+        }}
+        keyboardType="decimal-pad"
+      />
+
+      <View style={styles.programToggleRow}>
+        <Text style={styles.programToggleText}>{t('warmupGeneration')}</Text>
+        <Switch
+          value={warmupEnabled}
+          onValueChange={handleWarmupChange}
+          trackColor={{ false: '#767577', true: '#FFFFFF' }}
+          thumbColor={warmupEnabled ? '#ffffff' : '#f4f3f4'}
+        />
       </View>
 
       <Text style={[styles.helperText, { color: theme.text }]}>
@@ -628,6 +782,7 @@ export default function FiveThreeOneSetup() {
           style={styles.fullInput}
           placeholder={t('liftNamePlaceholder')}
           value={lift.name}
+          onFocus={markWizardEdited}
           onChangeText={(value) => updateLift(lift.id, { name: value })}
           autoCapitalize="words"
         />
@@ -680,6 +835,7 @@ export default function FiveThreeOneSetup() {
             style={styles.fullInput}
             placeholder={t('trainingMaxPlaceholder', { unit })}
             value={lift.trainingMaxText}
+            onFocus={markWizardEdited}
             onRawChange={(value) => updateLift(lift.id, { trainingMaxText: value })}
             keyboardType="decimal-pad"
           />
@@ -691,6 +847,7 @@ export default function FiveThreeOneSetup() {
                 style={[styles.halfInput, styles.inputSpacing]}
                 placeholder={t('recentWeight')}
                 value={lift.recentWeightText}
+                onFocus={markWizardEdited}
                 onRawChange={(value) => updateLift(lift.id, { recentWeightText: value })}
                 keyboardType="decimal-pad"
               />
@@ -699,6 +856,7 @@ export default function FiveThreeOneSetup() {
                 style={styles.halfInput}
                 placeholder={t('recentReps')}
                 value={lift.recentRepsText}
+                onFocus={markWizardEdited}
                 onRawChange={(value) => updateLift(lift.id, { recentRepsText: value })}
                 keyboardType="number-pad"
               />
@@ -722,6 +880,7 @@ export default function FiveThreeOneSetup() {
           style={styles.slotInput}
           placeholder={t('daySlotPlaceholder')}
           value={lift.daySlot === null ? '' : String(lift.daySlot)}
+          onFocus={markWizardEdited}
           onRawChange={(value) => updateLift(lift.id, { daySlot: parseNumericInput(value) })}
           keyboardType="number-pad"
         />
@@ -840,7 +999,16 @@ export default function FiveThreeOneSetup() {
               : t('roundNearest')}
         </Text>
         <Text style={[styles.reviewLine, { color: theme.text }]}>
-          {t('tmPercentage')}: {tmPercentage * 100}%
+          {t('tmPercentage')}: {tmPercentageText}%
+        </Text>
+        <Text style={[styles.reviewLine, { color: theme.text }]}>
+          {t('includeDeload')}: {includeDeload ? t('deloadIncluded') : t('deloadNotIncluded')}
+        </Text>
+        <Text style={[styles.reviewLine, { color: theme.text }]}>
+          {t('upperTmIncrement')}: {upperTmIncrementText} / {t('lowerTmIncrement')}: {lowerTmIncrementText}
+        </Text>
+        <Text style={[styles.reviewLine, { color: theme.text }]}>
+          {t('warmupGeneration')}: {warmupEnabled ? t('warmupsIncluded') : t('warmupsNotIncluded')}
         </Text>
       </View>
 
@@ -1029,6 +1197,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     marginBottom: 4,
+  },
+  programToggleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    minHeight: 48,
+    paddingHorizontal: 15,
+    marginTop: 12,
+    marginBottom: 4,
+    backgroundColor: '#121212',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#000000',
+  },
+  programToggleText: {
+    flex: 1,
+    marginRight: 12,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   choice: {
     minHeight: 44,

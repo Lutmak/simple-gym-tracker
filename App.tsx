@@ -37,6 +37,7 @@
   import TemplateDetails from './screens/TemplateDetails';
   import Programs from './screens/Programs';
   import FiveThreeOneSetup from './screens/FiveThreeOneSetup';
+  import FiveThreeOneCycleGeneration from './screens/FiveThreeOneCycleGeneration';
   import * as Notifications from 'expo-notifications';
   import { useRecurringWorkouts } from './utils/recurringWorkoutUtils';
   import { addRecurringTable, createUpdateTriggers } from './utils/addRecurringTable';
@@ -136,6 +137,7 @@
     TemplateDetails: { workout_id: number };
     Programs: undefined;
     FiveThreeOneSetup: undefined;
+    FiveThreeOneGeneration: { programId: number };
   };
 
   export type WorkoutLogStackParamList = {
@@ -217,6 +219,11 @@
            name="FiveThreeOneSetup"
            component={FiveThreeOneSetup}
            options={{ title: '5/3/1 Setup' }}
+         />
+         <WorkoutStackScreen.Screen
+           name="FiveThreeOneGeneration"
+           component={FiveThreeOneCycleGeneration}
+           options={{ title: 'Generate 5/3/1 Cycle' }}
          />
       </WorkoutStackScreen.Navigator>
     );

@@ -1,8 +1,9 @@
-import React from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import React, { useCallback, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Ionicons from 'react-native-vector-icons/Ionicons';
+import { useSQLiteContext } from 'expo-sqlite';
 
 import { WorkoutStackParamList } from '../App';
 import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
@@ -11,10 +12,56 @@ import { useTranslation } from 'react-i18next';
 
 type ProgramsNavigationProp = StackNavigationProp<WorkoutStackParamList, 'Programs'>;
 
+interface SavedProgram {
+  program_id: number;
+  program_name: string;
+  unit: 'kg' | 'lb';
+  include_deload: number;
+}
+
 export default function Programs() {
   const navigation = useNavigation<ProgramsNavigationProp>();
+  const db = useSQLiteContext();
   const { theme } = useTheme();
   const { t } = useTranslation();
+  const [programs, setPrograms] = useState<SavedProgram[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+
+      const loadPrograms = async () => {
+        setIsLoading(true);
+        try {
+          const savedPrograms = await db.getAllAsync<SavedProgram>(
+            `SELECT program_id, program_name, unit, include_deload
+             FROM FiveThreeOne_Programs
+             ORDER BY program_id;`,
+          );
+          if (isMounted) {
+            setPrograms(savedPrograms);
+            setError(null);
+          }
+        } catch (loadError) {
+          console.error('Error loading saved 5/3/1 programs:', loadError);
+          if (isMounted) {
+            setError(t('failedToLoadPrograms'));
+          }
+        } finally {
+          if (isMounted) {
+            setIsLoading(false);
+          }
+        }
+      };
+
+      loadPrograms();
+      return () => {
+        isMounted = false;
+      };
+    }, [db, t]),
+  );
 
   return (
     <ScrollView
@@ -56,6 +103,52 @@ export default function Programs() {
         </View>
         <Ionicons name="chevron-forward" size={22} color={theme.text} />
       </TouchableOpacity>
+
+      <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('savedFiveThreeOnePrograms')}</Text>
+      {isLoading ? (
+        <ActivityIndicator size="large" color={theme.buttonBackground} />
+      ) : error ? (
+        <Text style={[styles.emptyText, { color: theme.text }]} accessibilityRole="alert">
+          {error}
+        </Text>
+      ) : programs.length === 0 ? (
+        <Text style={[styles.emptyText, { color: theme.text }]}>
+          {t('noSavedFiveThreeOnePrograms')}
+        </Text>
+      ) : (
+        programs.map((program) => (
+          <View
+            key={program.program_id}
+            style={[styles.savedProgramCard, { backgroundColor: theme.card, borderColor: theme.border }]}
+          >
+            <View style={styles.savedProgramInfo}>
+              <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                style={[styles.savedProgramName, { color: theme.text }]}
+              >
+                {program.program_name}
+              </Text>
+              <Text style={[styles.savedProgramDetails, { color: theme.text }]}>
+                {program.unit} / {program.include_deload === 1 ? t('deloadIncluded') : t('deloadNotIncluded')}
+              </Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.generateButton, { backgroundColor: theme.buttonBackground }]}
+              onPress={() => navigation.navigate('FiveThreeOneGeneration', { programId: program.program_id })}
+              accessibilityRole="button"
+              accessibilityLabel={`${t('generateCycle')}: ${program.program_name}`}
+            >
+              <Ionicons name="flash" size={19} color={theme.buttonText} />
+              <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                style={[styles.generateButtonText, { color: theme.buttonText }]}
+              >
+                {t('generateCycle')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ))
+      )}
     </ScrollView>
   );
 }
@@ -117,5 +210,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     opacity: 0.7,
     lineHeight: 20,
+  },
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    marginTop: 18,
+    marginBottom: 12,
+  },
+  emptyText: {
+    fontSize: 15,
+    lineHeight: 22,
+    opacity: 0.7,
+    marginBottom: 16,
+  },
+  savedProgramCard: {
+    minHeight: 116,
+    padding: 16,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  savedProgramInfo: {
+    marginBottom: 12,
+  },
+  savedProgramName: {
+    fontSize: 19,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  savedProgramDetails: {
+    fontSize: 14,
+    opacity: 0.7,
+  },
+  generateButton: {
+    minHeight: 44,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+  },
+  generateButtonText: {
+    fontSize: 15,
+    fontWeight: '800',
+    marginLeft: 7,
   },
 });

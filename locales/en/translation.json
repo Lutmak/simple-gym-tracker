@@ -556,7 +556,23 @@
      "programCreated": "Program created",
      "programCreatedMessage": "Your 5/3/1 program has been saved.",
      "programNameAlreadyExists": "A program with this name already exists.",
-     "failedToCreateProgram": "The program could not be saved. Please try again."
+     "failedToCreateProgram": "The program could not be saved. Please try again.",
+     "savedFiveThreeOnePrograms": "Saved 5/3/1 Programs",
+     "noSavedFiveThreeOnePrograms": "Create a 5/3/1 program to generate its first cycle.",
+     "failedToLoadPrograms": "Saved programs could not be loaded.",
+     "generateCycle": "Generate Cycle",
+     "deloadIncluded": "Deload included",
+     "deloadNotIncluded": "No deload",
+     "failedToLoadProgramForGeneration": "The program could not be loaded for generation.",
+     "cycleGenerationTitle": "Build the next cycle",
+     "cycleGenerationDescription": "This creates ordinary workouts for each week and lift. Repeating the action is safe: an active cycle is reused until it is complete.",
+     "configuredLifts": "configured lifts",
+     "warmupsIncluded": "Warm-up ramps included",
+     "warmupsNotIncluded": "Warm-up ramps disabled",
+     "cycleGeneratedMessage": "Cycle {{cycle}} generated: {{weeks}} weeks across {{workouts}} workouts.",
+     "cycleAlreadyGeneratedMessage": "Cycle {{cycle}} already exists. Complete it before generating another.",
+     "failedToGenerateCycle": "The cycle could not be generated. Check the program settings and try again.",
+     "viewGeneratedWorkouts": "View Generated Workouts"
 
     }
   

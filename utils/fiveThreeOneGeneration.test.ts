@@ -200,6 +200,20 @@ describe('fiveThreeOneGeneration', () => {
       [4, null, null, 1, 6, 3],
     ]);
   });
+
+  it('refuses a next cycle while any completed-cycle suggestion is unresolved', async () => {
+    const database = new GenerationDatabaseFake();
+    await generateFiveThreeOneCycle(database, source);
+    database.markCycleComplete([
+      { suggested_training_max: 105, suggestion_status: 'accepted' },
+      { suggested_training_max: null, suggestion_status: 'pending' },
+    ]);
+
+    await expect(generateFiveThreeOneCycle(database, source)).rejects.toThrow(
+      'Resolve every lift suggestion before generating the next cycle.',
+    );
+    expect(database.cycleInsertCount).toBe(1);
+  });
 });
 
 class GenerationDatabaseFake implements FiveThreeOneDatabase {
@@ -208,7 +222,29 @@ class GenerationDatabaseFake implements FiveThreeOneDatabase {
   nextId = 1;
   sqlStatements: string[] = [];
   linkParams: SQLiteBindParams[] = [];
-  private cycle: { cycle_id: number; cycle_number: number; status: 'active'; include_deload: number } | null = null;
+  private cycle: {
+    cycle_id: number;
+    cycle_number: number;
+    status: 'active' | 'complete';
+    include_deload: number;
+  } | null = null;
+  private suggestions: Array<{
+    suggested_training_max: number | null;
+    suggestion_status: 'pending' | 'accepted' | 'edited' | 'declined' | null;
+  }> = [];
+
+  markCycleComplete(
+    suggestions: Array<{
+      suggested_training_max: number | null;
+      suggestion_status: 'pending' | 'accepted' | 'edited' | 'declined' | null;
+    }>,
+  ): void {
+    if (!this.cycle) {
+      throw new Error('A cycle must be generated before it can be completed.');
+    }
+    this.cycle = { ...this.cycle, status: 'complete' };
+    this.suggestions = suggestions;
+  }
 
   async withTransactionAsync(task: () => Promise<void>): Promise<void> {
     await task();
@@ -231,6 +267,9 @@ class GenerationDatabaseFake implements FiveThreeOneDatabase {
     if (sql.includes('INSERT INTO Workouts')) {
       this.workoutInsertCount += 1;
     }
+    if (sql.includes('UPDATE FiveThreeOne_Lifts')) {
+      return { lastInsertRowId: 0, changes: 1 };
+    }
     return { lastInsertRowId: this.nextId++, changes: 1 };
   }
 
@@ -242,6 +281,9 @@ class GenerationDatabaseFake implements FiveThreeOneDatabase {
   }
 
   async getAllAsync<T>(sql: string): Promise<T[]> {
+    if (sql.includes('FROM FiveThreeOne_Lifts')) {
+      return this.suggestions as T[];
+    }
     throw new Error(`Unexpected all-rows query: ${sql}`);
   }
 }

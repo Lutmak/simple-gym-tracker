@@ -9,6 +9,10 @@ import {
   type FiveThreeOneCycleProgressDecision,
   type FiveThreeOneGenerationSource,
 } from './fiveThreeOneGeneration';
+import {
+  canGenerateFiveThreeOneNextCycle,
+  type FiveThreeOneSuggestionStatus,
+} from './fiveThreeOneProgression';
 
 export interface FiveThreeOneDatabase {
   withTransactionAsync(task: () => Promise<void>): Promise<void>;
@@ -73,6 +77,11 @@ interface CycleRow {
   status: 'planned' | 'active' | 'complete';
   current_week: number;
   include_deload: number;
+}
+
+interface LiftSuggestionRow {
+  suggested_training_max: number | null;
+  suggestion_status: FiveThreeOneSuggestionStatus | null;
 }
 
 interface SessionLinkRow {
@@ -231,6 +240,26 @@ export async function generateFiveThreeOneCycle(
       return;
     }
 
+    if (existingCycle?.status === 'complete') {
+      const suggestions = await db.getAllAsync<LiftSuggestionRow>(
+        `SELECT suggested_training_max, suggestion_status
+         FROM FiveThreeOne_Lifts
+         WHERE program_id = ?;`,
+        [source.program.programId],
+      );
+      const canGenerateNextCycle =
+        suggestions.length === source.lifts.length &&
+        canGenerateFiveThreeOneNextCycle(
+          suggestions.map((suggestion) => ({
+            suggestedTM: suggestion.suggested_training_max,
+            status: suggestion.suggestion_status,
+          })),
+        );
+      if (!canGenerateNextCycle) {
+        throw new Error('Resolve every lift suggestion before generating the next cycle.');
+      }
+    }
+
     const cycleNumber = (existingCycle?.cycle_number ?? 0) + 1;
     const includeDeload = source.program.includeDeload;
     const plan = generateFiveThreeOneCyclePlan({
@@ -245,6 +274,13 @@ export async function generateFiveThreeOneCycle(
       [source.program.programId, cycleNumber, 'active', 1, includeDeload ? 1 : 0, timestamp],
     );
     assertPositiveId(cycleInsert.lastInsertRowId, 'Generated cycle ID');
+
+    await db.runAsync(
+      `UPDATE FiveThreeOne_Lifts
+       SET suggested_training_max = NULL, suggestion_status = NULL
+       WHERE program_id = ?;`,
+      [source.program.programId],
+    );
 
     for (const week of plan.weeks) {
       const workoutInsert = await db.runAsync(

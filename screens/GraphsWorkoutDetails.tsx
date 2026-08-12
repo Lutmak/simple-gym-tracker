@@ -3824,7 +3824,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 20,
-    height: 220,
+    minHeight: 220,
   },
   noDataText: {
     marginTop: 10,

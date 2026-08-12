@@ -33,6 +33,7 @@ import { useTranslation } from 'react-i18next';
 import { useNotifications } from '../utils/useNotifications';
 import { useRecurringWorkouts } from '../utils/recurringWorkoutUtils';
 import { addMuscleGroupToWeightLog } from '../utils/exerciseDetailUtils';
+import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 
 type MyCalendarNavigationProp = StackNavigationProp<
   WorkoutLogStackParamList,
@@ -548,7 +549,7 @@ export default function MyCalendar() {
     weekDays.forEach((day, index) => {
       gridItems.push(
         <View key={`weekday-${index}`} style={styles.gridCell}>
-          <Text style={[styles.weekDayText, { color: theme.text }]}>{day}</Text>
+          <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.weekDayText, { color: theme.text }]}>{day}</Text>
         </View>,
       );
     });
@@ -623,7 +624,7 @@ export default function MyCalendar() {
           }}
         >
           <View style={dayCellStyles}>
-            <Text style={textStyle}>{day}</Text>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={textStyle}>{day}</Text>
             {isToday && (
               <View
                 style={[
@@ -691,7 +692,7 @@ export default function MyCalendar() {
               color={theme.buttonText}
               style={styles.icon}
             />
-            <Text style={[styles.actionButtonText, { color: theme.buttonText }]}>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.actionButtonText, { color: theme.buttonText }]}>
               {t('quickWorkout')}
             </Text>
           </TouchableOpacity>
@@ -708,7 +709,7 @@ export default function MyCalendar() {
             color={theme.buttonText}
             style={styles.icon}
           />
-          <Text style={[styles.actionButtonText, { color: theme.buttonText }]}>
+          <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.actionButtonText, { color: theme.buttonText }]}>
             {t('recurringWorkouts')}
           </Text>
         </TouchableOpacity>
@@ -725,7 +726,7 @@ export default function MyCalendar() {
           <TouchableOpacity onPress={handlePrevMonth}>
             <Ionicons name='chevron-back' size={scale(24)} color={theme.text} />
           </TouchableOpacity>
-          <Text style={[styles.calendarMonthText, { color: theme.text }]}>
+          <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.calendarMonthText, { color: theme.text }]}>
             {`${getMonthName(currentDate)} ${currentDate.getFullYear()}`}
           </Text>
           <TouchableOpacity onPress={handleNextMonth}>
@@ -746,7 +747,7 @@ export default function MyCalendar() {
           {/* Today Item */}
           <View style={styles.legendItem}>
             <View style={styles.todayLegendIcon}>
-              <Text style={[styles.legendIconText, { color: theme.text }]}>
+              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.legendIconText, { color: theme.text }]}>
                 1
               </Text>
               <View
@@ -756,7 +757,7 @@ export default function MyCalendar() {
                 ]}
               />
             </View>
-            <Text style={[styles.legendText, { color: theme.text }]}>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.legendText, { color: theme.text }]}>
               {t('Today')}
             </Text>
           </View>
@@ -769,11 +770,11 @@ export default function MyCalendar() {
                 { borderColor: theme.text },
               ]}
             >
-              <Text style={[styles.legendIconText, { color: theme.text }]}>
+              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.legendIconText, { color: theme.text }]}>
                 3
               </Text>
             </View>
-            <Text style={[styles.legendText, { color: theme.text }]}>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.legendText, { color: theme.text }]}>
               {t('Untracked')}
             </Text>
           </View>
@@ -790,23 +791,24 @@ export default function MyCalendar() {
               ]}
             >
               <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                 style={[styles.legendIconText, { color: theme.buttonText }]}
               >
                 2
               </Text>
             </View>
-            <Text style={[styles.legendText, { color: theme.text }]}>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.legendText, { color: theme.text }]}>
               {t('Logged')}
             </Text>
           </View>
           {/* Upcoming Item */}
           <View style={styles.legendItem}>
             <View style={[styles.legendIcon, styles.upcomingDay]}>
-              <Text style={[styles.legendIconText, { color: theme.text }]}>
+              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.legendIconText, { color: theme.text }]}>
                 4
               </Text>
             </View>
-            <Text style={[styles.legendText, { color: theme.text }]}>
+            <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.legendText, { color: theme.text }]}>
               {t('Upcoming')}
             </Text>
           </View>

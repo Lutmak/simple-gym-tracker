@@ -154,7 +154,7 @@ const styles = ScaledSheet.create({
     marginBottom: '12@vs', // Reduced vertical margin
     justifyContent: 'center',
     alignItems: 'center',
-    height: '140@vs', // Adjusted height to be smaller
+    minHeight: '140@vs', // Adjusted height to be smaller
     width: '90%', // Add a width constraint
     alignSelf: 'center',
   },

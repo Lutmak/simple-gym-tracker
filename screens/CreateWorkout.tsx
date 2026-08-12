@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   StyleSheet,
   FlatList,
@@ -17,6 +16,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext'; // Import theme context
 import { useTranslation } from 'react-i18next';
+import AppTextInput from '../components/AppTextInput';
 
 
 type WorkoutListNavigationProp = StackNavigationProp<WorkoutStackParamList, 'WorkoutsList'>;
@@ -229,7 +229,7 @@ export default function CreateWorkout() {
               </View>
 
         
-              <TextInput
+              <AppTextInput
                 style={[
                   styles.input,
                   {
@@ -255,7 +255,7 @@ export default function CreateWorkout() {
                 { backgroundColor: theme.card, borderWidth: 1, borderColor: theme.border },
               ]}
             >
-              <TextInput
+              <AppTextInput
                 style={[
                   styles.dayInput,
                   { color: theme.text },
@@ -276,7 +276,7 @@ export default function CreateWorkout() {
                     activeOpacity={0.8}
                     style={styles.exerciseRow}
                   >
-                    <TextInput
+                    <AppTextInput
                       style={[
                         styles.exerciseInput,
                         {
@@ -294,7 +294,7 @@ export default function CreateWorkout() {
                         setDays(updatedDays);
                       }}
                     />
-                    <TextInput
+                    <AppTextInput
                       style={[
                         styles.smallInput,
                         {
@@ -315,7 +315,7 @@ export default function CreateWorkout() {
                         setDays(updatedDays);
                       }}
                     />
-                    <TextInput
+                    <AppTextInput
                       style={[
                         styles.smallInput,
                         {
@@ -525,7 +525,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 20,
-    height: 40,
+    minHeight: 40,
     elevation: 1,
     shadowOpacity: 0,
     borderWidth: 1,

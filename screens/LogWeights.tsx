@@ -5,7 +5,6 @@ import {
   StyleSheet,
   TouchableOpacity,
   Alert,
-  TextInput,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp} from '@react-navigation/native';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -16,6 +15,7 @@ import { useTheme } from '../context/ThemeContext';
 import { KeyboardAwareFlatList, KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useTranslation } from 'react-i18next';
 import { WeightLogStackParamList } from '../App';
+import AppTextInput, { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 
 type LogWeightsRouteProp = RouteProp<WeightLogStackParamList, 'LogWeights'>;
 
@@ -272,7 +272,7 @@ export default function LogWeights() {
           <Text style={[styles.exerciseTitle, { color: theme.text }]}>{exercise.exercise_name}</Text>
           {muscleGroupInfo && muscleGroupInfo.value && (
             <View style={[styles.muscleGroupBadge, { backgroundColor: theme.card, borderColor: theme.border, marginLeft: 8 }]}>
-              <Text style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
+              <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.muscleGroupBadgeText, { color: theme.text }]}>
                 {muscleGroupInfo.label}
               </Text>
             </View>
@@ -387,8 +387,8 @@ const SetInputRow = React.memo(({ setNumber, reps, weight, onRepsChange, onWeigh
       onLongPress={onDelete}
       style={[styles.setContainer, { backgroundColor: 'transparent' }]}
     >
-      <Text style={[styles.setText, { color: theme.text }]}>{t('Set')} {setNumber}:</Text>
-      <TextInput
+      <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.setText, { color: theme.text }]}>{t('Set')} {setNumber}:</Text>
+      <AppTextInput
         style={[styles.input, { color: theme.text, backgroundColor: 'transparent' }]}
         placeholder={t('repsPlaceholder') + " (> 0)"}
         placeholderTextColor={theme.logborder}
@@ -397,7 +397,7 @@ const SetInputRow = React.memo(({ setNumber, reps, weight, onRepsChange, onWeigh
         onChangeText={onRepsChange}
       />
 
-      <TextInput
+      <AppTextInput
         style={[styles.input, { color: theme.text, backgroundColor: 'transparent' }]}
         placeholder={weightFormat + " (> 0)"}
         placeholderTextColor={theme.logborder}

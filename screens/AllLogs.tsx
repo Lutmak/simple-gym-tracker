@@ -10,7 +10,6 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
   StatusBar,
-  TextInput,
   ScrollView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
@@ -22,6 +21,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
 import { AutoSizeText, ResizeTextMode } from 'react-native-auto-size-text';
 import deepCopy from '../utils/deepCopy';
+import AppTextInput, { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 
 interface EditExerciseMetadata {
     exerciseName: string;
@@ -651,9 +651,9 @@ export default function AllLogs() {
                   <FlatList data={editExerciseData} keyExtractor={(item, index) => item.weight_log_id !== -1 ? item.weight_log_id.toString() : (index * 100).toString()} renderItem={({item, index}) => {
                     return (
                       <View>
-                        <Text style={[{fontSize: 18, fontWeight: 600, color: theme.text}]}>{t('set')} {index+1}</Text>
-                        <Text style={[styles.inputLabel, { color: theme.text, marginTop: 15 }]}>{weightFormat}</Text>
-                        <TextInput
+                        <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[{fontSize: 18, fontWeight: 600, color: theme.text}]}>{t('set')} {index+1}</Text>
+                        <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text, marginTop: 15 }]}>{weightFormat}</Text>
+                        <AppTextInput
                           style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                           placeholder={t('Weight') + ' (> 0)'}
                           placeholderTextColor={theme.text}
@@ -661,8 +661,8 @@ export default function AllLogs() {
                           value={item['weight_logged'].toString()}
                           onChangeText={(val) => updateExerciseWeightLog(item, val, 'weight_logged', index)}
                         />
-                        <Text style={[styles.inputLabel, {color: theme.text, marginTop: 15}]}>{t('repsPlaceholder')}</Text>
-                        <TextInput
+                        <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, {color: theme.text, marginTop: 15}]}>{t('repsPlaceholder')}</Text>
+                        <AppTextInput
                           style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
                           placeholder={t('repsPlaceholder') + ' (> 0)'}
                           placeholderTextColor={theme.text}
@@ -854,9 +854,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modalContent: {
-    height: '80%',
+    maxHeight: '80%',
     borderRadius: 15,
     width: '80%',
   },
 });
-

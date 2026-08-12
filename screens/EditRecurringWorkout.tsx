@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, TextInput, Platform, Modal, Alert, ActivityIndicator, Keyboard, TouchableWithoutFeedback, KeyboardAvoidingView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Switch, Platform, Modal, Alert, ActivityIndicator, Keyboard, TouchableWithoutFeedback, KeyboardAvoidingView } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -10,6 +10,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useRecurringWorkouts } from '../utils/recurringWorkoutUtils';
 import { useSettings } from '../context/SettingsContext';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import AppTextInput, { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 
 // Add this to your WorkoutLogStackParamList in App.tsx
 // EditRecurringWorkout: { recurring_workout_id: number };
@@ -401,6 +402,7 @@ export default function EditRecurringWorkout() {
             onPress={() => setIntervalType('everyday')}
           >
             <Text
+              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
               style={[
                 styles.intervalText,
                 { color: theme.text },
@@ -425,6 +427,7 @@ export default function EditRecurringWorkout() {
           >
             <View style={styles.customIntervalRow}>
               <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                 style={[
                   styles.intervalText,
                   { color: intervalType === 'custom' ? theme.buttonText : theme.text },
@@ -432,7 +435,7 @@ export default function EditRecurringWorkout() {
               >
                 {t('everyXDays')}
               </Text>
-              <TextInput
+              <AppTextInput
                 style={[
                   styles.dayInput,
                   { 
@@ -447,6 +450,7 @@ export default function EditRecurringWorkout() {
                 maxLength={3}
               />
               <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                 style={[
                   styles.intervalText,
                   { color: intervalType === 'custom' ? theme.buttonText : theme.text },
@@ -473,6 +477,7 @@ export default function EditRecurringWorkout() {
             }}
           >
             <Text
+              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
               style={[
                 styles.intervalText,
                 { color: theme.text },
@@ -557,7 +562,10 @@ export default function EditRecurringWorkout() {
           </Text>
           
           <View style={styles.switchRow}>
-            <Text style={[styles.switchLabel, { color: theme.text }]}>
+            <Text
+              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+              style={[styles.switchLabel, { color: theme.text }]}
+            >
               {t('enableNotifications')}
             </Text>
             <Switch
@@ -573,7 +581,10 @@ export default function EditRecurringWorkout() {
               style={styles.timeSelector}
               onPress={() => setShowTimePicker(true)}
             >
-              <Text style={[styles.timeSelectorText, { color: theme.text }]}>
+              <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                style={[styles.timeSelectorText, { color: theme.text }]}
+              >
                 {t('notificationTime')}: {formatTime(notificationTime)}
               </Text>
               <Ionicons name="time-outline" size={22} color={theme.text} />
@@ -736,7 +747,7 @@ const styles = StyleSheet.create({
   },
   dayInput: {
     width: 40,
-    height: 30,
+    minHeight: 30,
     borderWidth: 0,
     borderRadius: 10,
     marginHorizontal: 8,

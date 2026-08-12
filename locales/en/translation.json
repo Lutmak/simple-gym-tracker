@@ -77,6 +77,12 @@
     "settingsTheme": "Theme",
     "settingsSwitchDark": "Switch to Dark",
     "settingsSwitchLight": "Switch to Light",
+     "fiveThreeOneDefaults": "5/3/1 Defaults",
+     "fiveThreeOneDefaultsDescription": "These values are copied into new programs using the unit chosen in setup. Existing programs keep their saved settings.",
+     "includeDeload": "Include deload week",
+     "upperTmIncrement": "Upper-body TM increment",
+     "lowerTmIncrement": "Lower-body TM increment",
+     "warmupGeneration": "Generate warm-up ramps",
 
 
 
@@ -510,7 +516,10 @@
      "roundingDirectionInvalid": "Choose a valid rounding direction.",
      "tmPercentage": "Training Max Percentage",
      "tmPercentageDescription": "Used when estimating a training max from a recent set.",
+     "tmPercentagePlaceholder": "85-90",
      "tmPercentageInvalid": "Choose a training max percentage from 85% to 90%.",
+     "upperTmIncrementRequired": "Enter a positive upper-body TM increment.",
+     "lowerTmIncrementRequired": "Enter a positive lower-body TM increment.",
      "programSetupNoProgression": "This saves the program settings and lifts only. No future cycle is generated or progressed automatically.",
      "trainingMaxes": "Training Maxes",
      "trainingMaxesDescription": "Enter each training max directly, or estimate it from a recent weight and reps set.",

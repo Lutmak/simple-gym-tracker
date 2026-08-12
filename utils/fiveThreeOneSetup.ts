@@ -1,4 +1,8 @@
-import type { LiftCategory } from './fiveThreeOne';
+import type {
+  LiftCategory,
+  RoundingDirection,
+  WeightUnit,
+} from './fiveThreeOne';
 
 export interface DefaultSetupLift {
   id: string;
@@ -13,6 +17,46 @@ export const DEFAULT_SETUP_LIFTS: readonly DefaultSetupLift[] = [
   { id: 'deadlift', name: 'Deadlift', category: 'lower', daySlot: 3 },
   { id: 'overhead-press', name: 'Overhead Press', category: 'upper', daySlot: 4 },
 ];
+
+export interface FiveThreeOneProgramSettings {
+  name: string;
+  unit: WeightUnit;
+  roundingIncrement: number;
+  roundingDirection: RoundingDirection;
+  tmPercentage: number;
+  includeDeload: boolean;
+  upperTmIncrement: number;
+  lowerTmIncrement: number;
+  warmupEnabled: boolean;
+}
+
+export type FiveThreeOneProgramInsertParams = [
+  string,
+  WeightUnit,
+  number,
+  RoundingDirection,
+  number,
+  number,
+  number,
+  number,
+  number,
+];
+
+export function getFiveThreeOneProgramInsertParams(
+  program: FiveThreeOneProgramSettings,
+): FiveThreeOneProgramInsertParams {
+  return [
+    program.name,
+    program.unit,
+    program.roundingIncrement,
+    program.roundingDirection,
+    program.tmPercentage,
+    program.includeDeload ? 1 : 0,
+    program.upperTmIncrement,
+    program.lowerTmIncrement,
+    program.warmupEnabled ? 1 : 0,
+  ];
+}
 
 export function normalizeDaySlots<T extends { daySlot: number | null }>(
   lifts: readonly T[],
@@ -57,7 +101,11 @@ export interface SetupValidationInput {
   unit: string;
   roundingIncrement: number | null;
   roundingDirection: string;
-  tmPercentage: number;
+  tmPercentage: number | null;
+  includeDeload: boolean;
+  upperTmIncrement: number | null;
+  lowerTmIncrement: number | null;
+  warmupEnabled: boolean;
   lifts: readonly SetupLiftValidationInput[];
 }
 
@@ -67,6 +115,8 @@ export type SetupValidationIssue =
   | 'rounding-increment-positive'
   | 'rounding-direction-invalid'
   | 'tm-percentage-invalid'
+  | 'upper-tm-increment-positive'
+  | 'lower-tm-increment-positive'
   | 'lift-required'
   | 'lift-name-required'
   | 'duplicate-lift-name'
@@ -100,11 +150,28 @@ export function validateSetup(
   }
 
   if (
+    input.tmPercentage === null ||
     !Number.isFinite(input.tmPercentage) ||
     input.tmPercentage < 0.85 ||
     input.tmPercentage > 0.9
   ) {
     return 'tm-percentage-invalid';
+  }
+
+  if (
+    input.upperTmIncrement === null ||
+    !Number.isFinite(input.upperTmIncrement) ||
+    input.upperTmIncrement <= 0
+  ) {
+    return 'upper-tm-increment-positive';
+  }
+
+  if (
+    input.lowerTmIncrement === null ||
+    !Number.isFinite(input.lowerTmIncrement) ||
+    input.lowerTmIncrement <= 0
+  ) {
+    return 'lower-tm-increment-positive';
   }
 
   if (input.lifts.length === 0) {

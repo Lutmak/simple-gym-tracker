@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -13,10 +13,15 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useSettings } from '../context/SettingsContext';
 import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
+import AppTextInput from '../components/AppTextInput';
+import type { FiveThreeOneDefaults } from '../utils/settingsStorage';
 import { useNotifications } from '../utils/useNotifications';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
+
+const formatSettingNumber = (value: number): string =>
+  Number(value.toFixed(2)).toString();
 
 export default function Settings() {
   const {
@@ -32,6 +37,8 @@ export default function Settings() {
     setLanguage,
     notificationPermissionGranted,
     setNotificationPermissionGranted,
+    fiveThreeOneDefaults,
+    setFiveThreeOneDefaults,
   } = useSettings();
   const { theme, toggleTheme } = useTheme();
   const { t } = useTranslation(); // for translations
@@ -42,6 +49,38 @@ export default function Settings() {
 
   // Manages whether the language dropdown is visible
   const [languageDropdownVisible, setLanguageDropdownVisible] = useState(false);
+  const [roundingIncrementText, setRoundingIncrementText] = useState(() =>
+    formatSettingNumber(fiveThreeOneDefaults.roundingIncrement),
+  );
+  const [tmPercentageText, setTmPercentageText] = useState(() =>
+    formatSettingNumber(fiveThreeOneDefaults.tmPercentage * 100),
+  );
+  const [upperTmIncrementText, setUpperTmIncrementText] = useState(() =>
+    formatSettingNumber(fiveThreeOneDefaults.upperTmIncrement),
+  );
+  const [lowerTmIncrementText, setLowerTmIncrementText] = useState(() =>
+    formatSettingNumber(fiveThreeOneDefaults.lowerTmIncrement),
+  );
+
+  useEffect(() => {
+    setRoundingIncrementText(
+      formatSettingNumber(fiveThreeOneDefaults.roundingIncrement),
+    );
+    setTmPercentageText(
+      formatSettingNumber(fiveThreeOneDefaults.tmPercentage * 100),
+    );
+    setUpperTmIncrementText(
+      formatSettingNumber(fiveThreeOneDefaults.upperTmIncrement),
+    );
+    setLowerTmIncrementText(
+      formatSettingNumber(fiveThreeOneDefaults.lowerTmIncrement),
+    );
+  }, [
+    fiveThreeOneDefaults.roundingIncrement,
+    fiveThreeOneDefaults.tmPercentage,
+    fiveThreeOneDefaults.upperTmIncrement,
+    fiveThreeOneDefaults.lowerTmIncrement,
+  ]);
 
   // Languages array with i18n-compatible codes
   const languages = [
@@ -74,6 +113,12 @@ export default function Settings() {
 
   // We'll display the label corresponding to the current context language
   const currentLanguage = language;
+  const currentRoundingDirection =
+    fiveThreeOneDefaults.roundingDirection === 'up'
+      ? t('roundUp')
+      : fiveThreeOneDefaults.roundingDirection === 'down'
+        ? t('roundDown')
+        : t('roundNearest');
 
   /**
    * Handle user selecting a language. We just call setLanguage;
@@ -99,6 +144,34 @@ export default function Settings() {
   // New handler for first day of the week
   const handleFirstWeekdayChange = (day: 'Sunday' | 'Monday') => {
     setFirstWeekday(day);
+  };
+
+  const updateFiveThreeOneDefaults = (
+    update: Partial<FiveThreeOneDefaults>,
+  ) => {
+    setFiveThreeOneDefaults({ ...fiveThreeOneDefaults, ...update });
+  };
+
+  const commitPositiveDefault = (
+    value: number | null,
+    field: 'roundingIncrement' | 'upperTmIncrement' | 'lowerTmIncrement',
+    reset: () => void,
+  ) => {
+    if (value === null || value <= 0) {
+      reset();
+      return;
+    }
+    updateFiveThreeOneDefaults({ [field]: value });
+  };
+
+  const commitTmPercentage = (value: number | null) => {
+    if (value === null || value < 85 || value > 90) {
+      setTmPercentageText(
+        formatSettingNumber(fiveThreeOneDefaults.tmPercentage * 100),
+      );
+      return;
+    }
+    updateFiveThreeOneDefaults({ tmPercentage: value / 100 });
   };
 
   // Handle notification main toggle change
@@ -490,6 +563,140 @@ export default function Settings() {
           </View>
         </View>
 
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            {t('fiveThreeOneDefaults')}
+          </Text>
+          <Text style={[styles.helperText, { color: theme.text }]}>
+            {t('fiveThreeOneDefaultsDescription')}
+          </Text>
+
+          <Text style={[styles.settingLabel, { color: theme.text }]}>
+            {t('roundingIncrement')}
+          </Text>
+          <AppTextInput
+            variant='numeric'
+            style={styles.defaultInput}
+            value={roundingIncrementText}
+            onRawChange={setRoundingIncrementText}
+            onCommit={(value) =>
+              commitPositiveDefault(
+                value,
+                'roundingIncrement',
+                () =>
+                  setRoundingIncrementText(
+                    formatSettingNumber(fiveThreeOneDefaults.roundingIncrement),
+                  ),
+              )
+            }
+            keyboardType='decimal-pad'
+            placeholder={t('roundingIncrementPlaceholder')}
+          />
+
+          <Text style={[styles.settingLabel, { color: theme.text }]}>
+            {t('roundingDirection')}
+          </Text>
+          <View style={styles.buttonGroup}>
+            {renderButton(t('roundUp'), currentRoundingDirection, () =>
+              updateFiveThreeOneDefaults({ roundingDirection: 'up' }),
+            )}
+            {renderButton(t('roundDown'), currentRoundingDirection, () =>
+              updateFiveThreeOneDefaults({ roundingDirection: 'down' }),
+            )}
+            {renderButton(t('roundNearest'), currentRoundingDirection, () =>
+              updateFiveThreeOneDefaults({ roundingDirection: 'nearest' }),
+            )}
+          </View>
+
+          <Text style={[styles.settingLabel, { color: theme.text }]}>
+            {t('tmPercentage')}
+          </Text>
+          <Text style={[styles.helperText, { color: theme.text }]}>
+            {t('tmPercentageDescription')}
+          </Text>
+          <AppTextInput
+            variant='numeric'
+            style={styles.defaultInput}
+            value={tmPercentageText}
+            onRawChange={setTmPercentageText}
+            onCommit={commitTmPercentage}
+            keyboardType='decimal-pad'
+            placeholder={t('tmPercentagePlaceholder')}
+          />
+
+          <View style={styles.toggleRow}>
+            <Text style={[styles.toggleText, { color: '#FFFFFF' }]}>
+              {t('includeDeload')}
+            </Text>
+            <Switch
+              value={fiveThreeOneDefaults.includeDeload}
+              onValueChange={(value) =>
+                updateFiveThreeOneDefaults({ includeDeload: value })
+              }
+              trackColor={{ false: '#767577', true: '#FFFFFF' }}
+              thumbColor={fiveThreeOneDefaults.includeDeload ? '#ffffff' : '#f4f3f4'}
+            />
+          </View>
+
+          <Text style={[styles.settingLabel, { color: theme.text }]}>
+            {t('upperTmIncrement')}
+          </Text>
+          <AppTextInput
+            variant='numeric'
+            style={styles.defaultInput}
+            value={upperTmIncrementText}
+            onRawChange={setUpperTmIncrementText}
+            onCommit={(value) =>
+              commitPositiveDefault(
+                value,
+                'upperTmIncrement',
+                () =>
+                  setUpperTmIncrementText(
+                    formatSettingNumber(fiveThreeOneDefaults.upperTmIncrement),
+                  ),
+              )
+            }
+            keyboardType='decimal-pad'
+            placeholder={t('upperTmIncrement')}
+          />
+
+          <Text style={[styles.settingLabel, { color: theme.text }]}>
+            {t('lowerTmIncrement')}
+          </Text>
+          <AppTextInput
+            variant='numeric'
+            style={styles.defaultInput}
+            value={lowerTmIncrementText}
+            onRawChange={setLowerTmIncrementText}
+            onCommit={(value) =>
+              commitPositiveDefault(
+                value,
+                'lowerTmIncrement',
+                () =>
+                  setLowerTmIncrementText(
+                    formatSettingNumber(fiveThreeOneDefaults.lowerTmIncrement),
+                  ),
+              )
+            }
+            keyboardType='decimal-pad'
+            placeholder={t('lowerTmIncrement')}
+          />
+
+          <View style={styles.toggleRow}>
+            <Text style={[styles.toggleText, { color: '#FFFFFF' }]}>
+              {t('warmupGeneration')}
+            </Text>
+            <Switch
+              value={fiveThreeOneDefaults.warmupEnabled}
+              onValueChange={(value) =>
+                updateFiveThreeOneDefaults({ warmupEnabled: value })
+              }
+              trackColor={{ false: '#767577', true: '#FFFFFF' }}
+              thumbColor={fiveThreeOneDefaults.warmupEnabled ? '#ffffff' : '#f4f3f4'}
+            />
+          </View>
+        </View>
+
 {/* --- NEW SECTION FOR FIRST DAY OF THE WEEK --- */}
 <View style={styles.section}>
   <Text style={[styles.sectionTitle, { color: theme.text }]}>
@@ -745,6 +952,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 15,
     color: '#000000',
+  },
+  settingLabel: {
+    fontSize: 17,
+    fontWeight: '700',
+    marginBottom: 8,
+    marginTop: 12,
+  },
+  helperText: {
+    fontSize: 14,
+    lineHeight: 20,
+    opacity: 0.7,
+    marginBottom: 10,
+  },
+  defaultInput: {
+    marginBottom: 4,
   },
   buttonGroup: {
     flexDirection: 'row',

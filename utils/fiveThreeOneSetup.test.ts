@@ -1,7 +1,9 @@
 import {
   DEFAULT_SETUP_LIFTS,
+  getFiveThreeOneProgramInsertParams,
   normalizeDaySlots,
   validateSetup,
+  type FiveThreeOneProgramSettings,
 } from './fiveThreeOneSetup';
 
 describe('fiveThreeOneSetup', () => {
@@ -48,6 +50,10 @@ describe('fiveThreeOneSetup', () => {
         roundingIncrement: 2.5,
         roundingDirection: 'nearest',
         tmPercentage: 0.9,
+        includeDeload: true,
+        upperTmIncrement: 2.5,
+        lowerTmIncrement: 5,
+        warmupEnabled: true,
         lifts: [
           {
             name: '',
@@ -67,6 +73,10 @@ describe('fiveThreeOneSetup', () => {
         roundingIncrement: 2.5,
         roundingDirection: 'nearest',
         tmPercentage: 0.9,
+        includeDeload: true,
+        upperTmIncrement: 2.5,
+        lowerTmIncrement: 5,
+        warmupEnabled: true,
         lifts: [
           {
             name: 'Squat',
@@ -86,6 +96,10 @@ describe('fiveThreeOneSetup', () => {
         roundingIncrement: 2.5,
         roundingDirection: 'nearest',
         tmPercentage: 0.9,
+        includeDeload: true,
+        upperTmIncrement: 2.5,
+        lowerTmIncrement: 5,
+        warmupEnabled: true,
         lifts: [
           {
             name: 'Squat',
@@ -113,6 +127,10 @@ describe('fiveThreeOneSetup', () => {
       roundingIncrement: 2.5,
       roundingDirection: 'nearest',
       tmPercentage: 0.9,
+      includeDeload: true,
+      upperTmIncrement: 2.5,
+      lowerTmIncrement: 5,
+      warmupEnabled: true,
       lifts: [
         {
           name: 'Squat',
@@ -132,5 +150,52 @@ describe('fiveThreeOneSetup', () => {
     expect(validateSetup({ ...validSetup, roundingDirection: 'sideways' })).toBe(
       'rounding-direction-invalid',
     );
+    expect(validateSetup({ ...validSetup, tmPercentage: 0.91 })).toBe(
+      'tm-percentage-invalid',
+    );
+    expect(validateSetup({ ...validSetup, upperTmIncrement: 0 })).toBe(
+      'upper-tm-increment-positive',
+    );
+    expect(validateSetup({ ...validSetup, lowerTmIncrement: null })).toBe(
+      'lower-tm-increment-positive',
+    );
+  });
+
+  it('persists the wizard choices rather than later-changing defaults', () => {
+    const program: FiveThreeOneProgramSettings = {
+      name: 'Strength',
+      unit: 'lb',
+      roundingIncrement: 5,
+      roundingDirection: 'down',
+      tmPercentage: 0.85,
+      includeDeload: false,
+      upperTmIncrement: 5,
+      lowerTmIncrement: 10,
+      warmupEnabled: false,
+    };
+
+    const persistedValues = getFiveThreeOneProgramInsertParams(program);
+    const laterDefaults = {
+      ...program,
+      roundingIncrement: 2.5,
+      includeDeload: true,
+      warmupEnabled: true,
+    };
+
+    expect(persistedValues).toEqual([
+      'Strength',
+      'lb',
+      5,
+      'down',
+      0.85,
+      0,
+      5,
+      10,
+      0,
+    ]);
+    expect(laterDefaults).not.toEqual(program);
+    expect(persistedValues[2]).toBe(program.roundingIncrement);
+    expect(persistedValues[5]).toBe(0);
+    expect(persistedValues[8]).toBe(0);
   });
 });

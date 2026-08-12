@@ -19,6 +19,8 @@ import { useNotifications } from '../utils/useNotifications';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
+import { replaceDatabaseFile } from '../utils/databaseImport';
+import { DatabaseImportValidationError } from '../utils/databaseSchema';
 
 const formatSettingNumber = (value: number): string =>
   Number(value.toFixed(2)).toString();
@@ -335,7 +337,6 @@ export default function Settings() {
             const dbName = 'SimpleDB.db';
             const dbDirectory = `${FileSystem.documentDirectory}SQLite/`;
             const dbFilePath = `${dbDirectory}${dbName}`;
-            const backupDbFilePath = `${dbFilePath}.backup`;
 
             let documentPickerResult;
             try {
@@ -372,23 +373,9 @@ export default function Settings() {
             }
 
             const sourceUri = documentPickerResult.assets[0].uri;
-            let originalDbExists = false;
-            let backupSuccessfullyCreated = false;
 
             try {
-              const originalDbInfo = await FileSystem.getInfoAsync(dbFilePath);
-              originalDbExists = originalDbInfo.exists;
-
-              if (originalDbExists) {
-                await FileSystem.copyAsync({
-                  from: dbFilePath,
-                  to: backupDbFilePath,
-                });
-                backupSuccessfullyCreated = true;
-              }
-
-              await FileSystem.deleteAsync(dbFilePath, { idempotent: true });
-              await FileSystem.copyAsync({ from: sourceUri, to: dbFilePath });
+              await replaceDatabaseFile(sourceUri, dbFilePath);
 
               Alert.alert(
                 t('importSuccessTitle') || 'Import Successful',
@@ -396,53 +383,16 @@ export default function Settings() {
                   'Database imported successfully. Please restart the app for changes to take effect.',
                 [{ text: 'OK' }],
               );
-
-              if (backupSuccessfullyCreated) {
-                await FileSystem.deleteAsync(backupDbFilePath, {
-                  idempotent: true,
-                });
-              }
             } catch (error) {
               console.error('Error during database replacement:', error);
-              let finalAlertMessage =
-                t('importErrorMessageDefault') ||
-                'Database import failed. An unexpected error occurred.';
+              const finalAlertMessage =
+                error instanceof DatabaseImportValidationError
+                  ? error.message
+                  : error instanceof Error
+                    ? error.message
+                    : t('importErrorMessageDefault') ||
+                      'Database import failed. Your existing data was not replaced.';
 
-              if (backupSuccessfullyCreated) {
-                try {
-                  await FileSystem.deleteAsync(dbFilePath, {
-                    idempotent: true,
-                  });
-                  await FileSystem.copyAsync({
-                    from: backupDbFilePath,
-                    to: dbFilePath,
-                  });
-                  finalAlertMessage =
-                    t('importFailedRestoreSuccess') ||
-                    'Import failed, but your original data has been successfully restored.';
-                  await FileSystem.deleteAsync(backupDbFilePath, {
-                    idempotent: true,
-                  });
-                } catch (restoreError) {
-                  console.error(
-                    'CRITICAL: Error restoring database from backup:',
-                    restoreError,
-                  );
-                  const baseMsg =
-                    t('importFailedRestoreErrorBase') ||
-                    'Import failed. CRITICAL: Could not restore original data. Backup may be available at: ';
-                  finalAlertMessage = baseMsg + backupDbFilePath;
-                  // IMPORTANT: Do NOT delete backupDbFilePath in this critical failure case.
-                }
-              } else if (originalDbExists) {
-                finalAlertMessage =
-                  t('importFailedOriginalIntact') ||
-                  'Import failed (error during backup step). Your original data should be intact.';
-              } else {
-                finalAlertMessage =
-                  t('importFailedNewFileError') ||
-                  'Import failed while copying the new database. No prior data existed.';
-              }
               Alert.alert(
                 t('importFailedTitle') || 'Import Failed',
                 finalAlertMessage,

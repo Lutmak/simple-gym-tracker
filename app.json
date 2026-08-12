@@ -16,11 +16,13 @@
     },
     "android": {
       "versionCode": 66,
-      "blockedPermissions": ["android.permission.INTERNET",
-       "android.permission.RECEIVE_BOOT_COMPLETED",
-       "android.permission.RECORD_AUDIO",
-       "android.permission.ACCESS_NETWORK_STATE",
-       "android.permission.ACCESS_WIFI_STATE" ],
+      "blockedPermissions": [
+        "android.permission.INTERNET",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.ACCESS_WIFI_STATE"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/simpleicon.png",
         "backgroundColor": "#ffffff"
@@ -32,7 +34,14 @@
     },
     "plugins": [
       "expo-sqlite",
-      "expo-build-properties",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "buildArchs": ["arm64-v8a"]
+          }
+        }
+      ],
       [
         "expo-notifications",
         {
@@ -40,7 +49,8 @@
           "color": "#000000",
           "enableBackgroundRemoteNotifications": false
         }
-      ]
+      ],
+      "expo-audio"
     ]
   }
 }

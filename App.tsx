@@ -1,7 +1,7 @@
   // App.tsx
   import React, {useState, useEffect, useRef } from 'react';
   import { View, ActivityIndicator, StatusBar, StyleSheet, Pressable, Text, Platform } from 'react-native'; // Import Platform
-  import * as FileSystem from 'expo-file-system';
+  import * as FileSystem from 'expo-file-system/legacy';
   import { SQLiteProvider} from 'expo-sqlite';
   import { Asset } from 'expo-asset';
   import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -459,7 +459,8 @@ const AppContent = () => {
         // Don't request permissions on app start - this will be handled when needed
         await Notifications.setNotificationHandler({
           handleNotification: async () => ({
-            shouldShowAlert: true,
+            shouldShowBanner: true,
+            shouldShowList: true,
             shouldPlaySound: true,
             shouldSetBadge: false,
           }),

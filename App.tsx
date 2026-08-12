@@ -39,6 +39,7 @@
   import FiveThreeOneSetup from './screens/FiveThreeOneSetup';
   import FiveThreeOneCycleGeneration from './screens/FiveThreeOneCycleGeneration';
   import FiveThreeOneCycleReview from './screens/FiveThreeOneCycleReview';
+  import FiveThreeOneProgress from './screens/FiveThreeOneProgress';
   import * as Notifications from 'expo-notifications';
   import { useRecurringWorkouts } from './utils/recurringWorkoutUtils';
   import { addRecurringTable, createUpdateTriggers } from './utils/addRecurringTable';
@@ -140,6 +141,7 @@
     FiveThreeOneSetup: undefined;
     FiveThreeOneGeneration: { programId: number };
     FiveThreeOneReview: { programId: number; cycleId: number };
+    FiveThreeOneProgress: { programId: number };
   };
 
   export type WorkoutLogStackParamList = {
@@ -231,6 +233,11 @@
             name="FiveThreeOneReview"
             component={FiveThreeOneCycleReview}
             options={{ title: 'Review 5/3/1 Cycle' }}
+          />
+          <WorkoutStackScreen.Screen
+            name="FiveThreeOneProgress"
+            component={FiveThreeOneProgress}
+            options={{ title: '5/3/1 Progress' }}
           />
       </WorkoutStackScreen.Navigator>
     );

@@ -592,6 +592,7 @@
       "cycleReviewTargetUnavailable": "target unavailable",
       "cycleReviewEstimated1RM": "Estimated 1RM",
       "cycleReviewSuggestion": "Training max decision",
+      "cycleReviewDecision": "Decision",
       "currentTrainingMax": "Current training max",
       "suggestedTrainingMax": "Suggested training max",
       "noAmrapResult": "No usable AMRAP result was logged for this lift. Its training max will be held.",

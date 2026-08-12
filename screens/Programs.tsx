@@ -140,7 +140,10 @@ export default function Programs() {
               >
                 {program.program_name}
               </Text>
-              <Text style={[styles.savedProgramDetails, { color: theme.text }]}>
+              <Text
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                style={[styles.savedProgramDetails, { color: theme.text }]}
+              >
                 {program.unit} / {program.include_deload === 1 ? t('deloadIncluded') : t('deloadNotIncluded')}
               </Text>
             </View>

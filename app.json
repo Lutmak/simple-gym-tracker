@@ -57,7 +57,8 @@
         }
       ],
       "expo-audio",
-      "expo-font"
+      "expo-font",
+      "./plugins/withDebugInternetPermission"
     ]
   }
 }

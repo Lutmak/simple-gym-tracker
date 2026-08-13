@@ -206,13 +206,9 @@ describe('progression — linear rule', () => {
     expect(proposals[0]).toMatchObject({ exerciseIdentifier: 1, proposedTarget: 102.5 });
   });
 
-  it('throws through the dispatch when the routine is a wave routine', () => {
-    expect(() => proposeNextTargets(routine({ progressionRule: 'wave' }), [])).toThrow(
-      'wave adapter lands in F2b',
-    );
-    expect(() => waveProposeNextTargets(routine({ progressionRule: 'wave' }), [])).toThrow(
-      'wave adapter lands in F2b',
-    );
+  it('proposes nothing for a wave routine with no history', () => {
+    expect(proposeNextTargets(routine({ progressionRule: 'wave' }), [])).toEqual([]);
+    expect(waveProposeNextTargets(routine({ progressionRule: 'wave' }), [])).toEqual([]);
   });
 
   it('proposes nothing for a none-rule routine', () => {

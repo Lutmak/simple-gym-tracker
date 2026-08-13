@@ -22,6 +22,12 @@ import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { replaceDatabaseFile } from '../utils/databaseImport';
 import { DatabaseImportValidationError } from '../utils/databaseSchema';
+import { useSQLiteContext } from 'expo-sqlite';
+import {
+  loadDemoData,
+  removeDemoData,
+  type DemoDatabase,
+} from '../utils/demoData';
 
 const formatSettingNumber = (value: number): string =>
   Number(value.toFixed(2)).toString();
@@ -45,6 +51,49 @@ export default function Settings() {
   } = useSettings();
   const { theme, toggleTheme } = useTheme();
   const { t } = useTranslation(); // for translations
+  const db = useSQLiteContext();
+
+  const demoDb: DemoDatabase = {
+    run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
+    get: async (sql, params) =>
+      (await db.getFirstAsync<Record<string, unknown>>(
+        sql,
+        (params ?? []) as never[],
+      )) ?? undefined,
+  };
+
+  const handleLoadDemoData = async () => {
+    try {
+      await loadDemoData(demoDb);
+      Alert.alert(t('demoDataTitle'), t('demoDataLoaded'));
+    } catch (error) {
+      console.error('Error loading demo data:', error);
+      Alert.alert(t('demoDataTitle'), t('demoDataLoadFailed'));
+    }
+  };
+
+  const handleRemoveDemoData = () => {
+    Alert.alert(
+      t('removeDemoData'),
+      t('removeDemoDataConfirm'),
+      [
+        { text: t('cancel') || 'Cancel', style: 'cancel' },
+        {
+          text: t('confirm') || 'Confirm',
+          onPress: async () => {
+            try {
+              await removeDemoData(demoDb);
+              Alert.alert(t('demoDataTitle'), t('demoDataRemoved'));
+            } catch (error) {
+              console.error('Error removing demo data:', error);
+              Alert.alert(t('demoDataTitle'), t('demoDataRemoveFailed'));
+            }
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  };
 
   // Use the notifications hook to access all notification-related functionality
   const { requestNotificationPermission, cancelAllNotifications } =
@@ -795,6 +844,66 @@ export default function Settings() {
                   numberOfLines={2}
                 >
                   {t('importData') || 'Import Data'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* --- DEMO DATA SECTION (temporary home; rebuilt in G4) --- */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            {t('demoDataTitle')}
+          </Text>
+          <View style={styles.dataManagementButtonGroup}>
+            <TouchableOpacity
+              style={[
+                styles.dataManagementButton,
+                { backgroundColor: '#121212' },
+              ]}
+              onPress={handleLoadDemoData}
+            >
+              <View style={styles.dataManagementButtonContent}>
+                <Ionicons
+                  name='flask-outline'
+                  size={18}
+                  color={'#FFFFFF'}
+                  style={styles.dataButtonIcon}
+                />
+                <Text
+                  style={[
+                    styles.dataManagementButtonText,
+                    { color: '#FFFFFF' },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {t('loadDemoData')}
+                </Text>
+              </View>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.dataManagementButton,
+                { backgroundColor: '#FFFFFF' },
+              ]}
+              onPress={handleRemoveDemoData}
+            >
+              <View style={styles.dataManagementButtonContent}>
+                <Ionicons
+                  name='trash-outline'
+                  size={18}
+                  color={'#000000'}
+                  style={styles.dataButtonIcon}
+                />
+                <Text
+                  style={[
+                    styles.dataManagementButtonText,
+                    { color: '#000000' },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {t('removeDemoData')}
                 </Text>
               </View>
             </TouchableOpacity>

@@ -1,70 +1,91 @@
--- db.sql — Iteration 3 schema reference.
+import {
+  CATALOG_EXERCISE_SEED_SQL,
+  CATALOG_MUSCLE_SEED_SQL,
+} from '../data/catalog-seed.ts';
 
--- This file is DOCUMENTATION ONLY and is never executed. The executable DDL lives in
--- utils/schema.ts (SCHEMA_STATEMENTS / DROP_STATEMENTS) and runs from initialiseSchema
--- in App.tsx before any screen renders. Keep both in lockstep.
+/**
+ * The full Iteration 3 model (§3.1 of SPECS.md) as ordered SQL statements.
+ * Pure module: no expo-sqlite import, runnable against any SQLite executor
+ * (node:sqlite in tests, expo-sqlite in the app). `initialiseSchema` in
+ * App.tsx is a thin shell over `runSchema`.
+ */
 
--- ============================================================================
--- Removed in this iteration (clean install; no migration from the old model)
--- ============================================================================
---   Recurring_Workouts and its four triggers (update_recurring_workout_name,
---     update_recurring_day_name, delete_recurring_workout, delete_recurring_day)
---   Template_Workouts, Template_Days, Template_Exercises
---   FiveThreeOne_Programs, FiveThreeOne_AssistanceTemplates,
---     FiveThreeOne_AssistanceExercises, FiveThreeOne_Lifts, FiveThreeOne_Cycles,
---     FiveThreeOne_WorkoutLink, FiveThreeOne_LiftAssistance, FiveThreeOne_AmrapResults
--- The screens that queried them survive until D1 deletes them; their queries fail
--- by design in the interim.
+export interface SchemaExecutor {
+  exec(sql: string): Promise<void> | void;
+  getAll<T = Record<string, unknown>>(
+    sql: string,
+    params?: readonly unknown[],
+  ): Promise<T[]> | T[];
+}
 
--- ============================================================================
--- Surviving history tables — shape unchanged (SPECS.md §3.2)
--- ============================================================================
--- History rows copy exercise_name, sets and reps at log time and never reference
--- the plan by ID for display. Workout_Log → Logged_Exercises → Weight_Log keep
--- their columns; Weight_Log gains the per-row unit from §3.7. Legacy databases
--- (the bundled assets/SimpleDB.db) get the column via ensureWeightLogUnitColumn,
--- a guarded ALTER that runs inside runSchema.
+/** Obsolete Iteration 2 tables and triggers, removed in the same pass that creates the new model. */
+export const DROP_STATEMENTS: readonly string[] = [
+  `DROP TRIGGER IF EXISTS update_recurring_workout_name;`,
+  `DROP TRIGGER IF EXISTS update_recurring_day_name;`,
+  `DROP TRIGGER IF EXISTS delete_recurring_workout;`,
+  `DROP TRIGGER IF EXISTS delete_recurring_day;`,
+  `DROP TABLE IF EXISTS Recurring_Workouts;`,
+  `DROP TABLE IF EXISTS Template_Exercises;`,
+  `DROP TABLE IF EXISTS Template_Days;`,
+  `DROP TABLE IF EXISTS Template_Workouts;`,
+  `DROP TABLE IF EXISTS FiveThreeOne_AmrapResults;`,
+  `DROP TABLE IF EXISTS FiveThreeOne_WorkoutLink;`,
+  `DROP TABLE IF EXISTS FiveThreeOne_LiftAssistance;`,
+  `DROP TABLE IF EXISTS FiveThreeOne_Cycles;`,
+  `DROP TABLE IF EXISTS FiveThreeOne_Lifts;`,
+  `DROP TABLE IF EXISTS FiveThreeOne_AssistanceExercises;`,
+  `DROP TABLE IF EXISTS FiveThreeOne_AssistanceTemplates;`,
+  `DROP TABLE IF EXISTS FiveThreeOne_Programs;`,
+  `DROP INDEX IF EXISTS FiveThreeOne_Lifts_program_weekday;`,
+];
 
-CREATE TABLE IF NOT EXISTS Workouts (
+export const SCHEMA_STATEMENTS: readonly string[] = [
+  `PRAGMA foreign_keys = ON;`,
+
+  // The history tables keep their Iteration 2 shape (§3.2 of SPECS.md): rows copy
+  // exercise_name, sets and reps at log time and never reference the plan for display.
+  // Weight_Log gains the per-row unit from §3.7; legacy databases get it from
+  // ensureWeightLogUnitColumn because the bundled database predates the column.
+  `CREATE TABLE IF NOT EXISTS Workouts (
     workout_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     workout_name TEXT NOT NULL UNIQUE
-);
+  );`,
 
-CREATE TABLE IF NOT EXISTS Days (
+  `CREATE TABLE IF NOT EXISTS Days (
     day_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     workout_id INTEGER NOT NULL,
     day_name TEXT NOT NULL,
     FOREIGN KEY (workout_id) REFERENCES Workouts(workout_id) ON DELETE CASCADE,
     UNIQUE (workout_id, day_name)
-);
+  );`,
 
-CREATE TABLE IF NOT EXISTS Exercises (
+  `CREATE TABLE IF NOT EXISTS Exercises (
     exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     day_id INTEGER NOT NULL,
     exercise_name TEXT NOT NULL,
     sets INTEGER NOT NULL,
     reps INTEGER NOT NULL,
     FOREIGN KEY (day_id) REFERENCES Days(day_id) ON DELETE CASCADE
-);
+  );`,
 
-CREATE TABLE IF NOT EXISTS Workout_Log (
+  `CREATE TABLE IF NOT EXISTS Workout_Log (
     workout_log_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     workout_name TEXT NOT NULL,
     day_name TEXT NOT NULL,
     workout_date INTEGER NOT NULL,
     UNIQUE (workout_date, day_name, workout_name)
-);
+  );`,
 
-CREATE TABLE IF NOT EXISTS Logged_Exercises (
+  `CREATE TABLE IF NOT EXISTS Logged_Exercises (
     logged_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     workout_log_id INTEGER NOT NULL,
     exercise_name TEXT NOT NULL,
     sets INTEGER NOT NULL,
     reps INTEGER NOT NULL,
     FOREIGN KEY (workout_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE CASCADE
-);
+  );`,
 
-CREATE TABLE IF NOT EXISTS Weight_Log (
+  `CREATE TABLE IF NOT EXISTS Weight_Log (
     weight_log_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     workout_log_id INTEGER NOT NULL,
     logged_exercise_id INTEGER NOT NULL,
@@ -76,17 +97,11 @@ CREATE TABLE IF NOT EXISTS Weight_Log (
     FOREIGN KEY (workout_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE CASCADE,
     FOREIGN KEY (logged_exercise_id) REFERENCES Logged_Exercises(logged_exercise_id),
     UNIQUE (workout_log_id, logged_exercise_id, set_number)
-);
+  );`,
 
--- ============================================================================
--- Exercise catalog (SPECS.md §3.5)
--- ============================================================================
--- yuhonas/free-exercise-db (Unlicense), normalised at build time by
--- scripts/ingest-catalog.mts into data/catalog-seed.ts. The app never fetches.
--- English only. exercise_key is the source id (stable); name is UNIQUE and the
--- normalizer deduplicates on it (first occurrence wins).
-
-CREATE TABLE IF NOT EXISTS Catalog_Exercises (
+  // Exercise catalog (§3.5). Seed data is generated at build time by
+  // scripts/ingest-catalog.mts into data/catalog-seed.ts; the app never fetches.
+  `CREATE TABLE IF NOT EXISTS Catalog_Exercises (
     exercise_key TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL UNIQUE,
     category TEXT NOT NULL,
@@ -95,28 +110,18 @@ CREATE TABLE IF NOT EXISTS Catalog_Exercises (
     mechanic TEXT,
     equipment TEXT,
     instructions TEXT
-);
+  );`,
 
-CREATE TABLE IF NOT EXISTS Catalog_Exercise_Muscles (
+  `CREATE TABLE IF NOT EXISTS Catalog_Exercise_Muscles (
     exercise_key TEXT NOT NULL,
     muscle_name TEXT NOT NULL,
     is_primary INTEGER NOT NULL CHECK (is_primary IN (0, 1)),
     FOREIGN KEY (exercise_key) REFERENCES Catalog_Exercises(exercise_key) ON DELETE CASCADE,
     PRIMARY KEY (exercise_key, muscle_name)
-);
+  );`,
 
-CREATE INDEX IF NOT EXISTS Catalog_Exercise_Muscles_muscle
-    ON Catalog_Exercise_Muscles (muscle_name);
-
--- ============================================================================
--- The plan (SPECS.md §3.1)
--- ============================================================================
--- A routine is an ordered set of training days plus one progression rule.
--- Exactly one routine is active (partial unique index). routine_key is the
--- stable key for seeded rows (INSERT OR IGNORE); user routines leave it NULL.
--- weekday uses Date.getDay(): 0 = Sunday … 6 = Saturday.
-
-CREATE TABLE IF NOT EXISTS Routines (
+  // Plan. A routine is an ordered set of training days plus a progression rule.
+  `CREATE TABLE IF NOT EXISTS Routines (
     routine_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     routine_key TEXT UNIQUE,
     name TEXT NOT NULL,
@@ -128,12 +133,12 @@ CREATE TABLE IF NOT EXISTS Routines (
     rest_accessory_seconds INTEGER NOT NULL CHECK (rest_accessory_seconds >= 0),
     is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0, 1)),
     created_at INTEGER NOT NULL
-);
+  );`,
 
-CREATE UNIQUE INDEX IF NOT EXISTS Routines_single_active
-    ON Routines (is_active) WHERE is_active = 1;
+  `CREATE UNIQUE INDEX IF NOT EXISTS Routines_single_active
+     ON Routines (is_active) WHERE is_active = 1;`,
 
-CREATE TABLE IF NOT EXISTS Sessions (
+  `CREATE TABLE IF NOT EXISTS Sessions (
     session_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     routine_id INTEGER NOT NULL,
     weekday INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
@@ -141,17 +146,9 @@ CREATE TABLE IF NOT EXISTS Sessions (
     sort_order INTEGER NOT NULL CHECK (sort_order > 0),
     FOREIGN KEY (routine_id) REFERENCES Routines(routine_id) ON DELETE CASCADE,
     UNIQUE (routine_id, weekday)
-);
+  );`,
 
--- Load derivation: load_source decides which columns are meaningful.
---   training_max_pct → training_max_pct (fraction 0..1 of the training max) +
---                      training_max_weight (the exercise's current training max)
---   absolute         → absolute_weight
---   bodyweight       → neither
--- unit_override is the per-exercise unit from §3.7 (NULL = routine unit).
--- is_amrap marks the final set as AMRAP: target_reps is the minimum, the actual
--- reps are recorded in Weight_Log.
-CREATE TABLE IF NOT EXISTS SessionExercises (
+  `CREATE TABLE IF NOT EXISTS SessionExercises (
     session_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     session_id INTEGER NOT NULL,
     catalog_exercise_id TEXT,
@@ -179,16 +176,10 @@ CREATE TABLE IF NOT EXISTS SessionExercises (
       OR (load_source = 'bodyweight'
         AND absolute_weight IS NULL AND training_max_pct IS NULL AND training_max_weight IS NULL)
     )
-);
+  );`,
 
--- ============================================================================
--- Cycles and weeks (SPECS.md §3.3)
--- ============================================================================
--- wave:   3-week wave + optional deload. linear: fixed review period (default 4
--- weeks). none: plain repeating week. A week advances when its sessions are all
--- resolved — completed, moved or discarded — never by the calendar alone.
-
-CREATE TABLE IF NOT EXISTS Cycles (
+  // Cycles and weeks (§3.3): a cycle has weeks, a week's sessions are resolved one by one.
+  `CREATE TABLE IF NOT EXISTS Cycles (
     cycle_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     routine_id INTEGER NOT NULL,
     cycle_number INTEGER NOT NULL CHECK (cycle_number > 0),
@@ -199,19 +190,21 @@ CREATE TABLE IF NOT EXISTS Cycles (
     completed_at INTEGER,
     FOREIGN KEY (routine_id) REFERENCES Routines(routine_id) ON DELETE CASCADE,
     UNIQUE (routine_id, cycle_number)
-);
+  );`,
 
-CREATE TABLE IF NOT EXISTS CycleWeeks (
+  `CREATE TABLE IF NOT EXISTS CycleWeeks (
     cycle_week_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     cycle_id INTEGER NOT NULL,
     week_number INTEGER NOT NULL CHECK (week_number > 0),
     FOREIGN KEY (cycle_id) REFERENCES Cycles(cycle_id) ON DELETE CASCADE,
     UNIQUE (cycle_id, week_number)
-);
+  );`,
 
--- One row per session per week. completed_log_id is a non-destructive link to
--- history: deleting a log nulls it (SET NULL), never the other way round.
-CREATE TABLE IF NOT EXISTS WeekSessions (
+  // One row per session per week. `pending` until the session is resolved; a completed
+  // session links to its log, a moved one records the date it was moved to, a discarded
+  // one records the date it was discarded (§3.6). The link to Workout_Log never cascades:
+  // deleting a log must never destroy plan bookkeeping.
+  `CREATE TABLE IF NOT EXISTS WeekSessions (
     week_session_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     cycle_week_id INTEGER NOT NULL,
     session_id INTEGER NOT NULL,
@@ -222,20 +215,12 @@ CREATE TABLE IF NOT EXISTS WeekSessions (
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (completed_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE SET NULL,
     UNIQUE (cycle_week_id, session_id)
-);
+  );`,
 
-CREATE INDEX IF NOT EXISTS WeekSessions_week
-    ON WeekSessions (cycle_week_id);
-
--- ============================================================================
--- Progression review (SPECS.md §3.4)
--- ============================================================================
--- The app proposes, the user decides. One proposal per exercise per cycle;
--- status records the outcome (pending until the review, then accepted / held /
--- edited / declined). Nothing is applied without a resolved review. For a
--- 'held' proposal proposed_target equals current_target; for 'edited' it is the
--- value the user entered.
-CREATE TABLE IF NOT EXISTS Progression_Proposal (
+  // Progression review state (§3.4): the app proposes, the user decides. One proposal
+  // per exercise per cycle; `status` records the outcome and nothing is ever applied
+  // without a resolved review.
+  `CREATE TABLE IF NOT EXISTS Progression_Proposal (
     proposal_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     routine_id INTEGER NOT NULL,
     cycle_id INTEGER NOT NULL,
@@ -253,16 +238,53 @@ CREATE TABLE IF NOT EXISTS Progression_Proposal (
     FOREIGN KEY (session_exercise_id) REFERENCES SessionExercises(session_exercise_id) ON DELETE CASCADE,
     FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
     UNIQUE (cycle_id, session_exercise_id)
-);
+  );`,
 
-CREATE INDEX IF NOT EXISTS Progression_Proposal_routine
-    ON Progression_Proposal (routine_id);
+  `CREATE INDEX IF NOT EXISTS Catalog_Exercise_Muscles_muscle
+     ON Catalog_Exercise_Muscles (muscle_name);`,
 
--- ============================================================================
--- Seeded data
--- ============================================================================
--- Catalog: INSERT OR IGNORE on stable exercise keys, run from runSchema on
--- every launch (idempotent). Source: data/catalog-seed.ts, generated by
--- scripts/ingest-catalog.mts; commit SHA in data/catalog-manifest.json.
--- Demo routine: utils/demoData.ts — buildDemoRows (pure) + loadDemoData /
--- removeDemoData, reachable from Settings. Idempotent, reversible, reloadable.
+  `CREATE INDEX IF NOT EXISTS WeekSessions_week
+     ON WeekSessions (cycle_week_id);`,
+
+  `CREATE INDEX IF NOT EXISTS Progression_Proposal_routine
+     ON Progression_Proposal (routine_id);`,
+];
+
+/**
+ * The bundled assets/SimpleDB.db predates the per-row unit column. ALTER cannot add a
+ * NOT NULL column without a default, and the historical rows have no honest unit, so
+ * the legacy default is 'kg' — the bundled database ships empty of weight rows anyway.
+ * Gated so it never runs twice and never touches a fresh database.
+ */
+export async function ensureWeightLogUnitColumn(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(Weight_Log);',
+  );
+  if (!columns.some((column) => column.name === 'unit')) {
+    await executor.exec(
+      `ALTER TABLE Weight_Log
+       ADD COLUMN unit TEXT NOT NULL DEFAULT 'kg' CHECK (unit IN ('kg', 'lb'));`,
+    );
+  }
+}
+
+/** Idempotent catalog seed: stable exercise keys, INSERT OR IGNORE. */
+export async function seedCatalog(executor: SchemaExecutor): Promise<void> {
+  await executor.exec(CATALOG_EXERCISE_SEED_SQL);
+  await executor.exec(CATALOG_MUSCLE_SEED_SQL);
+}
+
+/** Drops the obsolete tables, creates the new model, and seeds the catalog. */
+export async function runSchema(executor: SchemaExecutor): Promise<void> {
+  await executor.exec('PRAGMA foreign_keys = ON;');
+  for (const statement of DROP_STATEMENTS) {
+    await executor.exec(statement);
+  }
+  for (const statement of SCHEMA_STATEMENTS) {
+    await executor.exec(statement);
+  }
+  await ensureWeightLogUnitColumn(executor);
+  await seedCatalog(executor);
+}

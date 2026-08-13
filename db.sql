@@ -259,6 +259,57 @@ CREATE INDEX IF NOT EXISTS Progression_Proposal_routine
     ON Progression_Proposal (routine_id);
 
 -- ============================================================================
+-- Preset routine catalog (SPECS.md F3)
+-- ============================================================================
+-- The 22 curated routines live in data/presetRoutines.ts and are seeded
+-- idempotently by seedPresetRoutines inside runSchema. They are data, never
+-- edited in place: activating one (D2) COPIES it into Routines /
+-- Sessions / SessionExercises. exercise_name is a snapshot of the catalog
+-- name taken at seed time; a key that does not resolve is a seed-time throw
+-- and a test failure, never a runtime surprise.
+
+CREATE TABLE IF NOT EXISTS Preset_Routines (
+    routine_key TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL,
+    philosophy TEXT NOT NULL,
+    level TEXT NOT NULL CHECK (level IN ('beginner', 'intermediate', 'advanced')),
+    recommended_days INTEGER NOT NULL CHECK (recommended_days BETWEEN 1 AND 7),
+    rest_main_seconds INTEGER NOT NULL CHECK (rest_main_seconds >= 0),
+    rest_accessory_seconds INTEGER NOT NULL CHECK (rest_accessory_seconds >= 0),
+    progression_rule TEXT NOT NULL CHECK (progression_rule IN ('wave', 'linear', 'none')),
+    rounding_increment_kg REAL NOT NULL CHECK (rounding_increment_kg > 0)
+);
+
+CREATE TABLE IF NOT EXISTS Preset_Sessions (
+    preset_session_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    routine_key TEXT NOT NULL,
+    weekday INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+    name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL CHECK (sort_order > 0),
+    FOREIGN KEY (routine_key) REFERENCES Preset_Routines(routine_key) ON DELETE CASCADE,
+    UNIQUE (routine_key, weekday),
+    UNIQUE (routine_key, sort_order)
+);
+
+CREATE TABLE IF NOT EXISTS Preset_SessionExercises (
+    preset_session_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    preset_session_id INTEGER NOT NULL,
+    catalog_exercise_id TEXT NOT NULL,
+    exercise_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('main', 'accessory')),
+    target_sets INTEGER NOT NULL CHECK (target_sets > 0),
+    target_reps INTEGER NOT NULL CHECK (target_reps > 0),
+    load_source TEXT NOT NULL CHECK (load_source IN ('training_max_pct', 'absolute', 'bodyweight')),
+    training_max_pct REAL CHECK (training_max_pct IS NULL OR training_max_pct > 0),
+    is_amrap INTEGER NOT NULL DEFAULT 0 CHECK (is_amrap IN (0, 1)),
+    sort_order INTEGER NOT NULL CHECK (sort_order > 0),
+    FOREIGN KEY (preset_session_id) REFERENCES Preset_Sessions(preset_session_id) ON DELETE CASCADE,
+    FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
+    UNIQUE (preset_session_id, sort_order)
+);
+
+-- ============================================================================
 -- Seeded data
 -- ============================================================================
 -- Catalog: INSERT OR IGNORE on stable exercise keys, run from runSchema on

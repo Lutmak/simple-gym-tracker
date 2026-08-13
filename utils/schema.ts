@@ -2,6 +2,7 @@ import {
   CATALOG_EXERCISE_SEED_SQL,
   CATALOG_MUSCLE_SEED_SQL,
 } from '../data/catalog-seed.ts';
+import { PRESET_ROUTINES } from '../data/presetRoutines.ts';
 
 /**
  * The full Iteration 3 model (§3.1 of SPECS.md) as ordered SQL statements.
@@ -12,6 +13,8 @@ import {
 
 export interface SchemaExecutor {
   exec(sql: string): Promise<void> | void;
+  /** Parameterized statement execution (runAsync / prepared statement). */
+  run(sql: string, params: readonly unknown[]): Promise<void> | void;
   getAll<T = Record<string, unknown>>(
     sql: string,
     params?: readonly unknown[],
@@ -248,6 +251,50 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
 
   `CREATE INDEX IF NOT EXISTS Progression_Proposal_routine
      ON Progression_Proposal (routine_id);`,
+
+  // Preset routine catalog (SPECS.md F3). The 22 curated routines are committed data
+  // (data/presetRoutines.ts), seeded idempotently. Activation (D2) COPIES a preset
+  // into Routines/Sessions/SessionExercises; presets are never edited in place.
+  `CREATE TABLE IF NOT EXISTS Preset_Routines (
+    routine_key TEXT PRIMARY KEY NOT NULL,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL,
+    philosophy TEXT NOT NULL,
+    level TEXT NOT NULL CHECK (level IN ('beginner', 'intermediate', 'advanced')),
+    recommended_days INTEGER NOT NULL CHECK (recommended_days BETWEEN 1 AND 7),
+    rest_main_seconds INTEGER NOT NULL CHECK (rest_main_seconds >= 0),
+    rest_accessory_seconds INTEGER NOT NULL CHECK (rest_accessory_seconds >= 0),
+    progression_rule TEXT NOT NULL CHECK (progression_rule IN ('wave', 'linear', 'none')),
+    rounding_increment_kg REAL NOT NULL CHECK (rounding_increment_kg > 0)
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS Preset_Sessions (
+    preset_session_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    routine_key TEXT NOT NULL,
+    weekday INTEGER NOT NULL CHECK (weekday BETWEEN 0 AND 6),
+    name TEXT NOT NULL,
+    sort_order INTEGER NOT NULL CHECK (sort_order > 0),
+    FOREIGN KEY (routine_key) REFERENCES Preset_Routines(routine_key) ON DELETE CASCADE,
+    UNIQUE (routine_key, weekday),
+    UNIQUE (routine_key, sort_order)
+  );`,
+
+  `CREATE TABLE IF NOT EXISTS Preset_SessionExercises (
+    preset_session_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    preset_session_id INTEGER NOT NULL,
+    catalog_exercise_id TEXT NOT NULL,
+    exercise_name TEXT NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('main', 'accessory')),
+    target_sets INTEGER NOT NULL CHECK (target_sets > 0),
+    target_reps INTEGER NOT NULL CHECK (target_reps > 0),
+    load_source TEXT NOT NULL CHECK (load_source IN ('training_max_pct', 'absolute', 'bodyweight')),
+    training_max_pct REAL CHECK (training_max_pct IS NULL OR training_max_pct > 0),
+    is_amrap INTEGER NOT NULL DEFAULT 0 CHECK (is_amrap IN (0, 1)),
+    sort_order INTEGER NOT NULL CHECK (sort_order > 0),
+    FOREIGN KEY (preset_session_id) REFERENCES Preset_Sessions(preset_session_id) ON DELETE CASCADE,
+    FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
+    UNIQUE (preset_session_id, sort_order)
+  );`,
 ];
 
 /**
@@ -276,6 +323,86 @@ export async function seedCatalog(executor: SchemaExecutor): Promise<void> {
   await executor.exec(CATALOG_MUSCLE_SEED_SQL);
 }
 
+/**
+ * Idempotent preset-routine seed (SPECS.md F3). A routine referencing an exercise that is
+ * not in the catalog is a build-time failure, not a runtime surprise: the catalog name
+ * lookup throws here, and utils/presetRoutines.test.ts asserts the same invariant.
+ */
+export async function seedPresetRoutines(executor: SchemaExecutor): Promise<void> {
+  for (const routine of PRESET_ROUTINES) {
+    await executor.run(
+      `INSERT OR IGNORE INTO Preset_Routines
+       (routine_key, name, description, philosophy, level, recommended_days,
+        rest_main_seconds, rest_accessory_seconds, progression_rule, rounding_increment_kg)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+      [
+        routine.key,
+        routine.name,
+        routine.description,
+        routine.philosophy,
+        routine.level,
+        routine.recommendedDays,
+        routine.restMainSeconds,
+        routine.restAccessorySeconds,
+        routine.progressionRule,
+        routine.roundingIncrementKg,
+      ],
+    );
+
+    for (const [sessionIndex, session] of routine.sessions.entries()) {
+      await executor.run(
+        `INSERT OR IGNORE INTO Preset_Sessions
+         (routine_key, weekday, name, sort_order)
+         VALUES (?, ?, ?, ?);`,
+        [routine.key, session.weekday, session.name, sessionIndex + 1],
+      );
+
+      const sessionRow = await executor.getAll<{ preset_session_id: number }>(
+        `SELECT preset_session_id FROM Preset_Sessions
+         WHERE routine_key = ? AND weekday = ?;`,
+        [routine.key, session.weekday],
+      );
+      const presetSessionId = sessionRow[0]?.preset_session_id;
+      if (presetSessionId === undefined) {
+        throw new Error(`Could not seed preset session: ${routine.key} / ${session.name}`);
+      }
+
+      for (const [exerciseIndex, exercise] of session.exercises.entries()) {
+        const catalogRow = await executor.getAll<{ name: string }>(
+          `SELECT name FROM Catalog_Exercises WHERE exercise_key = ?;`,
+          [exercise.catalogKey],
+        );
+        const catalogName = catalogRow[0]?.name;
+        if (catalogName === undefined) {
+          throw new Error(
+            `Preset routine "${routine.name}" references unknown catalog exercise ` +
+              `"${exercise.catalogKey}". Regenerate or fix the key; see data/presetRoutines.ts.`,
+          );
+        }
+
+        await executor.run(
+          `INSERT OR IGNORE INTO Preset_SessionExercises
+           (preset_session_id, catalog_exercise_id, exercise_name, role, target_sets,
+            target_reps, load_source, training_max_pct, is_amrap, sort_order)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          [
+            presetSessionId,
+            exercise.catalogKey,
+            catalogName,
+            exercise.role,
+            exercise.sets,
+            exercise.reps,
+            exercise.loadSource,
+            exercise.loadSource === 'training_max_pct' ? 0.9 : null,
+            exercise.isAmrap ? 1 : 0,
+            exerciseIndex + 1,
+          ],
+        );
+      }
+    }
+  }
+}
+
 /** Drops the obsolete tables, creates the new model, and seeds the catalog. */
 export async function runSchema(executor: SchemaExecutor): Promise<void> {
   await executor.exec('PRAGMA foreign_keys = ON;');
@@ -287,4 +414,5 @@ export async function runSchema(executor: SchemaExecutor): Promise<void> {
   }
   await ensureWeightLogUnitColumn(executor);
   await seedCatalog(executor);
+  await seedPresetRoutines(executor);
 }

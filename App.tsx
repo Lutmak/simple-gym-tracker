@@ -366,6 +366,10 @@
 const initialiseSchema = async (db: SQLiteDatabase) => {
   await runSchema({
     exec: (sql) => db.execAsync(sql),
+    run: (sql, params) =>
+      db.runAsync(sql, (params ?? []) as unknown as SQLiteBindParams).then(
+        () => undefined,
+      ),
     getAll: (sql, params) =>
       db.getAllAsync(sql, (params ?? []) as unknown as SQLiteBindParams),
   });

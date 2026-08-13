@@ -15,6 +15,9 @@ const connect = (): { db: DatabaseSync; executor: SchemaExecutor } => {
   const db = new DatabaseSync(':memory:');
   const executor: SchemaExecutor = {
     exec: (sql) => db.exec(sql),
+    run: (sql, params) => {
+      db.prepare(sql).run(...(params as SQLInputValue[]));
+    },
     getAll: <T>(sql: string, params: SQLInputValue[] = []) =>
       db.prepare(sql).all(...params) as T[],
   };
@@ -314,6 +317,9 @@ describe('runSchema', () => {
     const db = new DatabaseSync(temp);
     const executor: SchemaExecutor = {
       exec: (sql) => db.exec(sql),
+      run: (sql, params) => {
+        db.prepare(sql).run(...(params as SQLInputValue[]));
+      },
       getAll: <T>(sql: string, params: SQLInputValue[] = []) =>
         db.prepare(sql).all(...params) as T[],
     };

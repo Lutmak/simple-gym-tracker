@@ -14,6 +14,7 @@ import { useFocusEffect, useNavigation, useRoute, RouteProp } from '@react-navig
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useSettings } from '../context/SettingsContext';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale';
 import { useTranslation } from 'react-i18next';
 import { useNotifications } from '../utils/useNotifications';
 import { WorkoutLogStackParamList } from '../App';
@@ -493,51 +494,51 @@ export default function LogWorkout() {
 
 const styles = StyleSheet.create({
   container: {
-    paddingHorizontal: 20,
-    paddingBottom: 40,
+    paddingHorizontal: spacing.gutter,
+    paddingBottom: 32,
   },
   backButton: {
-    padding: 8,
-    marginTop: 40,
+    padding: spacing.inline,
+    marginTop: 32,
     alignSelf: 'flex-start',
     // No background color to make it unobtrusive
   },
   input: {
     borderWidth: 1,
     borderColor: 'rgba(0, 0, 0, 0.2)',
-    borderRadius: 10,
-    paddingVertical: 18,
-    paddingHorizontal: 20,
-    marginBottom: 20,
+    borderRadius: radius.control,
+    paddingVertical: spacing.card,
+    paddingHorizontal: spacing.gutter,
+    marginBottom: spacing.card,
     backgroundColor: '#F7F7F7',
     elevation: 2,
   },
   inputText: {
-    fontSize: 18,
+    fontSize: fontSize.button,
     color: '#000000',
     fontWeight: '600',
     textAlign: 'center',
   },
   sectionTitle: {
-    fontSize: 22,
+    fontSize: fontSize.sectionTitle,
     fontWeight: '800',
-    marginVertical: 15,
+    marginVertical: spacing.card,
     color: '#000000',
     textAlign: 'left',
   },
   Title: {
-    fontSize: 22,
+    fontSize: fontSize.sectionTitle,
     fontWeight: '800',
-    marginVertical: 15,
+    marginVertical: spacing.card,
     color: '#000000',
     textAlign: 'center',
   },
   listItem: {
-    padding: 20,
+    padding: spacing.card,
     borderWidth: 1,
     borderColor: 'rgba(0, 0, 0, 0.2)',
-    borderRadius: 12,
-    marginBottom: 12,
+    borderRadius: radius.card,
+    marginBottom: spacing.cardGap,
     backgroundColor: '#FFFFFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -546,7 +547,7 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   listItemText: {
-    fontSize: 18,
+    fontSize: fontSize.button,
     color: '#000000',
     fontWeight: '700',
   },
@@ -558,17 +559,17 @@ const styles = StyleSheet.create({
     color: '#FFFFFF', // White text for selected item
   },
   emptyText: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     color: 'rgba(0, 0, 0, 0.5)',
     textAlign: 'center',
-    marginTop: 10,
+    marginTop: spacing.label,
   },
   saveButton: {
     backgroundColor: '#000000',
-    borderRadius: 12,
-    paddingVertical: 20,
+    borderRadius: radius.card,
+    paddingVertical: spacing.gutter,
     alignItems: 'center',
-    marginTop: 30,
+    marginTop: spacing.section,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
@@ -576,14 +577,14 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   saveButtonText: {
-    fontSize: 20,
+    fontSize: fontSize.button,
     color: '#FFFFFF',
     fontWeight: 'bold',
   },
   buttonGroup: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 15,
+    marginBottom: spacing.card,
   },
 });
   

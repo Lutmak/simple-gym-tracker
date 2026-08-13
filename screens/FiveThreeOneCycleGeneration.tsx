@@ -16,6 +16,7 @@ import { WorkoutStackParamList } from '../App';
 import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 import { useTheme } from '../context/ThemeContext';
 import { useTranslation } from 'react-i18next';
+import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
 import {
   generateFiveThreeOneCycle,
   loadFiveThreeOneGenerationSource,
@@ -138,7 +139,10 @@ export default function FiveThreeOneCycleGeneration() {
               {source.program.includeDeload ? t('deloadIncluded') : t('deloadNotIncluded')}
             </Text>
             <Text style={[styles.detail, { color: theme.text }]}>
-              {source.program.warmupEnabled ? t('warmupsIncluded') : t('warmupsNotIncluded')}
+              {t('warmupDaysCount', {
+                count: source.lifts.filter((lift) => lift.warmupEnabled).length,
+                total: source.lifts.length,
+              })}
             </Text>
           </View>
 
@@ -203,94 +207,94 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: 20,
-    paddingBottom: 50,
+    paddingHorizontal: spacing.gutter,
+    paddingBottom: 40,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 28,
+    marginTop: spacing.gutter,
+    marginBottom: spacing.section,
   },
   backButton: {
-    padding: 8,
-    marginRight: 12,
+    padding: spacing.inline,
+    marginRight: spacing.cardGap,
   },
   title: {
-    fontSize: 32,
+    fontSize: fontSize.screenTitle,
     fontWeight: '800',
     flexShrink: 1,
   },
   card: {
-    borderRadius: 14,
+    borderRadius: radius.card,
     borderWidth: 1,
-    padding: 18,
-    marginBottom: 16,
+    padding: spacing.card,
+    marginBottom: spacing.cardGap,
   },
   programName: {
-    fontSize: 24,
+    fontSize: fontSize.sectionTitle,
     fontWeight: '800',
-    marginBottom: 8,
+    marginBottom: spacing.label,
   },
   detail: {
-    fontSize: 15,
+    fontSize: fontSize.body,
     lineHeight: 22,
     marginTop: 3,
     opacity: 0.75,
   },
   infoCard: {
-    borderRadius: 14,
+    borderRadius: radius.card,
     borderWidth: 1,
-    padding: 18,
-    marginBottom: 20,
+    padding: spacing.card,
+    marginBottom: spacing.section,
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: fontSize.cardTitle,
     fontWeight: '800',
-    marginBottom: 8,
+    marginBottom: spacing.label,
   },
   description: {
-    fontSize: 15,
+    fontSize: fontSize.helper,
     lineHeight: 23,
     opacity: 0.75,
   },
   errorText: {
-    fontSize: 15,
+    fontSize: fontSize.body,
     lineHeight: 22,
     fontWeight: '600',
   },
   messageText: {
-    fontSize: 15,
+    fontSize: fontSize.body,
     lineHeight: 22,
     fontWeight: '700',
-    marginBottom: 16,
+    marginBottom: spacing.card,
   },
   primaryButton: {
-    minHeight: 50,
-    borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 12,
+    minHeight: touchTarget.row,
+    borderRadius: radius.control,
+    paddingHorizontal: spacing.gutter,
+    paddingVertical: spacing.cardGap,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: spacing.cardGap,
   },
   primaryButtonText: {
-    fontSize: 17,
+    fontSize: fontSize.button,
     fontWeight: '800',
-    marginLeft: 8,
+    marginLeft: spacing.inline,
   },
   secondaryButton: {
-    minHeight: 46,
-    borderRadius: 12,
+    minHeight: touchTarget.row,
+    borderRadius: radius.control,
     borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 11,
+    paddingHorizontal: spacing.gutter,
+    paddingVertical: spacing.label,
     alignItems: 'center',
     justifyContent: 'center',
   },
   secondaryButtonText: {
-    fontSize: 16,
+    fontSize: fontSize.button,
     fontWeight: '700',
   },
 });

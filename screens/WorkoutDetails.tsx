@@ -6,6 +6,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
 import { AutoSizeText, ResizeTextMode } from 'react-native-auto-size-text';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
 import { WorkoutStackParamList } from '../App';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useTranslation } from 'react-i18next';
@@ -782,7 +783,7 @@ export default function WorkoutDetails() {
                         </View>
                       </View>
                       <View style={styles.exerciseDetails}>
-                        <Text style={{ color: theme.text, fontSize: 16, textAlign: 'right' }}>
+                        <Text style={{ color: theme.text, fontSize: fontSize.body, textAlign: 'right' }}>
                           {exercise.sets} <Text style={{ color: theme.text }}>{t('Sets')}</Text>
                           {'  '}
                           {exercise.reps} <Text style={{ color: theme.text }}>{t('Reps')}</Text>
@@ -1045,8 +1046,8 @@ export default function WorkoutDetails() {
 const styles = StyleSheet.create({
     container: {
       flex: 1,
-      paddingHorizontal: 20,
-      paddingTop: 60,
+      paddingHorizontal: spacing.gutter,
+      paddingTop: 48,
       backgroundColor: '#FFFFFF',
     },
     adContainer: {
@@ -1057,7 +1058,7 @@ const styles = StyleSheet.create({
       top: 20,
       left: 10,
       zIndex: 10,
-      padding: 8,
+      padding: spacing.inline,
     },
     titleContainer: {
       flexDirection: 'row',
@@ -1069,23 +1070,23 @@ const styles = StyleSheet.create({
       top: 20,
       right: 10,
       zIndex: 10,
-      padding: 8,
+      padding: spacing.inline,
       marginTop:3,
     },
     title: {
-      fontSize: 36,
+      fontSize: fontSize.screenTitle,
       fontWeight: '900',
       textAlign: 'center',
-      marginBottom: 10,
+      marginBottom: spacing.label,
     },
     dayContainer: {
-      padding: 20,
+      padding: spacing.card,
     },
     dayHeader: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      marginBottom: 12,
+      marginBottom: spacing.label,
     },
     dayHeaderRightControls: {
       flexDirection: 'row',
@@ -1100,7 +1101,7 @@ const styles = StyleSheet.create({
       padding: 4,
     },
     dayTitle: {
-      fontSize: 24,
+      fontSize: fontSize.sectionTitle,
       fontWeight: '800',
     },
     exerciseContainer: {
@@ -1108,9 +1109,9 @@ const styles = StyleSheet.create({
       justifyContent: 'space-between',
       alignItems: 'center',
       backgroundColor: '#F7F7F7',
-      paddingVertical: 12,
+      paddingVertical: spacing.label,
       paddingHorizontal: 3,
-      marginBottom: 5,
+      marginBottom: 4,
       borderWidth: 0,
       borderColor: 'rgba(0, 0, 0, 0.1)',
       maxWidth: '100%',  // Prevent overflow
@@ -1124,41 +1125,41 @@ const styles = StyleSheet.create({
       alignItems: 'flex-end',
     },
     muscleGroupBadge: {
-      paddingVertical: 4,
-      paddingHorizontal: 10,
-      borderRadius: 15,
+      paddingVertical: 3,
+      paddingHorizontal: spacing.label,
+      borderRadius: 12,
       borderWidth: 1,
       alignSelf: 'flex-start',
     },
     muscleGroupBadgeText: {
-        fontSize: 12,
+        fontSize: fontSize.caption,
         fontWeight: '600',
     },
     noExercisesText: {
       textAlign: 'center',
-      fontSize: 16,
+      fontSize: fontSize.body,
       fontStyle: 'italic',
       color: 'rgba(0, 0, 0, 0.5)',
-      marginTop: 10,
+      marginTop: spacing.label,
     },
     addDayButton: {
       flexDirection: 'row',
       alignItems: 'center',
-      borderRadius: 20,
-      padding: 12,
+      borderRadius: radius.pill,
+      padding: spacing.label,
       marginTop: 1,
       justifyContent: 'center',
     },
     addDayButtonText: {
-      fontSize: 18,
+      fontSize: fontSize.button,
       fontWeight: '800',
-      marginLeft: 8,
+      marginLeft: spacing.inline,
     },
     emptyText: {
       textAlign: 'center',
-      fontSize: 16,
+      fontSize: fontSize.body,
       color: 'rgba(0, 0, 0, 0.5)',
-      marginTop: 20,
+      marginTop: spacing.section,
     },
     modalContainer: {
       flex: 1,
@@ -1166,29 +1167,29 @@ const styles = StyleSheet.create({
       alignItems: 'center',
     },
     modalContent: {
-      borderRadius: 15,
+      borderRadius: radius.card,
       width: '80%',
     },
     modalTitle: {
-      fontSize: 20,
+      fontSize: fontSize.cardTitle,
       fontWeight: 'bold',
-      marginBottom: 15,
+      marginBottom: spacing.card,
     },
     dayModalContent: {
-      borderRadius: 15,
+      borderRadius: radius.card,
       width: '80%',
-      padding: 20,
+      padding: spacing.card,
     },
     dayModalTitle: {
-      fontSize: 20,
+      fontSize: fontSize.cardTitle,
       fontWeight: 'bold',
-      marginBottom: 15,
+      marginBottom: spacing.card,
     },
     inputLabel: {
       alignSelf: 'stretch',
       textAlign: 'left',
-      fontSize: 16,
-      marginBottom: 5,
+      fontSize: fontSize.label,
+      marginBottom: spacing.label,
       fontWeight: '600',
     },
     input: {
@@ -1196,15 +1197,15 @@ const styles = StyleSheet.create({
       borderWidth: 1,
       borderColor: 'rgba(0, 0, 0, 0.2)',
       borderRadius: 8,
-      padding: 10,
-      marginBottom: 10,
+      padding: spacing.label,
+      marginBottom: spacing.label,
     },
     saveButton: {
       borderRadius: 8,
-      paddingVertical: 10,
-      paddingHorizontal: 20,
-      marginBottom: 10,
-      marginTop: 10,
+      paddingVertical: spacing.label,
+      paddingHorizontal: spacing.gutter,
+      marginBottom: spacing.label,
+      marginTop: spacing.label,
       alignItems: 'center',
     },
     saveButtonText: {
@@ -1214,16 +1215,16 @@ const styles = StyleSheet.create({
       borderWidth: 1,
       borderColor: '#000000',
       borderRadius: 8,
-      paddingVertical: 10,
-      paddingHorizontal: 20,
+      paddingVertical: spacing.label,
+      paddingHorizontal: spacing.gutter,
       alignItems: 'center',
     },
     cancelButtonText: {
       fontWeight: 'bold',
     },
     animatedDayContainer: {
-      marginBottom: 20,
-      borderRadius: 20,
+      marginBottom: spacing.card,
+      borderRadius: radius.pill,
       overflow: 'hidden',
       shadowColor: '#000',
       shadowOffset: { width: 0, height: 2 },
@@ -1233,25 +1234,25 @@ const styles = StyleSheet.create({
     },
     tipText: {
       textAlign: 'center',
-      fontSize: 14,
+      fontSize: fontSize.helper,
       fontStyle: 'italic',
-      marginTop: 20,
-      marginBottom: 20,
-      paddingHorizontal: 10,
+      marginTop: spacing.card,
+      marginBottom: spacing.card,
+      paddingHorizontal: spacing.label,
     },
     exportButton: {
       alignItems: 'center',
-      marginBottom: 15,
+      marginBottom: spacing.card,
     },
     muscleGroupButton: {
-      paddingVertical: 8,
-      paddingHorizontal: 12,
-      borderRadius: 20,
-      minHeight: 40,
+      paddingVertical: spacing.label,
+      paddingHorizontal: spacing.card,
+      borderRadius: radius.pill,
+      minHeight: touchTarget.icon,
       elevation: 1,
       shadowOpacity: 0,
       borderWidth: 1,
-      marginRight: 10,
+      marginRight: spacing.label,
       justifyContent: 'center',
       alignItems: 'center',
     },

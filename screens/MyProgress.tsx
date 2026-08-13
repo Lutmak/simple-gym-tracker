@@ -7,6 +7,7 @@ import { WeightLogStackParamList } from '../App'; // Adjust the path to where We
 import { useSQLiteContext } from 'expo-sqlite';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale';
 import { useTranslation } from 'react-i18next';
 
 
@@ -148,15 +149,15 @@ export default function MyProgress() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    padding: spacing.gutter,
     backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginTop: 40,
-    marginBottom: 20,
+    marginTop: 32,
+    marginBottom: spacing.card,
   },
   backButton: {
     width: 40,
@@ -165,23 +166,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    fontSize: 32,
+    fontSize: fontSize.screenTitle,
     fontWeight: '900',
     textAlign: 'center',
     flex: 1,
   },
   tipText: {
-    marginTop: 20, // Space above the text
-    paddingBottom:20,
+    marginTop: spacing.card, // Space above the text
+    paddingBottom:spacing.card,
     textAlign: 'center', // Center align
-    fontSize: 14, // Smaller font size
+    fontSize: fontSize.helper, // Smaller font size
     fontStyle: 'italic', // Italic for emphasis
   },
   workoutCard: {
     backgroundColor: '#F7F7F7',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+    paddingVertical: spacing.card,
+    paddingHorizontal: spacing.card,
+    borderRadius: radius.control,
     borderWidth: 1,
     borderColor: 'rgba(0, 0, 0, 0.1)',
     elevation: 2,
@@ -192,25 +193,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: spacing.cardGap,
   },
   workoutCardContent: {
     flexDirection: 'row', // Align items in a row
-    paddingHorizontal: 16,
+    paddingHorizontal: spacing.gutter,
     justifyContent: 'space-between', // Space between the text and the icon
     alignItems: 'center', // Align vertically in the center
     width: '100%', // Ensure content takes up the full width
   },
   workoutText: {
-    fontSize: 18,
+    fontSize: fontSize.cardTitle,
     fontWeight: 'bold',
     color: '#000000',
   },
   emptyText: {
     textAlign: 'center',
     color: '#666666',
-    fontSize: 16,
-    marginTop: 20,
+    fontSize: fontSize.body,
+    marginTop: spacing.card,
   },
   adContainer: {
     alignItems: 'center',

@@ -15,36 +15,32 @@ export interface FiveThreeOneProgramForGeneration {
   roundingIncrement: number;
   roundingDirection: RoundingDirection;
   includeDeload: boolean;
-  warmupEnabled: boolean;
-}
-
-export interface FiveThreeOneLiftForGeneration {
-  liftId: number;
-  name: string;
-  category: LiftCategory;
-  trainingMax: number;
-  daySlot: number;
-  assistanceTemplateId: number | null;
 }
 
 export interface FiveThreeOneAssistanceExerciseForGeneration {
-  assistanceExerciseId: number;
   name: string;
   sets: number;
   reps: number;
   sortOrder: number;
 }
 
-export interface FiveThreeOneAssistanceTemplateForGeneration {
-  templateId: number;
+/**
+ * A training day arrives complete: warm-ups and accessories are decided when the program is set
+ * up, not resolved from a template here. Both are per-day choices the user can edit.
+ */
+export interface FiveThreeOneLiftForGeneration {
+  liftId: number;
   name: string;
-  exercises: readonly FiveThreeOneAssistanceExerciseForGeneration[];
+  category: LiftCategory;
+  trainingMax: number;
+  daySlot: number;
+  warmupEnabled: boolean;
+  assistanceExercises: readonly FiveThreeOneAssistanceExerciseForGeneration[];
 }
 
 export interface FiveThreeOneGenerationSource {
   program: FiveThreeOneProgramForGeneration;
   lifts: readonly FiveThreeOneLiftForGeneration[];
-  assistanceTemplates: readonly FiveThreeOneAssistanceTemplateForGeneration[];
 }
 
 export interface FiveThreeOneCycleSelection {
@@ -139,7 +135,7 @@ const assertBoolean = (value: boolean, message: string): void => {
 };
 
 const validateGenerationSource = (source: FiveThreeOneGenerationSource): void => {
-  const { program, lifts, assistanceTemplates } = source;
+  const { program, lifts } = source;
   assertPositiveInteger(program.programId, 'Program ID must be a positive integer.');
   if (!program.name.trim()) {
     throw new Error('Program name must not be empty.');
@@ -150,7 +146,6 @@ const validateGenerationSource = (source: FiveThreeOneGenerationSource): void =>
     throw new Error('Rounding increment must be a finite number greater than zero.');
   }
   assertBoolean(program.includeDeload, 'Program deload setting must be a boolean.');
-  assertBoolean(program.warmupEnabled, 'Program warm-up setting must be a boolean.');
 
   if (lifts.length === 0) {
     throw new Error('At least one lift is required to generate a cycle.');
@@ -179,37 +174,12 @@ const validateGenerationSource = (source: FiveThreeOneGenerationSource): void =>
       throw new Error(`Day slot ${lift.daySlot} is duplicated.`);
     }
     daySlots.add(lift.daySlot);
-    if (lift.assistanceTemplateId !== null) {
-      assertPositiveInteger(
-        lift.assistanceTemplateId,
-        `Assistance template ID must be positive for ${lift.name}.`,
-      );
-    }
-  }
+    assertBoolean(lift.warmupEnabled, `Warm-up setting must be a boolean for ${lift.name}.`);
 
-  const templateIds = new Set<number>();
-  for (const template of assistanceTemplates) {
-    assertPositiveInteger(template.templateId, 'Assistance template ID must be a positive integer.');
-    if (templateIds.has(template.templateId)) {
-      throw new Error(`Assistance template ID ${template.templateId} is duplicated.`);
-    }
-    templateIds.add(template.templateId);
-    if (!template.name.trim()) {
-      throw new Error('Assistance template name must not be empty.');
-    }
-
-    const exerciseIds = new Set<number>();
-    for (const exercise of template.exercises) {
-      assertPositiveInteger(
-        exercise.assistanceExerciseId,
-        'Assistance exercise ID must be a positive integer.',
-      );
-      if (exerciseIds.has(exercise.assistanceExerciseId)) {
-        throw new Error(`Assistance exercise ID ${exercise.assistanceExerciseId} is duplicated.`);
-      }
-      exerciseIds.add(exercise.assistanceExerciseId);
+    const sortOrders = new Set<number>();
+    for (const exercise of lift.assistanceExercises) {
       if (!exercise.name.trim()) {
-        throw new Error('Assistance exercise name must not be empty.');
+        throw new Error(`Assistance exercise name must not be empty for ${lift.name}.`);
       }
       assertPositiveInteger(exercise.sets, `Assistance sets must be positive for ${exercise.name}.`);
       assertPositiveInteger(exercise.reps, `Assistance reps must be positive for ${exercise.name}.`);
@@ -217,31 +187,24 @@ const validateGenerationSource = (source: FiveThreeOneGenerationSource): void =>
         exercise.sortOrder,
         `Assistance sort order must be positive for ${exercise.name}.`,
       );
+      if (sortOrders.has(exercise.sortOrder)) {
+        throw new Error(`Assistance sort order ${exercise.sortOrder} is duplicated for ${lift.name}.`);
+      }
+      sortOrders.add(exercise.sortOrder);
     }
   }
 };
 
 const assistanceForLift = (
   lift: FiveThreeOneLiftForGeneration,
-  templates: readonly FiveThreeOneAssistanceTemplateForGeneration[],
-): GeneratedFiveThreeOneAssistanceExercise[] => {
-  if (lift.assistanceTemplateId === null) {
-    throw new Error(`Assistance template is required for ${lift.name}.`);
-  }
-
-  const template = templates.find((candidate) => candidate.templateId === lift.assistanceTemplateId);
-  if (!template) {
-    throw new Error(`Assistance template ${lift.assistanceTemplateId} was not found for ${lift.name}.`);
-  }
-
-  return [...template.exercises]
+): GeneratedFiveThreeOneAssistanceExercise[] =>
+  [...lift.assistanceExercises]
     .sort((left, right) => left.sortOrder - right.sortOrder)
     .map((exercise) => ({
       exerciseName: exercise.name.trim(),
       sets: exercise.sets,
       reps: exercise.reps,
     }));
-};
 
 export const generateFiveThreeOneCyclePlan = ({
   source,
@@ -260,7 +223,7 @@ export const generateFiveThreeOneCyclePlan = ({
   const weeks = weekNumbers.map((weekNumber) => {
     const wave = waveForWeek(weekNumber);
     const days = orderedLifts.map((lift) => {
-      const warmups = source.program.warmupEnabled
+      const warmups = lift.warmupEnabled
         ? warmupSets(lift.trainingMax, {
             unit: source.program.unit,
             increment: source.program.roundingIncrement,
@@ -301,7 +264,7 @@ export const generateFiveThreeOneCyclePlan = ({
           reps: wave.sets[0]?.targetReps ?? 1,
           links: [...warmupLinks, ...workLinks],
         },
-        assistanceExercises: assistanceForLift(lift, source.assistanceTemplates),
+        assistanceExercises: assistanceForLift(lift),
       };
     });
 

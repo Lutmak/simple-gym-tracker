@@ -9,6 +9,11 @@ import {
 } from './fiveThreeOneGenerationPersistence';
 import type { SQLiteBindParams } from 'expo-sqlite';
 
+const assistanceExercises = [
+  { name: 'Dumbbell Row', sets: 5, reps: 10, sortOrder: 1 },
+  { name: 'Dips', sets: 3, reps: 12, sortOrder: 2 },
+];
+
 const source: FiveThreeOneGenerationSource = {
   program: {
     programId: 7,
@@ -17,7 +22,6 @@ const source: FiveThreeOneGenerationSource = {
     roundingIncrement: 2.5,
     roundingDirection: 'nearest',
     includeDeload: true,
-    warmupEnabled: true,
   },
   lifts: [
     {
@@ -26,7 +30,8 @@ const source: FiveThreeOneGenerationSource = {
       category: 'lower',
       trainingMax: 100,
       daySlot: 1,
-      assistanceTemplateId: 21,
+      warmupEnabled: true,
+      assistanceExercises,
     },
     {
       liftId: 12,
@@ -34,29 +39,8 @@ const source: FiveThreeOneGenerationSource = {
       category: 'upper',
       trainingMax: 60,
       daySlot: 2,
-      assistanceTemplateId: 21,
-    },
-  ],
-  assistanceTemplates: [
-    {
-      templateId: 21,
-      name: 'Simple assistance',
-      exercises: [
-        {
-          assistanceExerciseId: 31,
-          name: 'Dumbbell Row',
-          sets: 5,
-          reps: 10,
-          sortOrder: 1,
-        },
-        {
-          assistanceExerciseId: 32,
-          name: 'Dips',
-          sets: 3,
-          reps: 12,
-          sortOrder: 2,
-        },
-      ],
+      warmupEnabled: true,
+      assistanceExercises,
     },
   ],
 };
@@ -134,6 +118,68 @@ describe('fiveThreeOneGeneration', () => {
       { exerciseName: 'Dumbbell Row', sets: 5, reps: 10 },
       { exerciseName: 'Dips', sets: 3, reps: 12 },
     ]);
+  });
+
+  it('orders assistance by sort order and accepts a day with none', () => {
+    const days = generateFiveThreeOneCyclePlan({
+      source: {
+        ...source,
+        lifts: [
+          {
+            ...source.lifts[0],
+            assistanceExercises: [
+              { name: 'Dips', sets: 3, reps: 12, sortOrder: 2 },
+              { name: 'Dumbbell Row', sets: 5, reps: 10, sortOrder: 1 },
+            ],
+          },
+          { ...source.lifts[1], assistanceExercises: [] },
+        ],
+      },
+      cycle: { cycleNumber: 1, includeDeload: true },
+    }).weeks[0]?.days;
+
+    expect(days?.[0]?.assistanceExercises.map((exercise) => exercise.exerciseName)).toEqual([
+      'Dumbbell Row',
+      'Dips',
+    ]);
+    expect(days?.[1]?.assistanceExercises).toEqual([]);
+  });
+
+  it('generates warm-ups per day rather than per program', () => {
+    const days = generateFiveThreeOneCyclePlan({
+      source: {
+        ...source,
+        lifts: [
+          { ...source.lifts[0], warmupEnabled: true },
+          { ...source.lifts[1], warmupEnabled: false },
+        ],
+      },
+      cycle: { cycleNumber: 1, includeDeload: true },
+    }).weeks[0]?.days;
+
+    expect(days?.[0]?.mainLift.links.filter((link) => link.isWarmup)).toHaveLength(3);
+    expect(days?.[1]?.mainLift.links.filter((link) => link.isWarmup)).toHaveLength(0);
+    expect(days?.[1]?.mainLift.links.map((link) => link.setNumber)).toEqual([1, 2, 3]);
+  });
+
+  it('rejects a duplicated assistance sort order, which the unique index would reject too', () => {
+    expect(() =>
+      generateFiveThreeOneCyclePlan({
+        source: {
+          ...source,
+          lifts: [
+            {
+              ...source.lifts[0],
+              assistanceExercises: [
+                { name: 'Dips', sets: 3, reps: 12, sortOrder: 1 },
+                { name: 'Dumbbell Row', sets: 5, reps: 10, sortOrder: 1 },
+              ],
+            },
+          ],
+        },
+        cycle: { cycleNumber: 1, includeDeload: true },
+      }),
+    ).toThrow('Assistance sort order 1 is duplicated for Squat.');
   });
 
   it('decides completion from expected and logged days rather than calendar time', () => {

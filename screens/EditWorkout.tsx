@@ -12,6 +12,7 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale';
 import { useTranslation } from 'react-i18next';
 import {
   NestableDraggableFlatList,
@@ -425,27 +426,27 @@ export default function EditWorkout() {
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
-    padding: 20 
+    padding: spacing.gutter 
   },
   backButton: { 
     position: 'absolute', 
     top: 20, 
     left: 10, 
-    padding: 8, 
+    padding: spacing.inline, 
     zIndex: 10 
   },
   title: { 
-    fontSize: 30, 
+    fontSize: fontSize.screenTitle, 
     fontWeight: 'bold', 
     textAlign: 'center', 
-    marginBottom: 40 
+    marginBottom: spacing.section 
   },
 
   inputWorkoutName: { 
-    borderRadius: 15, 
-    padding: 14, 
-    fontSize: 30, 
-    marginBottom: 30, 
+    borderRadius: radius.card, 
+    padding: spacing.card, 
+    fontSize: fontSize.sectionTitle, 
+    marginBottom: spacing.section, 
     backgroundColor: 'transparent',
     fontWeight: 'bold',
     textAlign: 'center',
@@ -459,24 +460,24 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   input: { 
-    borderRadius: 15, 
-    padding: 14, 
-    fontSize: 18, 
-    marginBottom: 30, 
+    borderRadius: radius.card, 
+    padding: spacing.card, 
+    fontSize: fontSize.cardTitle, 
+    marginBottom: spacing.section, 
     backgroundColor: 'transparent',
     fontWeight: 'bold',
   },
   subtitle: { 
-    fontSize: 24, 
+    fontSize: fontSize.sectionTitle, 
     fontWeight: 'bold', 
-    marginBottom: 30,
-    marginTop: 60,
+    marginBottom: spacing.card,
+    marginTop: spacing.section,
   },
   dayContainer: { 
-    padding: 20, 
-    borderRadius: 15,
-    marginTop: 30,
-    marginBottom: 99, 
+    padding: spacing.card, 
+    borderRadius: radius.card,
+    marginTop: spacing.card,
+    marginBottom: spacing.section, 
     backgroundColor: 'transparent',
     shadowColor: '#000',
     shadowOffset: {
@@ -488,9 +489,9 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   dayInput: { 
-    fontSize: 24, 
-    marginBottom: 20, 
-    paddingBottom: 8,
+    fontSize: fontSize.sectionTitle, 
+    marginBottom: spacing.card, 
+    paddingBottom: spacing.label,
     fontWeight: 'bold',
   },
   exercisesContainer: {
@@ -502,38 +503,38 @@ const styles = StyleSheet.create({
   exerciseContainer: { 
     flexDirection: 'row', 
     alignItems: 'center', 
-    marginBottom: 15, 
-    padding: 10, 
-    borderRadius: 10, 
+    marginBottom: spacing.label, 
+    padding: spacing.label, 
+    borderRadius: radius.control, 
     backgroundColor: 'transparent',
   },
   dragHandle: {
-    marginRight: 30,
+    marginRight: spacing.section,
     justifyContent: 'center',
     alignItems: 'center',
   },
   exerciseInput: { 
     flex: 3, 
-    marginHorizontal: 5, 
-    paddingVertical: 6, 
-    fontSize: 16, 
+    marginHorizontal: 4, 
+    paddingVertical: spacing.inline, 
+    fontSize: fontSize.body, 
   },
   numberInput: {
     flex: 1,
-    marginHorizontal: 5,
-    paddingVertical: 6,
-    fontSize: 16,
+    marginHorizontal: 4,
+    paddingVertical: spacing.inline,
+    fontSize: fontSize.body,
     textAlign: 'center',
   },
   saveButton: { 
-    paddingVertical: 18, 
-    borderRadius: 15, 
+    paddingVertical: spacing.gutter, 
+    borderRadius: radius.card, 
     alignItems: 'center', 
-    marginTop: 40, 
+    marginTop: spacing.section, 
     backgroundColor: 'transparent'
   },
   saveButtonText: { 
-    fontSize: 20, 
+    fontSize: fontSize.button, 
     fontWeight: 'bold', 
     color: 'transparent'
   }

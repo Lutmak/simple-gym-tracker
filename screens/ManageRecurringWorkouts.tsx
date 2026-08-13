@@ -4,6 +4,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale';
 import { useTranslation } from 'react-i18next';
 import { WorkoutLogStackParamList } from '../App';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -185,28 +186,28 @@ export default function ManageRecurringWorkouts() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    padding: spacing.gutter,
   },
   backButton: {
-    marginTop: 10,
-    marginBottom: 20,
-    padding: 8,
+    marginTop: spacing.label,
+    marginBottom: spacing.card,
+    padding: spacing.inline,
     zIndex: 10,
     alignSelf: 'flex-start',
   },
   title: {
-    fontSize: 28,
+    fontSize: fontSize.screenTitle,
     fontWeight: '900',
-    marginBottom: 20,
+    marginBottom: spacing.card,
     textAlign: 'center',
   },
   list: {
-    paddingBottom: 20,
+    paddingBottom: spacing.card,
   },
   workoutItem: {
-    padding: 16,
-    borderRadius: 12,
-    marginBottom: 12,
+    padding: spacing.card,
+    borderRadius: radius.card,
+    marginBottom: spacing.cardGap,
     flexDirection: 'row',
     alignItems: 'center',
     shadowColor: '#000',
@@ -218,14 +219,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   workoutName: {
-    fontSize: 18,
+    fontSize: fontSize.cardTitle,
     fontWeight: 'bold',
     flex: 1,
   },
   workoutDetails: {
-    fontSize: 14,
+    fontSize: fontSize.helper,
     opacity: 0.7,
-    marginRight: 10,
+    marginRight: spacing.label,
   },
   arrow: {
     marginLeft: 'auto',
@@ -236,13 +237,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   emptyText: {
-    fontSize: 18,
+    fontSize: fontSize.cardTitle,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: spacing.label,
     textAlign: 'center',
   },
   emptySubtext: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     opacity: 0.7,
     textAlign: 'center',
   },

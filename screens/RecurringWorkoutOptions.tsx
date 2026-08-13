@@ -6,6 +6,7 @@ import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale';
 import { useTranslation } from 'react-i18next';
 import { WorkoutLogStackParamList } from '../App';
 
@@ -75,7 +76,7 @@ export default function RecurringWorkoutOptions() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    padding: spacing.gutter,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -83,26 +84,26 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 20,
     left: 10,
-    padding: 8,
+    padding: spacing.inline,
     zIndex: 10,
   },
   title: {
-    fontSize: 28,
+    fontSize: fontSize.screenTitle,
     fontWeight: '900',
-    marginBottom: 40,
+    marginBottom: spacing.section,
     textAlign: 'center',
   },
   button: {
     backgroundColor: '#000000',
-    borderRadius: 15,
-    paddingVertical: 20,
-    paddingHorizontal: 25,
+    borderRadius: radius.card,
+    paddingVertical: spacing.gutter,
+    paddingHorizontal: spacing.section,
     width: '90%',
     maxWidth: 400,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
+    marginBottom: spacing.card,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
@@ -112,16 +113,16 @@ const styles = StyleSheet.create({
   buttonText: {
     color: '#FFFFFF',
     fontWeight: 'bold',
-    fontSize: 18,
+    fontSize: fontSize.button,
   },
   icon: {
-    marginRight: 10,
+    marginRight: spacing.label,
   },
   explanation: {
     textAlign: 'center',
-    fontSize: 16,
-    marginTop: 30,
-    paddingHorizontal: 20,
+    fontSize: fontSize.body,
+    marginTop: spacing.section,
+    paddingHorizontal: spacing.gutter,
     opacity: 0.7,
   },
 });

@@ -29,6 +29,7 @@ import {
 import { WorkoutLogStackParamList } from '../App';
 import { useSettings } from '../context/SettingsContext';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, spacing } from '../utils/scale';
 import { useTranslation } from 'react-i18next';
 import { useNotifications } from '../utils/useNotifications';
 import { useRecurringWorkouts } from '../utils/recurringWorkoutUtils';
@@ -1252,7 +1253,7 @@ const styles = StyleSheet.create({
     marginRight: scale(10),
   },
   title: {
-    fontSize: moderateScale(32),
+    fontSize: moderateScale(fontSize.screenTitle),
     fontWeight: '900',
     textAlign: 'center',
   },
@@ -1274,7 +1275,7 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     fontWeight: 'bold',
-    fontSize: moderateScale(14),
+    fontSize: moderateScale(fontSize.helper),
     textAlign: 'center',
   },
   icon: {
@@ -1283,7 +1284,7 @@ const styles = StyleSheet.create({
   tipText: {
     marginTop: verticalScale(10),
     textAlign: 'center',
-    fontSize: moderateScale(14),
+    fontSize: moderateScale(fontSize.helper),
     fontStyle: 'italic',
     opacity: 0.8,
   },
@@ -1291,13 +1292,13 @@ const styles = StyleSheet.create({
   modalTipText: {
     marginTop: verticalScale(10),
     textAlign: 'center',
-    fontSize: moderateScale(14),
+    fontSize: moderateScale(fontSize.helper),
     fontStyle: 'italic',
     opacity: 0.8,
     marginBottom: verticalScale(10),
   },
   emptyText: {
-    fontSize: moderateScale(16),
+    fontSize: moderateScale(fontSize.body),
     textAlign: 'center',
     opacity: 0.7,
   },
@@ -1306,7 +1307,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 400,
     borderRadius: 20,
-    padding: moderateScale(15),
+    padding: moderateScale(spacing.card),
     marginTop: verticalScale(5),
     borderWidth: 1,
     shadowColor: '#000',
@@ -1322,7 +1323,7 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(10),
   },
   calendarMonthText: {
-    fontSize: moderateScale(20),
+    fontSize: moderateScale(fontSize.cardTitle),
     fontWeight: 'bold',
   },
   daysGrid: {
@@ -1402,12 +1403,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   legendIconText: {
-    fontSize: moderateScale(12),
+    fontSize: moderateScale(fontSize.caption),
     fontWeight: 'bold',
     lineHeight: Platform.OS === 'ios' ? moderateScale(24) : moderateScale(22),
   },
   legendText: {
-    fontSize: moderateScale(14),
+    fontSize: moderateScale(fontSize.helper),
   },
   // Modal Styles
   modalContainer: {
@@ -1417,7 +1418,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     borderRadius: 20,
-    padding: moderateScale(20),
+    padding: moderateScale(spacing.card),
     width: '90%',
     maxWidth: 400,
     alignItems: 'center',
@@ -1440,26 +1441,26 @@ const styles = StyleSheet.create({
     padding: moderateScale(5),
   },
   modalTitle: {
-    fontSize: moderateScale(24),
+    fontSize: moderateScale(fontSize.sectionTitle),
     fontWeight: '900',
     marginBottom: verticalScale(10),
     textAlign: 'center',
     marginTop: verticalScale(20),
   },
   modalSubtitle: {
-    fontSize: moderateScale(18),
+    fontSize: moderateScale(fontSize.cardTitle),
     fontWeight: '700',
     marginBottom: verticalScale(20),
     textAlign: 'center',
   },
   modalExercise: { marginBottom: verticalScale(15), width: '100%' },
   modalExerciseName: {
-    fontSize: moderateScale(20),
+    fontSize: moderateScale(fontSize.cardTitle),
     fontWeight: '800',
     textAlign: 'center',
   },
   modalExerciseDetails: {
-    fontSize: moderateScale(16),
+    fontSize: moderateScale(fontSize.body),
     textAlign: 'center',
     opacity: 0.8,
   },
@@ -1474,17 +1475,17 @@ const styles = StyleSheet.create({
   modalWorkoutItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: moderateScale(15),
+    padding: moderateScale(spacing.card),
     borderRadius: 15,
     marginBottom: verticalScale(10),
     borderWidth: 0,
   },
   modalWorkoutName: {
-    fontSize: moderateScale(18),
+    fontSize: moderateScale(fontSize.cardTitle),
     fontWeight: 'bold',
   },
   modalWorkoutDay: {
-    fontSize: moderateScale(14),
+    fontSize: moderateScale(fontSize.helper),
     opacity: 0.8,
   },
   modalLegendContainer: {
@@ -1501,7 +1502,7 @@ const styles = StyleSheet.create({
   },
   modalLegendText: {
     marginLeft: scale(5),
-    fontSize: moderateScale(14),
+    fontSize: moderateScale(fontSize.helper),
   },
   completionTimeContainer: {
     flexDirection: 'row',
@@ -1509,7 +1510,7 @@ const styles = StyleSheet.create({
     marginBottom: verticalScale(15),
   },
   completionTimeText: {
-    fontSize: moderateScale(16),
+    fontSize: moderateScale(fontSize.body),
     fontWeight: '600',
   },
   choiceButton: {

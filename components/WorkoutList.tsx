@@ -5,7 +5,8 @@ import { Workout } from '../utils/types';
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ScrollView, View } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useTheme } from '../context/ThemeContext'; // Adjust the path to your ThemeContext
+import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale'; // Adjust the path to your ThemeContext
 import { useTranslation } from 'react-i18next';
 import { useSQLiteContext } from 'expo-sqlite';
 import { exportWorkout, importWorkout } from '../utils/workoutSharingUtils';
@@ -152,38 +153,38 @@ export default function WorkoutList({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: 16,
-    marginTop: 50, // Move everything down
+    paddingHorizontal: spacing.gutter,
+    marginTop: 40, // Move everything down
   },
   titleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: spacing.section,
   },
   titleIcon: {
-    marginRight: 10,
+    marginRight: spacing.label,
   },
   title: {
-    fontSize: 35, // Larger font size
+    fontSize: fontSize.screenTitle, // Larger font size
     fontWeight: '900', // Extra bold
     textAlign: 'center', // Centered text
   },
   tipText: {
-    marginTop: 20, // Space above the text
+    marginTop: spacing.card, // Space above the text
     textAlign: 'center', // Center align
-    fontSize: 14, // Smaller font size
+    fontSize: fontSize.helper, // Smaller font size
     fontStyle: 'italic', // Italic for emphasis
   },
   createButton: {
     borderRadius: 50,
-    paddingVertical: 15,
-    paddingHorizontal: 15,
+    paddingVertical: spacing.card,
+    paddingHorizontal: spacing.card,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1, // Take up available space
-    marginRight: 10, // Add space to the right
+    marginRight: spacing.label, // Add space to the right
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 5,
@@ -191,9 +192,9 @@ const styles = StyleSheet.create({
   },
   importButton: {
     borderRadius: 50,
-    paddingTop: 15,
-    paddingBottom: 15,
-    paddingHorizontal: 15,
+    paddingTop: spacing.card,
+    paddingBottom: spacing.card,
+    paddingHorizontal: spacing.card,
     alignItems: 'center',
     justifyContent: 'center',
     shadowOpacity: 0.2,
@@ -204,19 +205,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 20,
-    marginBottom: 20,
+    marginTop: spacing.card,
+    marginBottom: spacing.card,
   },
   createButtonText: {
-    fontSize: 18,
+    fontSize: fontSize.button,
     fontWeight: 'bold',
   },
 
   workoutCard: {
     backgroundColor: '#F7F7F7',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+    paddingVertical: spacing.card,
+    paddingHorizontal: spacing.card,
+    borderRadius: radius.control,
     borderWidth: 1,
     borderColor: 'rgba(0, 0, 0, 0.1)',
     elevation: 2,
@@ -227,10 +228,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: spacing.cardGap,
   },
   workoutText: {
-    fontSize: 20, // Slightly larger
+    fontSize: fontSize.cardTitle, // Slightly larger
     fontWeight: '700', // More bold
   },
   workoutNameWrapper: {

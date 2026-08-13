@@ -18,6 +18,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSettings } from '../context/SettingsContext';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale';
 import { useTranslation } from 'react-i18next';
 import { AutoSizeText, ResizeTextMode } from 'react-native-auto-size-text';
 import deepCopy from '../utils/deepCopy';
@@ -484,7 +485,7 @@ export default function AllLogs() {
                     fontSize={14}
                     numberOfLines={1}
                     mode={ResizeTextMode.max_lines}
-                    style={[styles.completionTime, { color: theme.text, fontSize: 14 }]}>
+                    style={[styles.completionTime, { color: theme.text, fontSize: fontSize.helper }]}>
                     {formattedTime}
                   </AutoSizeText>
                 </View>
@@ -650,7 +651,7 @@ export default function AllLogs() {
                   <FlatList data={editExerciseData} keyExtractor={(item, index) => item.weight_log_id !== -1 ? item.weight_log_id.toString() : (index * 100).toString()} renderItem={({item, index}) => {
                     return (
                       <View>
-                        <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[{fontSize: 18, fontWeight: 600, color: theme.text}]}>{t('set')} {index+1}</Text>
+                        <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[{fontSize: fontSize.cardTitle, fontWeight: 600, color: theme.text}]}>{t('set')} {index+1}</Text>
                         <Text maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER} style={[styles.inputLabel, { color: theme.text, marginTop: 15 }]}>{weightFormat}</Text>
                         <AppTextInput
                           style={[styles.input, { color: theme.text, backgroundColor: theme.background, borderColor: theme.border }]}
@@ -691,46 +692,46 @@ export default function AllLogs() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, paddingHorizontal: 20, paddingTop: 40 },
-  headerTitle: { fontSize: 30, fontWeight: '900', textAlign: 'center' },
+  container: { flex: 1, paddingHorizontal: spacing.gutter, paddingTop: 32 },
+  headerTitle: { fontSize: fontSize.screenTitle, fontWeight: '900', textAlign: 'center' },
   filterContainer: {
     flexDirection: 'column', // Stack buttons vertically
     alignItems: 'center',
-    paddingTop: 25,
-    paddingBottom: 10,
+    paddingTop: spacing.card,
+    paddingBottom: spacing.label,
   },
   tipText: {
-    margin: 12, // Space above the text
+    margin: spacing.label, // Space above the text
     textAlign: 'center', // Center align
-    fontSize: 14, // Smaller font size
+    fontSize: fontSize.helper, // Smaller font size
     fontStyle: 'italic', // Italic for emphasis
   },
   filterButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    marginBottom: 10,
+    borderRadius: radius.control,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.gutter,
+    marginBottom: spacing.label,
     alignSelf: 'center',
   },
   filterButtonText: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: 'bold',
-    marginLeft: 10,
+    marginLeft: spacing.label,
   },
   clearButton: {
     alignSelf: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    marginBottom:20,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.gutter,
+    borderRadius: radius.control,
+    marginBottom:spacing.card,
   },
-  clearButtonText: { fontSize: 16, fontWeight: 'bold' },
+  clearButtonText: { fontSize: fontSize.body, fontWeight: 'bold' },
   logContainer: {
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 15,
+    borderRadius: radius.card,
+    padding: spacing.card,
+    marginBottom: spacing.cardGap,
     borderWidth: 1,
     elevation: 2,
     shadowOffset: { width: 0, height: 2 },
@@ -742,37 +743,37 @@ const styles = StyleSheet.create({
     top: 10,
     left: 10,
     zIndex: 10,
-    padding: 8,
+    padding: spacing.inline,
   },
   logHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 10,
+    paddingVertical: spacing.label,
   },
   logWorkoutName: { 
-    fontSize: 20, 
+    fontSize: fontSize.cardTitle, 
     fontWeight: '900',
     marginBottom: 4,
   },
   logDayName: { 
-    fontSize: 20, 
+    fontSize: fontSize.cardTitle, 
     fontWeight: '900', 
-    marginBottom: 10
+    marginBottom: 4
   },
   logDate: { 
-    fontSize: 18,
+    fontSize: fontSize.body,
     fontWeight: 'bold',
     maxWidth: 120,
     textAlign: 'right',
-    marginHorizontal: 10,
+    marginHorizontal: spacing.label,
   },
-  logList: { marginTop: 10 },
-  logItem: { marginBottom: 10 },
-  exerciseName: { fontSize: 16, fontWeight: 'bold' },
-  logDetail: { fontSize: 14 },
-  adContainer: { alignItems: 'center', marginTop: 20 },
-  emptyText: { textAlign: 'center', fontSize: 16 },
+  logList: { marginTop: spacing.label },
+  logItem: { marginBottom: spacing.label },
+  exerciseName: { fontSize: fontSize.body, fontWeight: 'bold' },
+  logDetail: { fontSize: fontSize.helper },
+  adContainer: { alignItems: 'center', marginTop: spacing.card },
+  emptyText: { textAlign: 'center', fontSize: fontSize.body },
   workoutTitleContainer: {
     flex: 1,
     paddingRight: 10,
@@ -790,27 +791,27 @@ const styles = StyleSheet.create({
     marginRight: 3,
   },
   completionTime: {
-    fontSize: 14,
+    fontSize: fontSize.helper,
     opacity: 0.8,
   },
   muscleGroupBadge: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 15,
+    paddingVertical: 3,
+    paddingHorizontal: spacing.label,
+    borderRadius: 12,
     borderWidth: 1,
     alignSelf: 'flex-start',
-    marginLeft: 8,
+    marginLeft: spacing.inline,
   },
   muscleGroupBadgeText: {
-      fontSize: 12,
+      fontSize: fontSize.caption,
       fontWeight: '600',
   },
   saveButton: {
     borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    marginBottom: 10,
-    marginTop: 10,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.gutter,
+    marginBottom: spacing.label,
+    marginTop: spacing.label,
     alignItems: 'center',
   },
   saveButtonText: {
@@ -820,8 +821,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#000000',
     borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.gutter,
     alignItems: 'center',
   },
   cancelButtonText: {
@@ -830,8 +831,8 @@ const styles = StyleSheet.create({
   inputLabel: {
     alignSelf: 'stretch',
     textAlign: 'left',
-    fontSize: 16,
-    marginBottom: 5,
+    fontSize: fontSize.label,
+    marginBottom: spacing.label,
     fontWeight: '600',
   },
   input: {
@@ -839,13 +840,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(0, 0, 0, 0.2)',
     borderRadius: 8,
-    padding: 10,
-    marginBottom: 10,
+    padding: spacing.label,
+    marginBottom: spacing.label,
   },
   modalTitle: {
-    fontSize: 20,
+    fontSize: fontSize.cardTitle,
     fontWeight: 'bold',
-    marginBottom: 15,
+    marginBottom: spacing.card,
   },
   modalContainer: {
     flex: 1,
@@ -854,7 +855,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     maxHeight: '80%',
-    borderRadius: 15,
+    borderRadius: radius.card,
     width: '80%',
   },
 });

@@ -12,6 +12,7 @@ import { WorkoutLog, LoggedExercise } from '../utils/types';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useSettings } from '../context/SettingsContext';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale';
 import { KeyboardAwareFlatList, KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useTranslation } from 'react-i18next';
 import { WeightLogStackParamList } from '../App';
@@ -430,7 +431,7 @@ const SetInputRow = React.memo(({ setNumber, reps, weight, onRepsChange, onWeigh
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    padding: spacing.gutter,
     backgroundColor: '#FFFFFF',
   },
   adContainer: {
@@ -441,20 +442,20 @@ const styles = StyleSheet.create({
     top: 40,
     left: 10,
     zIndex: 10,
-    padding: 8,
+    padding: spacing.inline,
   },
   title: {
-    fontSize: 28,
+    fontSize: fontSize.screenTitle,
     fontWeight: 'bold',
-    marginBottom: 20,
+    marginBottom: spacing.card,
     textAlign: 'center',
     color: '#000000',
   },
   workoutContainer: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 20,
+    borderRadius: radius.card,
+    padding: spacing.card,
+    marginBottom: spacing.card,
     borderWidth: 1,
     borderColor: 'rgba(0, 0, 0, 0.2)',
     shadowColor: '#000',
@@ -464,27 +465,27 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   workoutName: {
-    fontSize: 20,
+    fontSize: fontSize.cardTitle,
     fontWeight: 'bold',
     color: '#000000',
     textAlign: 'center',
   },
   workoutDate: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     color: '#666666',
     textAlign: 'center',
   },
   dayName: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: '600',
     color: '#666666',
     textAlign: 'center',
-    marginBottom: 5,
+    marginBottom: 4,
   },
   exerciseContainer: {
-    marginBottom: 20,
-    borderRadius: 20,
-    padding: 20,
+    marginBottom: spacing.card,
+    borderRadius: radius.card,
+    padding: spacing.card,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -493,14 +494,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    marginVertical: 50,
+    marginVertical: spacing.card,
   },
   addSetButtonText: {
     color: '#fff',
     fontWeight: 'bold',
   },
   exerciseTitle: {
-    fontSize: 22,
+    fontSize: fontSize.sectionTitle,
     fontWeight: 'bold',
     textAlign: 'center',
   },
@@ -512,7 +513,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   label: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: '700',
     color: '#000000',
     textAlign: 'center',
@@ -521,11 +522,11 @@ const styles = StyleSheet.create({
   setContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: spacing.card,
     justifyContent: 'space-between',
   },
   setText: {
-    fontSize: 18,
+    fontSize: fontSize.body,
     textAlign: 'center',
     flex: 1,
     fontWeight: '600',
@@ -536,40 +537,40 @@ const styles = StyleSheet.create({
     padding: 8,
     marginHorizontal: 25,
     textAlign: 'center',
-    fontSize: 16,
+    fontSize: fontSize.body,
   },
   saveButton: {
     backgroundColor: '#000000',
-    paddingVertical: 15,
-    borderRadius: 10,
+    paddingVertical: spacing.card,
+    borderRadius: radius.control,
     alignItems: 'center',
-    marginTop: 5,
+    marginTop: spacing.label,
   },
   saveButtonText: {
     color: '#FFFFFF',
-    fontSize: 20,
+    fontSize: fontSize.button,
     fontWeight: 'bold',
   },
   emptyText: {
-    marginTop:80,
+    marginTop:48,
     textAlign: 'center',
     color: '#666666',
-    fontSize: 16,
+    fontSize: fontSize.body,
   },
   tipText: {
     textAlign: 'center',
-    fontSize: 12,
+    fontSize: fontSize.caption,
     fontStyle: 'italic',
   },
   muscleGroupBadge: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 15,
+    paddingVertical: 3,
+    paddingHorizontal: spacing.label,
+    borderRadius: 12,
     borderWidth: 1,
     alignSelf: 'center',
   },
   muscleGroupBadgeText: {
-      fontSize: 12,
+      fontSize: fontSize.caption,
       fontWeight: '600',
   },
 });

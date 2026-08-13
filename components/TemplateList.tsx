@@ -5,7 +5,8 @@ import { TemplateWorkouts } from '../utils/types';
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ScrollView, View } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useTheme } from '../context/ThemeContext'; // Adjust the path to your ThemeContext
+import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale'; // Adjust the path to your ThemeContext
 import { useTranslation } from 'react-i18next';
 
 type WorkoutListNavigationProp = StackNavigationProp<WorkoutStackParamList, 'TemplateList'>;
@@ -62,49 +63,50 @@ export default function TemplateList({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingHorizontal: 16,
-    marginTop: 100, // Move everything down
+    paddingHorizontal: spacing.gutter,
+    marginTop: 64, // Move everything down
   },
   title: {
-    fontSize: 35, // Larger font size
+    fontSize: fontSize.screenTitle, // Larger font size
     fontWeight: '900', // Extra bold
-    marginBottom: 24,
+    marginBottom: spacing.section,
     textAlign: 'center', // Centered text
   },
   tipText: {
-    marginTop: 20, // Space above the text
+    marginTop: spacing.card, // Space above the text
     textAlign: 'center', // Center align
-    fontSize: 14, // Smaller font size
+    fontSize: fontSize.helper, // Smaller font size
     fontStyle: 'italic', // Italic for emphasis
   },
   createButton: {
-    borderRadius: 20,
-    paddingVertical: 15,
-    paddingHorizontal: 20,
+    borderRadius: radius.pill,
+    paddingVertical: spacing.card,
+    paddingHorizontal: spacing.gutter,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 20,
-    marginBottom: 30, // Add space below the button
+    marginTop: spacing.card,
+    marginBottom: spacing.section, // Add space below the button
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 5,
     elevation: 5,
   },
   createButtonText: {
-    fontSize: 18,
+    fontSize: fontSize.button,
     fontWeight: 'bold',
     flex: 1,
   },
   plus: {
-    fontSize: 28,
+    // A decorative glyph rather than type, so it sits outside the reading scale.
+    fontSize: 22,
     fontWeight: 'bold',
   },
   workoutCard: {
     backgroundColor: '#F7F7F7',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+    paddingVertical: spacing.card,
+    paddingHorizontal: spacing.card,
+    borderRadius: radius.control,
     borderWidth: 1,
     borderColor: 'rgba(0, 0, 0, 0.1)',
     elevation: 2,
@@ -115,10 +117,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: spacing.cardGap,
   },
   workoutText: {
-    fontSize: 20, // Slightly larger
+    fontSize: fontSize.cardTitle, // Slightly larger
     fontWeight: '700', // More bold
   },
 });

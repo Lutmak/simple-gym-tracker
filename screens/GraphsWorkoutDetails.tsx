@@ -17,6 +17,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSQLiteContext } from 'expo-sqlite';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale';
 import { useTranslation } from 'react-i18next';
 import { LineChart, BarChart } from 'react-native-chart-kit';
 import { useSettings } from '../context/SettingsContext';
@@ -1458,7 +1459,7 @@ const calculateCES = (sets: LogData[]): number => {
     return (
       <View style={{ flexDirection: 'row', alignItems: 'center', marginLeft: 10 }}>
         <Ionicons name={iconName} size={22} color={color} />
-        <Text style={{ color, fontSize: 16, fontWeight: 'bold', marginLeft: 5 }}>
+        <Text style={{ color, fontSize: fontSize.body, fontWeight: 'bold', marginLeft: 5 }}>
           {displayValue}
         </Text>
       </View>
@@ -3636,23 +3637,23 @@ const calculateCES = (sets: LogData[]): number => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    padding: spacing.gutter,
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 32,
   },
   titleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 20,
-    marginTop: 40,
+    marginBottom: spacing.card,
+    marginTop: 32,
   },
   titleIcon: {
-    marginRight: 10,
+    marginRight: spacing.label,
   },
   title: {
-    fontSize: 32,
+    fontSize: fontSize.screenTitle,
     fontWeight: '900',
     textAlign: 'center',
   },
@@ -3660,48 +3661,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 10,
-    borderRadius: 20,
-    marginTop: 20,
+    paddingVertical: spacing.label,
+    borderRadius: radius.pill,
+    marginTop: spacing.card,
   },
   logsButtonIcon: {
-    marginRight: 8,
+    marginRight: spacing.inline,
   },
   logsButtonText: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: 'bold',
   },
   toggleContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginBottom: 20,
+    marginBottom: spacing.card,
     flexWrap: 'wrap',
   },
   toggleButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    marginHorizontal: 5,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
+    borderRadius: radius.pill,
+    marginHorizontal: 4,
     marginVertical: 2,
   },
   toggleButtonActive: {
     elevation: 2,
   },
   toggleText: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: 'bold',
-    marginLeft: 8,
+    marginLeft: spacing.inline,
   },
   timeToggleButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 15,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    marginHorizontal: 5,
+    marginTop: spacing.card,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
+    borderRadius: radius.pill,
+    marginHorizontal: 4,
     marginVertical: 2,
   },
 
@@ -3710,33 +3711,33 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   toggleTextFix: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: 'bold',
     flex: 1,
-    marginLeft: 6,
+    marginLeft: spacing.inline,
   },
   selectionContainer: {
-    marginBottom: 20,
+    marginBottom: spacing.card,
   },
   expandedSelectionContainer: {
-    marginBottom: 20,
+    marginBottom: spacing.card,
   },
   pickerContainer: {
-    marginBottom: 15,
+    marginBottom: spacing.card,
     zIndex: 1,
   },
   pickerLabel: {
-    fontSize: 16,
+    fontSize: fontSize.label,
     fontWeight: 'bold',
-    marginBottom: 5,
+    marginBottom: spacing.label,
   },
   dropdownButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 15,
+    borderRadius: radius.control,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -3747,17 +3748,17 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   dropdownButtonText: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: '500',
   },
   dropdownIcon: {
-    marginLeft: 10,
+    marginLeft: spacing.label,
   },
   dropdownListContainer: {
     borderWidth: 1,
-    borderRadius: 10,
-    marginTop: 5,
-    marginBottom: 15,
+    borderRadius: radius.control,
+    marginTop: 4,
+    marginBottom: spacing.card,
     elevation: 3,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -3772,38 +3773,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 15,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
   },
   dropdownItemActive: {
     backgroundColor: '#007AFF',
   },
   dropdownItemText: {
-    fontSize: 16,
+    fontSize: fontSize.body,
   },
   dropdownItemTextActive: {
     fontWeight: 'bold',
   },
   dropdownItemIcon: {
-    marginLeft: 10,
+    marginLeft: spacing.label,
   },
   graphSection: {
-    marginBottom: 20,
+    marginBottom: spacing.card,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: fontSize.cardTitle,
     fontWeight: 'bold',
-    marginBottom: 10,
+    marginBottom: spacing.label,
   },
   chartTitleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    marginBottom: spacing.label,
   },
   chartContainer: {
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: spacing.label,
   },
   chartScrollContainer: {
     paddingHorizontal: 10,
@@ -3814,39 +3815,39 @@ const styles = StyleSheet.create({
   },
   scrollHint: {
     textAlign: 'center',
-    fontSize: 12,
-    marginTop: 5,
+    fontSize: fontSize.caption,
+    marginTop: 4,
     opacity: 0.7,
     fontStyle: 'italic',
   },
   noDataContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    padding: spacing.card,
     minHeight: 220,
   },
   noDataText: {
-    marginTop: 10,
-    fontSize: 16,
+    marginTop: spacing.label,
+    fontSize: fontSize.body,
     textAlign: 'center',
   },
   infoBox: {
-    borderRadius: 10,
+    borderRadius: radius.control,
     borderWidth: 1,
-    padding: 15,
-    marginTop: 10,
+    padding: spacing.card,
+    marginTop: spacing.label,
   },
   infoTitle: {
-    fontSize: 16,
+    fontSize: fontSize.label,
     fontWeight: 'bold',
-    marginBottom: 5,
+    marginBottom: 4,
   },
   infoText: {
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: fontSize.helper,
+    lineHeight: 18,
   },
   timeFrameContainer: {
-    marginBottom: 20,
+    marginBottom: spacing.card,
   },
   buttonRow: {
     flexDirection: 'row',
@@ -3854,10 +3855,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   timeFrameButton: {
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    marginVertical: 5,
+    borderRadius: radius.control,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
+    marginVertical: 4,
     minWidth: '22%',
     alignItems: 'center',
     shadowColor: '#000',
@@ -3873,7 +3874,7 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   timeFrameButtonText: {
-    fontSize: 14,
+    fontSize: fontSize.helper,
     fontWeight: '500',
   },
   timeFrameButtonTextActive: {
@@ -3892,13 +3893,13 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: spacing.gutter,
   },
   tooltipContainer: {
     width: '90%',
     maxHeight: '80%',
-    borderRadius: 15,
-    padding: 15,
+    borderRadius: radius.card,
+    padding: spacing.card,
     borderWidth: 1,
     elevation: 5,
     shadowColor: '#000',
@@ -3910,61 +3911,61 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: spacing.label,
   },
   tooltipTitle: {
-    fontSize: 18,
+    fontSize: fontSize.cardTitle,
     fontWeight: 'bold',
     flex: 1,
   },
   tooltipSubtitle: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: '600',
-    marginBottom: 15,
+    marginBottom: spacing.card,
   },
   tooltipSetsList: {
     maxHeight: 300,
   },
   tooltipSetsHeader: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: 'bold',
-    marginBottom: 5,
+    marginBottom: 4,
   },
   tooltipSetItem: {
-    paddingVertical: 8,
+    paddingVertical: spacing.inline,
   },
   tooltipSetText: {
-    fontSize: 15,
+    fontSize: fontSize.helper,
   },
   tooltipDaySection: {
-    marginBottom: 15,
+    marginBottom: spacing.card,
   },
   tooltipDayHeader: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: spacing.inline,
     textDecorationLine: 'underline',
   },
   tooltipExerciseItem: {
-    marginBottom: 10,
+    marginBottom: spacing.label,
     paddingLeft: 5,
   },
   tooltipExerciseName: {
-    fontSize: 15,
+    fontSize: fontSize.helper,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   // New styles for sets legend
   legendContainer: {
-    marginTop: 15,
-    padding: 10,
+    marginTop: spacing.card,
+    padding: spacing.label,
     borderRadius: 8,
     borderWidth: 1,
   },
   legendTitle: {
-    fontSize: 16,
+    fontSize: fontSize.label,
     fontWeight: 'bold',
-    marginBottom: 8,
+    marginBottom: spacing.inline,
     textAlign: 'center',
   },
   legendItems: {
@@ -3975,8 +3976,8 @@ const styles = StyleSheet.create({
   legendItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: 8,
-    marginVertical: 4,
+    marginHorizontal: spacing.inline,
+    marginVertical: 3,
   },
   legendColor: {
     width: 12,
@@ -3985,7 +3986,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
   },
   legendText: {
-    fontSize: 14,
+    fontSize: fontSize.helper,
   },
   setColorIndicator: {
     width: 12,
@@ -3995,56 +3996,56 @@ const styles = StyleSheet.create({
   },
   tipText: {
     textAlign: 'center',
-    fontSize: 14,
+    fontSize: fontSize.helper,
     fontStyle: 'italic',
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 40,
-    marginTop: 40,
+    paddingVertical: 32,
+    marginTop: 32,
   },
   emptyText: {
-    fontSize: 18,
+    fontSize: fontSize.cardTitle,
     fontWeight: 'bold',
     textAlign: 'center',
-    marginTop: 20,
+    marginTop: spacing.card,
   },
   emptySubText: {
-    fontSize: 14,
+    fontSize: fontSize.helper,
     textAlign: 'center',
-    marginTop: 10,
+    marginTop: spacing.label,
     opacity: 0.7,
   },
   graphModeToggleContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    marginBottom: 20,
+    marginBottom: spacing.card,
   },
   graphModeButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    marginHorizontal: 5,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
+    borderRadius: radius.control,
+    marginHorizontal: 4,
     borderWidth: 1,
     borderColor: 'transparent',
   },
   buttonIcon: {
-    marginRight: 6,
+    marginRight: spacing.inline,
     marginTop: 1,
   },
   toggleTexticon: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: 'bold',
     flex: 1,
-    marginLeft: 6,
+    marginLeft: spacing.inline,
   },
   dropdownContainer: {
-    marginBottom: 15,
+    marginBottom: spacing.card,
     zIndex: 1,
   },
   dropdownHeader: {
@@ -4052,16 +4053,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     borderWidth: 1,
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 15,
+    borderRadius: radius.control,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
   },
   dropdownHeaderTextContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   dropdownHeaderText: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: '500',
   },
 });

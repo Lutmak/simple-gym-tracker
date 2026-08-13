@@ -12,6 +12,7 @@ import {
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useSettings } from '../context/SettingsContext';
 import { useTheme } from '../context/ThemeContext';
+import { fontSize, spacing } from '../utils/scale';
 import { useTranslation } from 'react-i18next';
 import AppTextInput from '../components/AppTextInput';
 import type { FiveThreeOneDefaults } from '../utils/settingsStorage';
@@ -875,8 +876,8 @@ export default function Settings() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 20,
-    paddingHorizontal: 20,
+    paddingTop: spacing.gutter,
+    paddingHorizontal: spacing.gutter,
     backgroundColor: '#FFFFFF',
   },
   backButton: {
@@ -884,36 +885,36 @@ const styles = StyleSheet.create({
     top: 20,
     left: 10,
     zIndex: 10,
-    padding: 8,
+    padding: spacing.inline,
   },
   title: {
-    fontSize: 30,
+    fontSize: fontSize.screenTitle,
     fontWeight: '900',
-    marginBottom: 30,
+    marginBottom: spacing.section,
     textAlign: 'center',
     color: '#000000',
   },
   section: {
-    marginBottom: 40,
+    marginBottom: spacing.section,
   },
   sectionTitle: {
-    fontSize: 22,
+    fontSize: fontSize.sectionTitle,
     fontWeight: '900',
     textAlign: 'center',
-    marginBottom: 15,
+    marginBottom: spacing.card,
     color: '#000000',
   },
   settingLabel: {
-    fontSize: 17,
+    fontSize: fontSize.label,
     fontWeight: '700',
-    marginBottom: 8,
-    marginTop: 12,
+    marginBottom: spacing.label,
+    marginTop: spacing.card,
   },
   helperText: {
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: fontSize.helper,
+    lineHeight: 18,
     opacity: 0.7,
-    marginBottom: 10,
+    marginBottom: spacing.label,
   },
   defaultInput: {
     marginBottom: 4,
@@ -926,15 +927,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#000000',
     borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 20,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.gutter,
     backgroundColor: '#FFFFFF',
   },
   activeButton: {
     backgroundColor: '#121212',
   },
   buttonText: {
-    fontSize: 18,
+    fontSize: fontSize.button,
     fontWeight: '600',
     color: '#000000',
   },
@@ -947,7 +948,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   tickIcon: {
-    marginLeft: 10,
+    marginLeft: spacing.label,
   },
   dropdownButton: {
     flexDirection: 'row',
@@ -956,29 +957,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'black',
     borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 15,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
     backgroundColor: '#121212',
   },
   dropdownIcon: {
-    marginLeft: 10,
+    marginLeft: spacing.label,
   },
   dropdownList: {
-    marginTop: 10,
+    marginTop: spacing.label,
     borderWidth: 1,
     borderColor: 'black',
     borderRadius: 8,
     backgroundColor: '#FFFFFF',
   },
   dropdownItem: {
-    paddingVertical: 10,
-    paddingHorizontal: 15,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
   },
   activeDropdownItem: {
     backgroundColor: '#121212',
   },
   dropdownItemText: {
-    fontSize: 18,
+    fontSize: fontSize.button,
     fontWeight: '600',
   },
   activeDropdownItemText: {
@@ -989,16 +990,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 15,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
     backgroundColor: '#121212',
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#000000',
-    marginBottom: 10,
+    marginBottom: spacing.label,
   },
   toggleText: {
-    fontSize: 16,
+    fontSize: fontSize.body,
     fontWeight: '600',
   },
   scrollContent: {
@@ -1017,11 +1018,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#000000',
     borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 15,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
     minWidth: 130,
     flex: 1,
-    marginHorizontal: 5,
+    marginHorizontal: 4,
   },
   dataManagementButtonContent: {
     flexDirection: 'row',
@@ -1029,7 +1030,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   dataManagementButtonText: {
-    fontSize: 18,
+    fontSize: fontSize.button,
     fontWeight: '600',
     flexShrink: 1,
   },

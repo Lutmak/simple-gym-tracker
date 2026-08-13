@@ -14,7 +14,8 @@ import {
 import { WorkoutStackParamList } from '../App'; // Adjust path to where WorkoutStackParamList is defined
 import { StackNavigationProp } from '@react-navigation/stack';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useTheme } from '../context/ThemeContext'; // Import theme context
+import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing, touchTarget } from '../utils/scale'; // Import theme context
 import { useTranslation } from 'react-i18next';
 import AppTextInput from '../components/AppTextInput';
 
@@ -416,28 +417,28 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    paddingHorizontal: 20,
-    paddingBottom: 60, // Ample space at the bottom
+    paddingHorizontal: spacing.gutter,
+    paddingBottom: 48, // Ample space at the bottom
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 24,
-    marginTop: 20,
+    marginBottom: spacing.section,
+    marginTop: spacing.gutter,
   },
   backButton: {
     padding: 5, // make it easier to press
   },
   title: {
-    fontSize: 34,
+    fontSize: fontSize.screenTitle,
     fontWeight: '800', // A bit bolder for a strong title
-    marginLeft: 16,
+    marginLeft: spacing.card,
   },
   input: {
-    borderRadius: 12,
-    padding: 18,
-    marginBottom: 24,
-    fontSize: 22,
+    borderRadius: radius.card,
+    padding: spacing.card,
+    marginBottom: spacing.section,
+    fontSize: fontSize.sectionTitle,
     fontWeight: 'bold',
     shadowColor: '#000',
     shadowOffset: {
@@ -449,9 +450,9 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   dayContainer: {
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 24,
+    borderRadius: radius.card,
+    padding: spacing.card,
+    marginBottom: spacing.section,
     overflow: 'hidden', // Ensures children with border radius look good
     shadowColor: '#000',
     shadowOffset: {
@@ -463,74 +464,74 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   dayInput: {
-    fontSize: 20,
+    fontSize: fontSize.cardTitle,
     fontWeight: '700',
-    paddingBottom: 12,
-    marginBottom: 16,
+    paddingBottom: spacing.label,
+    marginBottom: spacing.card,
   },
   // The exercise row itself will be a touchable opacity
   exerciseRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: spacing.label,
   },
   exerciseInput: {
     flex: 2,
-    marginRight: 10,
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 15,
+    marginRight: spacing.label,
+    borderRadius: radius.control,
+    padding: spacing.card,
+    fontSize: fontSize.body,
   },
   smallInput: {
     flex: 1,
     textAlign: 'center',
-    borderRadius: 10,
-    padding: 14,
-    fontSize: 15,
+    borderRadius: radius.control,
+    padding: spacing.card,
+    fontSize: fontSize.body,
   },
   addExerciseButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    borderRadius: 12,
-    marginTop: 12,
+    paddingVertical: spacing.card,
+    borderRadius: radius.card,
+    marginTop: spacing.label,
   },
   addButtonText: {
     // For both Add Exercise and Add Day
     fontWeight: '700',
-    fontSize: 16,
-    marginLeft: 10,
+    fontSize: fontSize.button,
+    marginLeft: spacing.label,
   },
   addDayButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 12,
-    marginTop: 8,
+    paddingVertical: spacing.card,
+    borderRadius: radius.card,
+    marginTop: spacing.label,
   },
   saveButton: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 20,
-    borderRadius: 12,
-    marginTop: 24,
+    paddingVertical: spacing.gutter,
+    borderRadius: radius.card,
+    marginTop: spacing.section,
   },
   saveButtonText: {
     fontWeight: 'bold',
-    fontSize: 18,
+    fontSize: fontSize.button,
   },
   muscleGroupButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    minHeight: 40,
+    paddingVertical: spacing.label,
+    paddingHorizontal: spacing.card,
+    borderRadius: radius.pill,
+    minHeight: touchTarget.icon,
     elevation: 1,
     shadowOpacity: 0,
     borderWidth: 1,
-    marginRight: 10,
-    marginBottom: 25,
+    marginRight: spacing.label,
+    marginBottom: spacing.section,
     justifyContent: 'center',
     alignItems: 'center',
   },

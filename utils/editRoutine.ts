@@ -2,12 +2,14 @@
  * D3 — Editing a routine (SPECS.md D3, §3.2, §3.7).
  *
  * The editor screen mutates a local draft; `buildEditRows` turns the draft
- * into plan rows (pure, testable) and `saveRoutineEdit` rewrites the plan in
- * one transaction. History tables are never touched: Workout_Log /
- * Logged_Exercises / Weight_Log copy their values at log time and never
- * reference the plan (§3.2). Weight fields are normalized per load source so
- * the SessionExercises CHECK constraint holds by construction; invalid drafts
- * throw `EditRoutineValidationError` with a user-facing code.
+ * into plan rows (pure, testable) and `saveRoutineEdit` applies the edit in
+ * one transaction, updating kept rows in place so their ids — and therefore
+ * WeekSessions and Progression_Proposal rows that cascade from them — survive.
+ * History tables are never touched: Workout_Log / Logged_Exercises /
+ * Weight_Log copy their values at log time and never reference the plan
+ * (§3.2). Weight fields are normalized per load source so the SessionExercises
+ * CHECK constraint holds by construction; invalid drafts throw
+ * `EditRoutineValidationError` with a user-facing code.
  */
 
 import type {
@@ -18,6 +20,8 @@ import type {
 } from './routineActions';
 
 export interface EditExercise {
+  /** The source SessionExercises row id; null for exercises added in this edit. */
+  exerciseId: number | null;
   catalogExerciseId: string | null;
   name: string;
   role: RoutineRole;
@@ -32,6 +36,8 @@ export interface EditExercise {
 }
 
 export interface EditSession {
+  /** The source Sessions row id; null for days added in this edit. */
+  sessionId: number | null;
   weekday: number;
   name: string;
   exercises: EditExercise[];
@@ -75,9 +81,15 @@ export interface EditRoutineRows {
     restMainSeconds: number;
     restAccessorySeconds: number;
   };
-  sessions: { weekday: number; name: string; sortOrder: number }[];
+  sessions: {
+    sessionId: number | null;
+    weekday: number;
+    name: string;
+    sortOrder: number;
+  }[];
   exercises: {
     sessionIndex: number;
+    exerciseId: number | null;
     catalogExerciseId: string | null;
     name: string;
     role: RoutineRole;
@@ -169,7 +181,12 @@ export function buildEditRows(draft: EditRoutine): EditRoutineRows {
       fail({ code: 'duplicateWeekday' });
     }
     usedWeekdays.add(session.weekday);
-    return { weekday: session.weekday, name: sessionName, sortOrder: index + 1 };
+    return {
+      sessionId: session.sessionId,
+      weekday: session.weekday,
+      name: sessionName,
+      sortOrder: index + 1,
+    };
   });
 
   const exercises = draft.sessions.flatMap((session, sessionIndex) =>
@@ -182,6 +199,7 @@ export function buildEditRows(draft: EditRoutine): EditRoutineRows {
       }
       return {
         sessionIndex,
+        exerciseId: exercise.exerciseId,
         catalogExerciseId: exercise.catalogExerciseId,
         name: exercise.name,
         role: exercise.role,
@@ -209,10 +227,16 @@ export function buildEditRows(draft: EditRoutine): EditRoutineRows {
 }
 
 /**
- * Rewrites the routine's plan in one transaction: header update, then
- * delete-and-reinsert the sessions and their exercises. The cascade handles
- * the plan's own children; Workout_Log / Logged_Exercises / Weight_Log have
- * no foreign key into the plan and are never touched (§3.2).
+ * Rewrites the routine's plan in one transaction, preserving the identity of
+ * every kept row: draft rows that carry a source id are UPDATEd in place,
+ * rows without an id (new days / exercises) are INSERTed, and rows not in the
+ * draft at all are DELETEd. Preserving ids is what keeps WeekSessions and
+ * Progression_Proposal rows — whose FKs cascade from Sessions /
+ * SessionExercises — alive across an edit, so an edit of an active routine
+ * mid-cycle affects future sessions only. Only rows the user actually removed
+ * are deleted; their WeekSessions cascade-delete is the correct consequence of
+ * the session being gone. Workout_Log / Logged_Exercises / Weight_Log have no
+ * foreign key into the plan and are never touched (§3.2).
  */
 export async function saveRoutineEdit(
   db: RoutineDatabase,
@@ -220,6 +244,16 @@ export async function saveRoutineEdit(
   draft: EditRoutine,
 ): Promise<void> {
   const rows = buildEditRows(draft);
+
+  const draftSessionIds = rows.sessions
+    .map((session) => session.sessionId)
+    .filter((id): id is number => id !== null);
+  const draftExerciseIds = rows.exercises
+    .map((exercise) => exercise.exerciseId)
+    .filter((id): id is number => id !== null);
+  assertUniqueIds(draftSessionIds, 'session');
+  assertUniqueIds(draftExerciseIds, 'exercise');
+
   await db.run('BEGIN;');
   try {
     await db.run(
@@ -236,48 +270,137 @@ export async function saveRoutineEdit(
         routineId,
       ],
     );
-    await db.run('DELETE FROM Sessions WHERE routine_id = ?;', [routineId]);
 
-    const sessionIds: number[] = [];
+    const resolvedSessionIds: number[] = [];
     for (const session of rows.sessions) {
-      await db.run(
-        `INSERT INTO Sessions (routine_id, weekday, name, sort_order)
-         VALUES (?, ?, ?, ?);`,
-        [routineId, session.weekday, session.name, session.sortOrder],
-      );
-      const sessionIdRow = await db.get('SELECT last_insert_rowid() AS id;', []);
-      if (!sessionIdRow) {
-        throw new Error('Could not read the new session id');
+      if (session.sessionId === null) {
+        await db.run(
+          `INSERT INTO Sessions (routine_id, weekday, name, sort_order)
+           VALUES (?, ?, ?, ?);`,
+          [routineId, session.weekday, session.name, session.sortOrder],
+        );
+        const sessionIdRow = await db.get('SELECT last_insert_rowid() AS id;', []);
+        if (!sessionIdRow) {
+          throw new Error('Could not read the new session id');
+        }
+        resolvedSessionIds.push(Number(sessionIdRow.id));
+      } else {
+        await db.run(
+          `UPDATE Sessions
+             SET weekday = ?, name = ?, sort_order = ?
+           WHERE session_id = ? AND routine_id = ?;`,
+          [
+            session.weekday,
+            session.name,
+            session.sortOrder,
+            session.sessionId,
+            routineId,
+          ],
+        );
+        const existing = await db.get(
+          'SELECT session_id FROM Sessions WHERE session_id = ? AND routine_id = ?;',
+          [session.sessionId, routineId],
+        );
+        if (!existing) {
+          throw new Error(`Draft references unknown session ${session.sessionId}`);
+        }
+        resolvedSessionIds.push(session.sessionId);
       }
-      sessionIds.push(Number(sessionIdRow.id));
     }
 
-    for (const exercise of rows.exercises) {
-      const sessionId = sessionIds[exercise.sessionIndex];
+    await deleteNotIn(
+      db,
+      'Sessions',
+      'session_id',
+      'routine_id',
+      routineId,
+      resolvedSessionIds,
+    );
+
+    for (let sessionIndex = 0; sessionIndex < rows.sessions.length; sessionIndex += 1) {
+      const sessionId = resolvedSessionIds[sessionIndex];
       if (sessionId === undefined) {
-        throw new Error(`Edit exercise has no session ${exercise.sessionIndex}`);
+        throw new Error(`Edit session ${sessionIndex} resolved to no id`);
       }
-      await db.run(
-        `INSERT INTO SessionExercises
-           (session_id, catalog_exercise_id, exercise_name, role, target_sets,
-            target_reps, load_source, training_max_pct, training_max_weight,
-            absolute_weight, unit_override, is_amrap, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
-        [
-          sessionId,
-          exercise.catalogExerciseId,
-          exercise.name,
-          exercise.role,
-          exercise.targetSets,
-          exercise.targetReps,
-          exercise.loadSource,
-          exercise.trainingMaxPct,
-          exercise.trainingMaxWeight,
-          exercise.absoluteWeight,
-          exercise.unitOverride,
-          exercise.isAmrap ? 1 : 0,
-          exercise.sortOrder,
-        ],
+      const sessionExercises = rows.exercises.filter(
+        (exercise) => exercise.sessionIndex === sessionIndex,
+      );
+      const resolvedExerciseIds: number[] = [];
+      for (const exercise of sessionExercises) {
+        if (exercise.exerciseId === null) {
+          await db.run(
+            `INSERT INTO SessionExercises
+               (session_id, catalog_exercise_id, exercise_name, role, target_sets,
+                target_reps, load_source, training_max_pct, training_max_weight,
+                absolute_weight, unit_override, is_amrap, sort_order)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+            [
+              sessionId,
+              exercise.catalogExerciseId,
+              exercise.name,
+              exercise.role,
+              exercise.targetSets,
+              exercise.targetReps,
+              exercise.loadSource,
+              exercise.trainingMaxPct,
+              exercise.trainingMaxWeight,
+              exercise.absoluteWeight,
+              exercise.unitOverride,
+              exercise.isAmrap ? 1 : 0,
+              exercise.sortOrder,
+            ],
+          );
+          const exerciseIdRow = await db.get('SELECT last_insert_rowid() AS id;', []);
+          if (!exerciseIdRow) {
+            throw new Error('Could not read the new exercise id');
+          }
+          resolvedExerciseIds.push(Number(exerciseIdRow.id));
+        } else {
+          await db.run(
+            `UPDATE SessionExercises
+               SET catalog_exercise_id = ?, exercise_name = ?, role = ?,
+                   target_sets = ?, target_reps = ?, load_source = ?,
+                   training_max_pct = ?, training_max_weight = ?,
+                   absolute_weight = ?, unit_override = ?, is_amrap = ?,
+                   sort_order = ?
+             WHERE session_exercise_id = ? AND session_id = ?;`,
+            [
+              exercise.catalogExerciseId,
+              exercise.name,
+              exercise.role,
+              exercise.targetSets,
+              exercise.targetReps,
+              exercise.loadSource,
+              exercise.trainingMaxPct,
+              exercise.trainingMaxWeight,
+              exercise.absoluteWeight,
+              exercise.unitOverride,
+              exercise.isAmrap ? 1 : 0,
+              exercise.sortOrder,
+              exercise.exerciseId,
+              sessionId,
+            ],
+          );
+          const existing = await db.get(
+            `SELECT session_exercise_id FROM SessionExercises
+             WHERE session_exercise_id = ? AND session_id = ?;`,
+            [exercise.exerciseId, sessionId],
+          );
+          if (!existing) {
+            throw new Error(
+              `Draft references unknown exercise ${exercise.exerciseId}`,
+            );
+          }
+          resolvedExerciseIds.push(exercise.exerciseId);
+        }
+      }
+      await deleteNotIn(
+        db,
+        'SessionExercises',
+        'session_exercise_id',
+        'session_id',
+        sessionId,
+        resolvedExerciseIds,
       );
     }
 
@@ -287,3 +410,43 @@ export async function saveRoutineEdit(
     throw error;
   }
 }
+
+/** A draft repeating a source id is corruption — the save must not proceed. */
+const assertUniqueIds = (ids: readonly number[], kind: string): void => {
+  const seen = new Set<number>();
+  for (const id of ids) {
+    if (seen.has(id)) {
+      throw new Error(`Draft repeats ${kind} id ${id}`);
+    }
+    seen.add(id);
+  }
+};
+
+/**
+ * Deletes rows scoped to one owner, keeping exactly the ids the edit resolved
+ * to — draft ids plus the ids of newly inserted rows. An empty keep-list
+ * deletes everything in scope — the empty-IN-list shape is a syntax error in
+ * SQLite, so it gets its own branch.
+ */
+const deleteNotIn = async (
+  db: RoutineDatabase,
+  table: 'Sessions' | 'SessionExercises',
+  idColumn: string,
+  scopeColumn: string,
+  scopeValue: number,
+  keepIds: readonly number[],
+): Promise<void> => {
+  if (keepIds.length === 0) {
+    await db.run(
+      `DELETE FROM ${table} WHERE ${scopeColumn} = ?;`,
+      [scopeValue],
+    );
+    return;
+  }
+  const placeholders = keepIds.map(() => '?').join(', ');
+  await db.run(
+    `DELETE FROM ${table}
+     WHERE ${scopeColumn} = ? AND ${idColumn} NOT IN (${placeholders});`,
+    [scopeValue, ...keepIds],
+  );
+};

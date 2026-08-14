@@ -39,6 +39,7 @@ type Props = NativeStackScreenProps<RoutinesStackParamList, 'EditRoutine'>;
 
 type ScreenExercise = {
   key: string;
+  exerciseId: number | null;
   catalogExerciseId: string | null;
   name: string;
   role: RoutineRole;
@@ -54,6 +55,7 @@ type ScreenExercise = {
 
 type ScreenSession = {
   key: string;
+  sessionId: number | null;
   weekday: number;
   name: string;
   exercises: ScreenExercise[];
@@ -98,6 +100,7 @@ const UNIT_OVERRIDES: readonly (RoutineUnit | null)[] = [null, 'kg', 'lb'];
 
 const toScreenExercise = (exercise: ExerciseSource): ScreenExercise => ({
   key: `e${exercise.exerciseId}`,
+  exerciseId: exercise.exerciseId,
   catalogExerciseId: exercise.catalogExerciseId,
   name: exercise.name,
   role: exercise.role,
@@ -119,9 +122,11 @@ const toEditRoutine = (draft: ScreenDraft): EditRoutine => ({
   restMainSeconds: parseNumericInput(draft.restMainSeconds) ?? NaN,
   restAccessorySeconds: parseNumericInput(draft.restAccessorySeconds) ?? NaN,
   sessions: draft.sessions.map((session) => ({
+    sessionId: session.sessionId,
     weekday: session.weekday,
     name: session.name,
     exercises: session.exercises.map((exercise) => ({
+      exerciseId: exercise.exerciseId,
       catalogExerciseId: exercise.catalogExerciseId,
       name: exercise.name,
       role: exercise.role,
@@ -186,6 +191,7 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
           restAccessorySeconds: String(source.routine.restAccessorySeconds),
           sessions: source.sessions.map((session) => ({
             key: `s${session.sessionId}`,
+            sessionId: session.sessionId,
             weekday: session.weekday,
             name: session.name,
             exercises: source.exercises
@@ -289,6 +295,7 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
         ...draft.sessions,
         {
           key: `n${nextKey.current++}`,
+          sessionId: null,
           weekday,
           name: t(WEEKDAY_FULL_KEYS[weekday]),
           exercises: [],
@@ -364,6 +371,7 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
           ...session.exercises,
           {
             key: `n${nextKey.current++}`,
+            exerciseId: null,
             catalogExerciseId: selection.catalogExerciseId,
             name: selection.name,
             role: 'accessory',

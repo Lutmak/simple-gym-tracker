@@ -43,6 +43,7 @@ const exerciseFrom = (source: RoutineSourceBundle, name: string): EditExercise =
     throw new Error(`Fixture missing exercise ${name}`);
   }
   return {
+    exerciseId: exercise.exerciseId,
     catalogExerciseId: exercise.catalogExerciseId,
     name: exercise.name,
     role: exercise.role,
@@ -67,6 +68,7 @@ const sessionFrom = (
     throw new Error(`Fixture missing session ${name}`);
   }
   return {
+    sessionId: sourceSession.sessionId,
     weekday,
     name: sourceSession.name,
     exercises: source.exercises
@@ -110,10 +112,12 @@ describe('buildEditRows — pure draft to plan rows', () => {
     restAccessorySeconds: 90,
     sessions: [
       {
+        sessionId: null,
         weekday: 1,
         name: 'Upper',
         exercises: [
           {
+            exerciseId: null,
             catalogExerciseId: 'Dumbbell_Bench_Press',
             name: 'Dumbbell Bench Press',
             role: 'main',
@@ -127,6 +131,7 @@ describe('buildEditRows — pure draft to plan rows', () => {
             isAmrap: true,
           },
           {
+            exerciseId: null,
             catalogExerciseId: 'Chin-Up',
             name: 'Chin-Up',
             role: 'accessory',
@@ -142,10 +147,12 @@ describe('buildEditRows — pure draft to plan rows', () => {
         ],
       },
       {
+        sessionId: null,
         weekday: 4,
         name: 'Lower',
         exercises: [
           {
+            exerciseId: null,
             catalogExerciseId: null,
             name: 'My custom lift',
             role: 'main',
@@ -174,8 +181,8 @@ describe('buildEditRows — pure draft to plan rows', () => {
       restAccessorySeconds: 90,
     });
     expect(rows.sessions).toEqual([
-      { weekday: 1, name: 'Upper', sortOrder: 1 },
-      { weekday: 4, name: 'Lower', sortOrder: 2 },
+      { sessionId: null, weekday: 1, name: 'Upper', sortOrder: 1 },
+      { sessionId: null, weekday: 4, name: 'Lower', sortOrder: 2 },
     ]);
 
     const [press, chinUp, custom] = rows.exercises;
@@ -516,5 +523,249 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
     });
     const squatCount = row.filter((r) => r.exercise_name === 'My Squat').length;
     expect(squatCount).toBe(1);
+  });
+
+  it('keeps WeekSessions and Progression_Proposal intact across a mid-cycle edit', async () => {
+    const { db, executor } = connect();
+    const base = await demoRoutineDraft(executor);
+
+    const weekSessionIdsBefore = (db
+      .prepare('SELECT week_session_id FROM WeekSessions ORDER BY week_session_id;')
+      .all() as { week_session_id: number }[]).map((row) => row.week_session_id);
+    expect(weekSessionIdsBefore.length).toBeGreaterThan(0);
+    const proposalsBefore = count(db, 'Progression_Proposal');
+    expect(proposalsBefore).toBeGreaterThan(0);
+    const historyBefore = {
+      workoutLog: count(db, 'Workout_Log'),
+      logged: count(db, 'Logged_Exercises'),
+      weight: count(db, 'Weight_Log'),
+    };
+
+    const squat = base.sessions
+      .find((s) => s.name === 'Squat Day')
+      ?.exercises.find((e) => e.name === 'Barbell Full Squat');
+    if (squat === undefined) {
+      throw new Error('Fixture missing barbell full squat');
+    }
+
+    await saveRoutineEdit(executor, 1, {
+      ...base,
+      name: 'Renamed Mid-Cycle',
+      sessions: base.sessions.map((s) =>
+        s.name === 'Squat Day'
+          ? {
+              ...s,
+              weekday: 2,
+              exercises: s.exercises.map((e) =>
+                e.name === squat.name ? { ...e, targetReps: 6 } : e,
+              ),
+            }
+          : s,
+      ),
+    });
+
+    const weekSessionIdsAfter = (db
+      .prepare('SELECT week_session_id FROM WeekSessions ORDER BY week_session_id;')
+      .all() as { week_session_id: number }[]).map((row) => row.week_session_id);
+    expect(weekSessionIdsAfter).toEqual(weekSessionIdsBefore);
+    expect(count(db, 'Progression_Proposal')).toBe(proposalsBefore);
+    const danglingProposals = (db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM Progression_Proposal p
+         LEFT JOIN SessionExercises e ON e.session_exercise_id = p.session_exercise_id
+         WHERE e.session_exercise_id IS NULL;`,
+      )
+      .get() as { n: number }).n;
+    expect(danglingProposals).toBe(0);
+    expect(count(db, 'Workout_Log')).toBe(historyBefore.workoutLog);
+    expect(count(db, 'Logged_Exercises')).toBe(historyBefore.logged);
+    expect(count(db, 'Weight_Log')).toBe(historyBefore.weight);
+
+    const routine = db
+      .prepare('SELECT name FROM Routines WHERE routine_id = 1;')
+      .get() as { name: string };
+    expect(routine.name).toBe('Renamed Mid-Cycle');
+
+    const moved = db
+      .prepare(
+        `SELECT weekday FROM Sessions WHERE routine_id = 1 AND name = 'Squat Day';`,
+      )
+      .get() as { weekday: number };
+    expect(moved.weekday).toBe(2);
+
+    const squatReps = db
+      .prepare(
+        `SELECT e.target_reps FROM SessionExercises e
+         JOIN Sessions s ON s.session_id = e.session_id
+         WHERE s.routine_id = 1 AND e.exercise_name = 'Barbell Full Squat';`,
+      )
+      .get() as { target_reps: number };
+    expect(squatReps.target_reps).toBe(6);
+  });
+
+  it('inserts a new day without touching the existing week session bookkeeping', async () => {
+    const { db, executor } = connect();
+    const base = await demoRoutineDraft(executor);
+
+    const weekSessionIdsBefore = (db
+      .prepare('SELECT week_session_id FROM WeekSessions ORDER BY week_session_id;')
+      .all() as { week_session_id: number }[]).map((row) => row.week_session_id);
+    const sessionsBefore = count(db, 'Sessions');
+    const proposalsBefore = count(db, 'Progression_Proposal');
+
+    await saveRoutineEdit(executor, 1, {
+      ...base,
+      sessions: [
+        ...base.sessions,
+        {
+          sessionId: null,
+          weekday: 6,
+          name: 'Pullday',
+          exercises: [
+            {
+              exerciseId: null,
+              catalogExerciseId: null,
+              name: 'Pull-Up',
+              role: 'accessory',
+              targetSets: 3,
+              targetReps: 10,
+              loadSource: 'bodyweight',
+              trainingMaxPct: null,
+              trainingMaxWeight: null,
+              absoluteWeight: null,
+              unitOverride: null,
+              isAmrap: false,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(count(db, 'Sessions')).toBe(sessionsBefore + 1);
+    const weekSessionIdsAfter = (db
+      .prepare('SELECT week_session_id FROM WeekSessions ORDER BY week_session_id;')
+      .all() as { week_session_id: number }[]).map((row) => row.week_session_id);
+    expect(weekSessionIdsAfter).toEqual(weekSessionIdsBefore);
+    expect(count(db, 'Progression_Proposal')).toBe(proposalsBefore);
+
+    const newSession = db
+      .prepare(
+        `SELECT s.session_id, s.weekday, e.exercise_name
+         FROM Sessions s JOIN SessionExercises e ON e.session_id = s.session_id
+         WHERE s.routine_id = 1 AND s.weekday = 6;`,
+      )
+      .get() as { session_id: number; weekday: number; exercise_name: string };
+    expect(newSession).toMatchObject({
+      weekday: 6,
+      exercise_name: 'Pull-Up',
+    });
+    const newWeekSessions = (db
+      .prepare('SELECT COUNT(*) AS n FROM WeekSessions WHERE session_id = ?;')
+      .get(newSession.session_id) as { n: number }).n;
+    expect(newWeekSessions).toBe(0);
+  });
+
+  it('removing a day deletes only its own rows and its own bookkeeping', async () => {
+    const { db, executor } = connect();
+    const base = await demoRoutineDraft(executor);
+
+    const weekSessionIdsBefore = (db
+      .prepare('SELECT week_session_id FROM WeekSessions ORDER BY week_session_id;')
+      .all() as { week_session_id: number }[]).map((row) => row.week_session_id);
+    const deadliftWeekSessionIds = (db
+      .prepare(
+        `SELECT ws.week_session_id FROM WeekSessions ws
+         JOIN Sessions s ON s.session_id = ws.session_id
+         WHERE s.routine_id = 1 AND s.name = 'Deadlift Day';`,
+      )
+      .all() as { week_session_id: number }[]).map((row) => row.week_session_id);
+    const sessionsBefore = count(db, 'Sessions');
+    const proposalsBefore = count(db, 'Progression_Proposal');
+
+    await saveRoutineEdit(executor, 1, {
+      ...base,
+      sessions: base.sessions.filter((s) => s.name !== 'Deadlift Day'),
+    });
+
+    expect(count(db, 'Sessions')).toBe(sessionsBefore - 1);
+    const weekSessionIdsAfter = (db
+      .prepare('SELECT week_session_id FROM WeekSessions ORDER BY week_session_id;')
+      .all() as { week_session_id: number }[]).map((row) => row.week_session_id);
+    expect(weekSessionIdsAfter).toEqual(
+      weekSessionIdsBefore.filter((id) => !deadliftWeekSessionIds.includes(id)),
+    );
+    expect(count(db, 'Progression_Proposal')).toBe(proposalsBefore - 1);
+    const deadliftProposal = (db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM Progression_Proposal p
+         JOIN SessionExercises e ON e.session_exercise_id = p.session_exercise_id
+         JOIN Sessions s ON s.session_id = e.session_id
+         WHERE s.name = 'Deadlift Day';`,
+      )
+      .get() as { n: number }).n;
+    expect(deadliftProposal).toBe(0);
+  });
+
+  it('a stale draft referencing a deleted session throws and changes nothing', async () => {
+    const { db, executor } = connect();
+    const base = await demoRoutineDraft(executor);
+
+    const planBefore = {
+      sessions: count(db, 'Sessions'),
+      weekSessions: count(db, 'WeekSessions'),
+      proposals: count(db, 'Progression_Proposal'),
+    };
+
+    await expect(
+      saveRoutineEdit(executor, 1, {
+        ...base,
+        sessions: [
+          { ...base.sessions[0], sessionId: 99999 },
+          ...base.sessions.slice(1),
+        ],
+      }),
+    ).rejects.toThrow('Draft references unknown session 99999');
+
+    expect(count(db, 'Sessions')).toBe(planBefore.sessions);
+    expect(count(db, 'WeekSessions')).toBe(planBefore.weekSessions);
+    expect(count(db, 'Progression_Proposal')).toBe(planBefore.proposals);
+    const routine = db
+      .prepare('SELECT name FROM Routines WHERE routine_id = 1;')
+      .get() as { name: string };
+    expect(routine.name).toBe('Demo Routine');
+  });
+
+  it('a draft repeating a source id throws and changes nothing', async () => {
+    const { db, executor } = connect();
+    const base = await demoRoutineDraft(executor);
+
+    const planBefore = {
+      sessions: count(db, 'Sessions'),
+      weekSessions: count(db, 'WeekSessions'),
+      proposals: count(db, 'Progression_Proposal'),
+    };
+    const squatDay = base.sessions.find((s) => s.name === 'Squat Day');
+    if (squatDay === undefined) {
+      throw new Error('Fixture missing Squat Day');
+    }
+    const duplicated = {
+      ...squatDay,
+      weekday: squatDay.weekday + 1,
+      exercises: [
+        squatDay.exercises[0],
+        { ...squatDay.exercises[0], name: 'Duplicated Squat' },
+      ],
+    };
+
+    await expect(
+      saveRoutineEdit(executor, 1, {
+        ...base,
+        sessions: [squatDay, duplicated],
+      }),
+    ).rejects.toThrow(`Draft repeats session id ${squatDay.sessionId}`);
+
+    expect(count(db, 'Sessions')).toBe(planBefore.sessions);
+    expect(count(db, 'WeekSessions')).toBe(planBefore.weekSessions);
+    expect(count(db, 'Progression_Proposal')).toBe(planBefore.proposals);
   });
 });

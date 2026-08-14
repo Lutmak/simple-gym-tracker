@@ -170,7 +170,9 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
   };
 
   const handleActivate = () => {
-    if (presetKey !== undefined && routineNeedsWeights(source)) {
+    if (presetKey !== undefined && routine.progressionRule === 'wave') {
+      confirmAndActivate(() => navigation.navigate('FiveThreeOneSetup', { presetKey }));
+    } else if (presetKey !== undefined && routineNeedsWeights(source)) {
       confirmAndActivate(() => navigation.navigate('ActivateRoutine', { presetKey }));
     } else {
       confirmAndActivate(activateNow);

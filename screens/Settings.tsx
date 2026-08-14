@@ -1,36 +1,59 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Switch,
-  ScrollView,
   Alert,
   Linking,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  View,
 } from 'react-native';
+import DateTimePicker, {
+  type DateTimePickerEvent,
+} from '@react-native-community/datetimepicker';
 import Ionicons from 'react-native-vector-icons/Ionicons';
-import { useSettings } from '../context/SettingsContext';
-import { useTheme } from '../context/ThemeContext';
-import { fontSize, spacing } from '../utils/scale';
 import { useTranslation } from 'react-i18next';
-import AppTextInput from '../components/AppTextInput';
-import type { FiveThreeOneDefaults } from '../utils/settingsStorage';
-import { useNotifications } from '../utils/useNotifications';
+import { useSQLiteContext } from 'expo-sqlite';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
+import { useSettings } from '../context/SettingsContext';
+import { useTheme } from '../context/ThemeContext';
+import { fontSize, radius, spacing } from '../utils/scale';
+import { useNotifications } from '../utils/useNotifications';
 import { replaceDatabaseFile } from '../utils/databaseImport';
 import { DatabaseImportValidationError } from '../utils/databaseSchema';
-import { useSQLiteContext } from 'expo-sqlite';
+import { loadDemoData, removeDemoData, type DemoDatabase } from '../utils/demoData';
 import {
-  loadDemoData,
-  removeDemoData,
-  type DemoDatabase,
-} from '../utils/demoData';
+  ImagePackValidationError,
+  IMAGE_PACK_RELEASE_URL,
+  installImagePackFromUri,
+} from '../utils/imagePackInstaller';
 
-const formatSettingNumber = (value: number): string =>
-  Number(value.toFixed(2)).toString();
+const LANGUAGES = [
+  { code: 'en', label: 'English' },
+  { code: 'es', label: 'Español' },
+] as const;
+
+const IMAGE_PACK_PICKER_TYPES = [
+  'application/zip',
+  'application/x-zip-compressed',
+  'application/octet-stream',
+];
+
+const imagePackErrorMessageKey = (reason: ImagePackValidationError['reason']): string => {
+  switch (reason) {
+    case 'too-large':
+      return 'imagePackTooLarge';
+    case 'unknown-exercise':
+    case 'foreign-file':
+      return 'imagePackForeign';
+    default:
+      return 'imagePackInvalid';
+  }
+};
 
 export default function Settings() {
   const {
@@ -40,18 +63,26 @@ export default function Settings() {
     setTimeFormat,
     weightFormat,
     setWeightFormat,
-    firstWeekday, // <-- Added
-    setFirstWeekday, // <-- Added
+    firstWeekday,
+    setFirstWeekday,
     language,
     setLanguage,
     notificationPermissionGranted,
     setNotificationPermissionGranted,
-    fiveThreeOneDefaults,
-    setFiveThreeOneDefaults,
+    notificationTime,
+    setNotificationTime,
   } = useSettings();
   const { theme, toggleTheme } = useTheme();
-  const { t } = useTranslation(); // for translations
+  const { t } = useTranslation();
   const db = useSQLiteContext();
+  const {
+    requestNotificationPermission,
+    cancelAllNotifications,
+    scheduleDailyReminder,
+  } = useNotifications();
+
+  const [languageDropdownVisible, setLanguageDropdownVisible] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
 
   const demoDb: DemoDatabase = {
     run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
@@ -77,9 +108,9 @@ export default function Settings() {
       t('removeDemoData'),
       t('removeDemoDataConfirm'),
       [
-        { text: t('cancel') || 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: t('confirm') || 'Confirm',
+          text: t('confirm'),
           onPress: async () => {
             try {
               await removeDemoData(demoDb);
@@ -95,158 +126,22 @@ export default function Settings() {
     );
   };
 
-  // Use the notifications hook to access all notification-related functionality
-  const { requestNotificationPermission, cancelAllNotifications } =
-    useNotifications();
-
-  // Manages whether the language dropdown is visible
-  const [languageDropdownVisible, setLanguageDropdownVisible] = useState(false);
-  const [roundingIncrementText, setRoundingIncrementText] = useState(() =>
-    formatSettingNumber(fiveThreeOneDefaults.roundingIncrement),
-  );
-  const [tmPercentageText, setTmPercentageText] = useState(() =>
-    formatSettingNumber(fiveThreeOneDefaults.tmPercentage * 100),
-  );
-  const [upperTmIncrementText, setUpperTmIncrementText] = useState(() =>
-    formatSettingNumber(fiveThreeOneDefaults.upperTmIncrement),
-  );
-  const [lowerTmIncrementText, setLowerTmIncrementText] = useState(() =>
-    formatSettingNumber(fiveThreeOneDefaults.lowerTmIncrement),
-  );
-
-  useEffect(() => {
-    setRoundingIncrementText(
-      formatSettingNumber(fiveThreeOneDefaults.roundingIncrement),
-    );
-    setTmPercentageText(
-      formatSettingNumber(fiveThreeOneDefaults.tmPercentage * 100),
-    );
-    setUpperTmIncrementText(
-      formatSettingNumber(fiveThreeOneDefaults.upperTmIncrement),
-    );
-    setLowerTmIncrementText(
-      formatSettingNumber(fiveThreeOneDefaults.lowerTmIncrement),
-    );
-  }, [
-    fiveThreeOneDefaults.roundingIncrement,
-    fiveThreeOneDefaults.tmPercentage,
-    fiveThreeOneDefaults.upperTmIncrement,
-    fiveThreeOneDefaults.lowerTmIncrement,
-  ]);
-
-  // Languages array with i18n-compatible codes
-  const languages = [
-    { code: 'cs', label: 'Čeština' },
-    { code: 'de', label: 'Deutsch' },
-    { code: 'dk', label: 'Dansk' },
-    { code: 'el', label: 'Ελληνική' },
-    { code: 'en', label: 'English' },
-    { code: 'es', label: 'Español' },
-    { code: 'fi', label: 'Suomi' },
-    { code: 'fr', label: 'Français' },
-    { code: 'it', label: 'Italiano' },
-    { code: 'ja', label: '日本語' },
-    { code: 'ko', label: '한국어' },
-    { code: 'nl', label: 'Nederlands' },
-    { code: 'no', label: 'Norsk' },
-    { code: 'pl', label: 'Polski' },
-    { code: 'pt', label: 'Português' },
-    { code: 'ro', label: 'Română' },
-    { code: 'ru', label: 'Русский' },
-    { code: 'sl', label: 'Slovenščina' },
-    { code: 'sv', label: 'Svenska' },
-    { code: 'tr', label: 'Türkçe' },
-    { code: 'uk', label: 'Українська' },
-    { code: 'zh', label: '中文' },
-
-
-    // add more languages here #2
-  ];
-
-  // We'll display the label corresponding to the current context language
-  const currentLanguage = language;
-  const currentRoundingDirection =
-    fiveThreeOneDefaults.roundingDirection === 'up'
-      ? t('roundUp')
-      : fiveThreeOneDefaults.roundingDirection === 'down'
-        ? t('roundDown')
-        : t('roundNearest');
-
-  /**
-   * Handle user selecting a language. We just call setLanguage;
-   * the context will automatically sync i18n for us.
-   */
-  const handleLanguageChange = (languageCode: string) => {
-    setLanguage(languageCode);
-    setLanguageDropdownVisible(false); // close dropdown
-  };
-
-  const handleDateFormatChange = (format: string) => {
-    setDateFormat(format);
-  };
-
-  const handleTimeFormatChange = (format: '24h' | 'AM/PM') => {
-    setTimeFormat(format);
-  };
-
-  const handleWeightFormatChange = (format: string) => {
-    setWeightFormat(format);
-  };
-
-  // New handler for first day of the week
-  const handleFirstWeekdayChange = (day: 'Sunday' | 'Monday') => {
-    setFirstWeekday(day);
-  };
-
-  const updateFiveThreeOneDefaults = (
-    update: Partial<FiveThreeOneDefaults>,
-  ) => {
-    setFiveThreeOneDefaults({ ...fiveThreeOneDefaults, ...update });
-  };
-
-  const commitPositiveDefault = (
-    value: number | null,
-    field: 'roundingIncrement' | 'upperTmIncrement' | 'lowerTmIncrement',
-    reset: () => void,
-  ) => {
-    if (value === null || value <= 0) {
-      reset();
-      return;
-    }
-    updateFiveThreeOneDefaults({ [field]: value });
-  };
-
-  const commitTmPercentage = (value: number | null) => {
-    if (value === null || value < 85 || value > 90) {
-      setTmPercentageText(
-        formatSettingNumber(fiveThreeOneDefaults.tmPercentage * 100),
-      );
-      return;
-    }
-    updateFiveThreeOneDefaults({ tmPercentage: value / 100 });
-  };
-
-  // Handle notification main toggle change
   const handleNotificationToggle = async (value: boolean) => {
     if (value) {
-      // Request permission when toggle is turned on
       const granted = await requestNotificationPermission();
       setNotificationPermissionGranted(granted);
+      if (granted) {
+        await scheduleDailyReminder(notificationTime);
+      }
     } else {
-      // Show confirmation alert when turning off
       Alert.alert(
-        t('notificationsDisableTitle') || 'Disable Notifications',
-        t('notificationsDisableMessage') ||
-          'Turning off notifications will cancel all scheduled workout reminders. Are you sure?',
+        t('notificationsDisableTitle'),
+        t('notificationsDisableMessage'),
         [
+          { text: t('Cancel'), style: 'cancel' },
           {
-            text: t('cancel') || 'Cancel',
-            style: 'cancel',
-          },
-          {
-            text: t('confirm') || 'Confirm',
+            text: t('confirm'),
             onPress: async () => {
-              // Cancel all notifications and update settings
               await cancelAllNotifications();
               setNotificationPermissionGranted(false);
             },
@@ -257,62 +152,36 @@ export default function Settings() {
     }
   };
 
-  // Renders the button that toggles the language dropdown
-  const renderLanguageButton = () => (
-    <TouchableOpacity
-      style={[styles.dropdownButton, { minWidth: 180 }]}
-      onPress={() => setLanguageDropdownVisible((prev) => !prev)}
-    >
-      <Text style={[styles.buttonText, { color: 'white' }]}>
-        {languages.find((lang) => lang.code === currentLanguage)?.label ||
-          'Select Language'}
-      </Text>
-      <Ionicons
-        name={languageDropdownVisible ? 'chevron-up' : 'chevron-down'}
-        size={18}
-        color='white'
-        style={styles.dropdownIcon}
-      />
-    </TouchableOpacity>
-  );
+  const formatTime = (time: string): string => {
+    const [hours, minutes] = time.split(':').map(Number);
+    if (timeFormat === 'AM/PM') {
+      const date = new Date();
+      date.setHours(hours, minutes, 0, 0);
+      return date.toLocaleString('en-US', {
+        hour: 'numeric',
+        minute: 'numeric',
+        hour12: true,
+      });
+    }
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+  };
 
-  /**
-   * Renders each format button (for Date & Weight).
-   * `label` is the string to display (e.g. 'dd-mm-yyyy'),
-   * `current` is the current format from context,
-   * `onPress` is the callback to set that format.
-   */
-  const renderButton = (
-    label: string,
-    current: string,
-    onPress: () => void,
-  ) => (
-    <TouchableOpacity
-      style={[styles.button, current === label && styles.activeButton]}
-      onPress={onPress}
-    >
-      <View style={styles.buttonContent}>
-        <Text
-          style={[
-            styles.buttonText,
-            current === label && styles.activeButtonText,
-          ]}
-        >
-          {label}
-        </Text>
-        {current === label && (
-          <Ionicons
-            name='checkmark'
-            size={18}
-            color='white'
-            style={styles.tickIcon}
-          />
-        )}
-      </View>
-    </TouchableOpacity>
-  );
+  const handleNotificationTimeChange = (
+    event: DateTimePickerEvent,
+    selectedTime?: Date,
+  ) => {
+    setShowTimePicker(Platform.OS === 'ios');
+    if (selectedTime) {
+      const time = `${String(selectedTime.getHours()).padStart(2, '0')}:${String(
+        selectedTime.getMinutes(),
+      ).padStart(2, '0')}`;
+      setNotificationTime(time);
+      if (notificationPermissionGranted) {
+        void cancelAllNotifications().then(() => scheduleDailyReminder(time));
+      }
+    }
+  };
 
-  // Database management functions
   const exportDatabase = async () => {
     try {
       const dbName = 'SimpleDB.db';
@@ -321,11 +190,9 @@ export default function Settings() {
       const fileInfo = await FileSystem.getInfoAsync(dbFilePath);
 
       if (!fileInfo.exists) {
-        Alert.alert(
-          t('exportFailedTitle') || 'Export Failed',
-          t('databaseNotFound') || 'Database file not found',
-          [{ text: 'OK' }],
-        );
+        Alert.alert(t('exportFailedTitle'), t('databaseNotFound'), [
+          { text: t('ok') },
+        ]);
         return;
       }
 
@@ -350,39 +217,33 @@ export default function Settings() {
       const isAvailable = await Sharing.isAvailableAsync();
 
       if (!isAvailable) {
-        Alert.alert(
-          t('exportFailedTitle') || 'Export Failed',
-          t('sharingNotAvailable') || 'Sharing is not available on this device',
-          [{ text: 'OK' }],
-        );
+        Alert.alert(t('exportFailedTitle'), t('sharingNotAvailable'), [
+          { text: t('ok') },
+        ]);
         return;
       }
 
       await Sharing.shareAsync(tempExportPath, {
         mimeType: 'application/x-sqlite3', // Standard MIME type
-        dialogTitle: t('exportDatabaseTitle') || 'Export Workout Database',
+        dialogTitle: t('exportDatabaseTitle'),
         UTI: 'public.database',
       });
     } catch (error) {
       console.error('Error exporting database:', error);
-      Alert.alert(
-        t('exportFailedTitle') || 'Export Failed',
-        t('exportErrorMessage') ||
-          'Failed to export database. Please try again.',
-        [{ text: 'OK' }],
-      );
+      Alert.alert(t('exportFailedTitle'), t('exportErrorMessage'), [
+        { text: t('ok') },
+      ]);
     }
   };
 
-  const importDatabase = async () => {
+  const importDatabase = () => {
     Alert.alert(
-      t('importConfirmTitle') || 'Import Database',
-      t('importConfirmMessage') ||
-        'Importing a database will replace your current data. This action cannot be undone. Continue?',
+      t('importConfirmTitle'),
+      t('importConfirmMessage'),
       [
-        { text: t('cancel') || 'Cancel', style: 'cancel' },
+        { text: t('Cancel'), style: 'cancel' },
         {
-          text: t('confirm') || 'Confirm',
+          text: t('confirm'),
           onPress: async () => {
             const dbName = 'SimpleDB.db';
             const dbDirectory = `${FileSystem.documentDirectory}SQLite/`;
@@ -405,20 +266,12 @@ export default function Settings() {
                 documentPickerResult.assets.length === 0 ||
                 !documentPickerResult.assets[0].uri
               ) {
-                Alert.alert(
-                  t('importFailedTitle') || 'Import Failed',
-                  t('fileNotSelectedError') ||
-                    'No file was selected or the file is invalid.',
-                );
+                Alert.alert(t('importFailedTitle'), t('fileNotSelectedError'));
                 return;
               }
             } catch (pickerError) {
               console.error('DocumentPicker error:', pickerError);
-              Alert.alert(
-                t('importFailedTitle') || 'Import Failed',
-                t('filePickerError') ||
-                  'An error occurred while selecting the file. Please try again.',
-              );
+              Alert.alert(t('importFailedTitle'), t('filePickerError'));
               return;
             }
 
@@ -427,12 +280,9 @@ export default function Settings() {
             try {
               await replaceDatabaseFile(sourceUri, dbFilePath);
 
-              Alert.alert(
-                t('importSuccessTitle') || 'Import Successful',
-                t('importSuccessMessage') ||
-                  'Database imported successfully. Please restart the app for changes to take effect.',
-                [{ text: 'OK' }],
-              );
+              Alert.alert(t('importSuccessTitle'), t('importSuccessMessage'), [
+                { text: t('ok') },
+              ]);
             } catch (error) {
               console.error('Error during database replacement:', error);
               const finalAlertMessage =
@@ -440,14 +290,11 @@ export default function Settings() {
                   ? error.message
                   : error instanceof Error
                     ? error.message
-                    : t('importErrorMessageDefault') ||
-                      'Database import failed. Your existing data was not replaced.';
+                    : t('importErrorMessageDefault');
 
-              Alert.alert(
-                t('importFailedTitle') || 'Import Failed',
-                finalAlertMessage,
-                [{ text: 'OK' }],
-              );
+              Alert.alert(t('importFailedTitle'), finalAlertMessage, [
+                { text: t('ok') },
+              ]);
             }
           },
         },
@@ -456,526 +303,362 @@ export default function Settings() {
     );
   };
 
+  const downloadImagePack = () => {
+    Linking.openURL(IMAGE_PACK_RELEASE_URL);
+  };
+
+  const installImagePack = async () => {
+    let documentPickerResult;
+    try {
+      documentPickerResult = await DocumentPicker.getDocumentAsync({
+        type: IMAGE_PACK_PICKER_TYPES,
+        copyToCacheDirectory: true,
+      });
+
+      if (
+        documentPickerResult.canceled ||
+        !documentPickerResult.assets ||
+        documentPickerResult.assets.length === 0 ||
+        !documentPickerResult.assets[0].uri
+      ) {
+        return;
+      }
+    } catch (pickerError) {
+      console.error('DocumentPicker error:', pickerError);
+      Alert.alert(t('imagePackInstallFailed'), t('filePickerError'));
+      return;
+    }
+
+    try {
+      const catalogRows = await db.getAllAsync<{ exercise_key: string }>(
+        'SELECT exercise_key FROM Catalog_Exercises;',
+      );
+      const knownKeys = new Set(catalogRows.map((row) => row.exercise_key));
+      const installed = await installImagePackFromUri(
+        documentPickerResult.assets[0].uri,
+        knownKeys,
+      );
+      Alert.alert(
+        t('imagePackInstalled'),
+        t('imagePackInstalledMessage', { count: installed }),
+      );
+    } catch (error) {
+      console.error('Error installing image pack:', error);
+      const finalAlertMessage =
+        error instanceof ImagePackValidationError
+          ? t(imagePackErrorMessageKey(error.reason))
+          : t('imagePackInstallError');
+      Alert.alert(t('imagePackInstallFailed'), finalAlertMessage);
+    }
+  };
+
+  const renderChoice = (
+    label: string,
+    active: boolean,
+    onPress: () => void,
+  ) => (
+    <Pressable
+      style={({ pressed }) => [
+        styles.choiceButton,
+        {
+          borderColor: theme.border,
+          backgroundColor: active ? theme.buttonBackground : theme.card,
+        },
+        pressed && styles.pressed,
+      ]}
+      onPress={onPress}
+    >
+      <Text
+        style={[
+          styles.choiceButtonText,
+          { color: active ? theme.buttonText : theme.text },
+        ]}
+      >
+        {label}
+      </Text>
+      {active && (
+        <Ionicons
+          name='checkmark'
+          size={16}
+          color={theme.buttonText}
+          style={styles.choiceTick}
+        />
+      )}
+    </Pressable>
+  );
+
+  const renderChoiceGroup = (
+    choices: { label: string; active: boolean; onPress: () => void }[],
+  ) => (
+    <View style={styles.choiceGroup}>
+      {choices.map((choice, index) => (
+        <View key={choice.label} style={styles.choiceSlot}>
+          {renderChoice(choice.label, choice.active, choice.onPress)}
+        </View>
+      ))}
+    </View>
+  );
+
+  const renderSectionTitle = (label: string) => (
+    <Text style={[styles.sectionTitle, { color: theme.text }]}>{label}</Text>
+  );
+
+  const renderSettingLabel = (label: string) => (
+    <Text style={[styles.settingLabel, { color: theme.text }]}>{label}</Text>
+  );
+
+  const renderDivider = () => (
+    <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
+  );
+
+  const renderActionRow = (
+    icon: React.ComponentProps<typeof Ionicons>['name'],
+    label: string,
+    onPress: () => void,
+    hint?: string,
+  ) => (
+    <Pressable
+      style={({ pressed }) => [
+        styles.actionRow,
+        { borderColor: theme.border, backgroundColor: theme.card },
+        pressed && styles.pressed,
+      ]}
+      onPress={onPress}
+    >
+      <Ionicons name={icon} size={20} color={theme.text} />
+      <View style={styles.actionRowText}>
+        <Text style={[styles.actionRowLabel, { color: theme.text }]}>
+          {label}
+        </Text>
+        {hint !== undefined && (
+          <Text style={[styles.actionRowHint, { color: theme.text }]}>
+            {hint}
+          </Text>
+        )}
+      </View>
+    </Pressable>
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={styles.content}
       >
         <Text style={[styles.title, { color: theme.text }]}>
           {t('settingsTitle')}
         </Text>
 
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('settingsLanguage')}
-          </Text>
-          {renderLanguageButton()}
+        {renderSectionTitle(t('settingsAppearance'))}
+
+        <View style={styles.card}>
+          {renderSettingLabel(t('settingsLanguage'))}
+          <Pressable
+            style={({ pressed }) => [
+              styles.dropdownButton,
+              { borderColor: theme.border, backgroundColor: theme.card },
+              pressed && styles.pressed,
+            ]}
+            onPress={() => setLanguageDropdownVisible((visible) => !visible)}
+          >
+            <Text style={[styles.dropdownButtonText, { color: theme.text }]}>
+              {LANGUAGES.find((lang) => lang.code === language)?.label ??
+                language}
+            </Text>
+            <Ionicons
+              name={languageDropdownVisible ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={theme.text}
+            />
+          </Pressable>
           {languageDropdownVisible && (
-            <View style={styles.dropdownList}>
-              {languages.map((item) => (
-                <TouchableOpacity
+            <View style={[styles.dropdownList, { borderColor: theme.border }]}>
+              {LANGUAGES.map((item) => (
+                <Pressable
                   key={item.code}
-                  style={[
+                  style={({ pressed }) => [
                     styles.dropdownItem,
-                    currentLanguage === item.code && styles.activeDropdownItem,
+                    language === item.code && {
+                      backgroundColor: theme.buttonBackground,
+                    },
+                    pressed && styles.pressed,
                   ]}
-                  onPress={() => handleLanguageChange(item.code)}
+                  onPress={() => {
+                    setLanguage(item.code);
+                    setLanguageDropdownVisible(false);
+                  }}
                 >
                   <Text
                     style={[
                       styles.dropdownItemText,
-                      currentLanguage === item.code &&
-                        styles.activeDropdownItemText,
+                      {
+                        color:
+                          language === item.code
+                            ? theme.buttonText
+                            : theme.text,
+                      },
                     ]}
                   >
-                    {item.label}{' '}
-                    {currentLanguage === item.code && (
-                      <Ionicons
-                        name='checkmark'
-                        size={18}
-                        color='white'
-                        style={styles.tickIcon}
-                      />
-                    )}
+                    {item.label}
                   </Text>
-                </TouchableOpacity>
+                </Pressable>
               ))}
             </View>
           )}
+
+          {renderDivider()}
+
+          {renderSettingLabel(t('settingsTheme'))}
+          {renderChoice(
+            theme.type === 'light' ? t('settingsSwitchDark') : t('settingsSwitchLight'),
+            false,
+            toggleTheme,
+          )}
+
+          {renderDivider()}
+
+          {renderSettingLabel(t('settingsWeightFormat'))}
+          {renderChoiceGroup([
+            { label: 'kg', active: weightFormat === 'kg', onPress: () => setWeightFormat('kg') },
+            { label: 'lbs', active: weightFormat === 'lbs', onPress: () => setWeightFormat('lbs') },
+          ])}
+
+          {renderDivider()}
+
+          {renderSettingLabel(t('settingsDateFormat'))}
+          {renderChoiceGroup([
+            {
+              label: 'dd-mm-yyyy',
+              active: dateFormat === 'dd-mm-yyyy',
+              onPress: () => setDateFormat('dd-mm-yyyy'),
+            },
+            {
+              label: 'mm-dd-yyyy',
+              active: dateFormat === 'mm-dd-yyyy',
+              onPress: () => setDateFormat('mm-dd-yyyy'),
+            },
+          ])}
+
+          {renderDivider()}
+
+          {renderSettingLabel(t('settingsTimeFormat'))}
+          {renderChoiceGroup([
+            {
+              label: '24h',
+              active: timeFormat === '24h',
+              onPress: () => setTimeFormat('24h'),
+            },
+            {
+              label: 'AM/PM',
+              active: timeFormat === 'AM/PM',
+              onPress: () => setTimeFormat('AM/PM'),
+            },
+          ])}
+
+          {renderDivider()}
+
+          {renderSettingLabel(t('settingsFirstWeekday'))}
+          {renderChoiceGroup([
+            {
+              label: t('Monday'),
+              active: firstWeekday === 'Monday',
+              onPress: () => setFirstWeekday('Monday'),
+            },
+            {
+              label: t('Sunday'),
+              active: firstWeekday === 'Sunday',
+              onPress: () => setFirstWeekday('Sunday'),
+            },
+          ])}
         </View>
 
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('notifications')}
-          </Text>
+        {renderSectionTitle(t('notifications'))}
 
+        <View style={styles.card}>
           <View style={styles.toggleRow}>
-            <Text style={[styles.toggleText, { color: '#FFFFFF' }]}>
+            <Text style={[styles.toggleText, { color: theme.text }]}>
               {t('remindScheduledWorkouts')}
             </Text>
             <Switch
               value={notificationPermissionGranted}
               onValueChange={handleNotificationToggle}
-              trackColor={{ false: '#767577', true: '#FFFFFF' }}
-              thumbColor={notificationPermissionGranted ? '#ffffff' : '#f4f3f4'}
+              trackColor={{ false: theme.border, true: theme.buttonBackground }}
+              thumbColor={theme.buttonText}
             />
           </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('settingsDateFormat')}
-          </Text>
-          <View style={styles.buttonGroup}>
-            {renderButton('dd-mm-yyyy', dateFormat, () =>
-              handleDateFormatChange('dd-mm-yyyy'),
-            )}
-            {renderButton('mm-dd-yyyy', dateFormat, () =>
-              handleDateFormatChange('mm-dd-yyyy'),
-            )}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('settingsTimeFormat')}
-          </Text>
-          <View style={styles.buttonGroup}>
-            {renderButton('24h', timeFormat, () => handleTimeFormatChange('24h'))}
-            {renderButton('AM/PM', timeFormat, () =>
-              handleTimeFormatChange('AM/PM'),
-            )}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('settingsWeightFormat')}
-          </Text>
-          <View style={styles.buttonGroup}>
-            {renderButton('kg', weightFormat, () =>
-              handleWeightFormatChange('kg'),
-            )}
-            {renderButton('lbs', weightFormat, () =>
-              handleWeightFormatChange('lbs'),
-            )}
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('fiveThreeOneDefaults')}
-          </Text>
-          <Text style={[styles.helperText, { color: theme.text }]}>
-            {t('fiveThreeOneDefaultsDescription')}
-          </Text>
-
-          <Text style={[styles.settingLabel, { color: theme.text }]}>
-            {t('roundingIncrement')}
-          </Text>
-          <AppTextInput
-            variant='numeric'
-            style={styles.defaultInput}
-            value={roundingIncrementText}
-            onRawChange={setRoundingIncrementText}
-            onCommit={(value) =>
-              commitPositiveDefault(
-                value,
-                'roundingIncrement',
-                () =>
-                  setRoundingIncrementText(
-                    formatSettingNumber(fiveThreeOneDefaults.roundingIncrement),
-                  ),
-              )
-            }
-            keyboardType='decimal-pad'
-            placeholder={t('roundingIncrementPlaceholder')}
-          />
-
-          <Text style={[styles.settingLabel, { color: theme.text }]}>
-            {t('roundingDirection')}
-          </Text>
-          <View style={styles.buttonGroup}>
-            {renderButton(t('roundUp'), currentRoundingDirection, () =>
-              updateFiveThreeOneDefaults({ roundingDirection: 'up' }),
-            )}
-            {renderButton(t('roundDown'), currentRoundingDirection, () =>
-              updateFiveThreeOneDefaults({ roundingDirection: 'down' }),
-            )}
-            {renderButton(t('roundNearest'), currentRoundingDirection, () =>
-              updateFiveThreeOneDefaults({ roundingDirection: 'nearest' }),
-            )}
-          </View>
-
-          <Text style={[styles.settingLabel, { color: theme.text }]}>
-            {t('tmPercentage')}
-          </Text>
-          <Text style={[styles.helperText, { color: theme.text }]}>
-            {t('tmPercentageDescription')}
-          </Text>
-          <AppTextInput
-            variant='numeric'
-            style={styles.defaultInput}
-            value={tmPercentageText}
-            onRawChange={setTmPercentageText}
-            onCommit={commitTmPercentage}
-            keyboardType='decimal-pad'
-            placeholder={t('tmPercentagePlaceholder')}
-          />
-
-          <View style={styles.toggleRow}>
-            <Text style={[styles.toggleText, { color: '#FFFFFF' }]}>
-              {t('includeDeload')}
-            </Text>
-            <Switch
-              value={fiveThreeOneDefaults.includeDeload}
-              onValueChange={(value) =>
-                updateFiveThreeOneDefaults({ includeDeload: value })
-              }
-              trackColor={{ false: '#767577', true: '#FFFFFF' }}
-              thumbColor={fiveThreeOneDefaults.includeDeload ? '#ffffff' : '#f4f3f4'}
-            />
-          </View>
-
-          <Text style={[styles.settingLabel, { color: theme.text }]}>
-            {t('upperTmIncrement')}
-          </Text>
-          <AppTextInput
-            variant='numeric'
-            style={styles.defaultInput}
-            value={upperTmIncrementText}
-            onRawChange={setUpperTmIncrementText}
-            onCommit={(value) =>
-              commitPositiveDefault(
-                value,
-                'upperTmIncrement',
-                () =>
-                  setUpperTmIncrementText(
-                    formatSettingNumber(fiveThreeOneDefaults.upperTmIncrement),
-                  ),
-              )
-            }
-            keyboardType='decimal-pad'
-            placeholder={t('upperTmIncrement')}
-          />
-
-          <Text style={[styles.settingLabel, { color: theme.text }]}>
-            {t('lowerTmIncrement')}
-          </Text>
-          <AppTextInput
-            variant='numeric'
-            style={styles.defaultInput}
-            value={lowerTmIncrementText}
-            onRawChange={setLowerTmIncrementText}
-            onCommit={(value) =>
-              commitPositiveDefault(
-                value,
-                'lowerTmIncrement',
-                () =>
-                  setLowerTmIncrementText(
-                    formatSettingNumber(fiveThreeOneDefaults.lowerTmIncrement),
-                  ),
-              )
-            }
-            keyboardType='decimal-pad'
-            placeholder={t('lowerTmIncrement')}
-          />
-
-          <View style={styles.toggleRow}>
-            <Text style={[styles.toggleText, { color: '#FFFFFF' }]}>
-              {t('warmupGeneration')}
-            </Text>
-            <Switch
-              value={fiveThreeOneDefaults.warmupEnabled}
-              onValueChange={(value) =>
-                updateFiveThreeOneDefaults({ warmupEnabled: value })
-              }
-              trackColor={{ false: '#767577', true: '#FFFFFF' }}
-              thumbColor={fiveThreeOneDefaults.warmupEnabled ? '#ffffff' : '#f4f3f4'}
-            />
-          </View>
-        </View>
-
-{/* --- NEW SECTION FOR FIRST DAY OF THE WEEK --- */}
-<View style={styles.section}>
-  <Text style={[styles.sectionTitle, { color: theme.text }]}>
-    {t('settingsFirstWeekday') || 'First Day of the Week'}
-  </Text>
-  <View style={styles.buttonGroup}>
-    {/* Monday Button */}
-    <TouchableOpacity
-      style={[
-        styles.button,
-        firstWeekday === 'Monday' && styles.activeButton,
-      ]}
-      onPress={() => handleFirstWeekdayChange('Monday')}
-    >
-      <View style={styles.buttonContent}>
-        <Text
-          style={[
-            styles.buttonText,
-            firstWeekday === 'Monday' && styles.activeButtonText,
-          ]}
-        >
-          {t('Monday')}
-        </Text>
-        {firstWeekday === 'Monday' && (
-          <Ionicons
-            name='checkmark'
-            size={18}
-            color='white'
-            style={styles.tickIcon}
-          />
-        )}
-      </View>
-    </TouchableOpacity>
-
-        {/* Sunday Button */}
-    <TouchableOpacity
-      style={[
-        styles.button,
-        firstWeekday === 'Sunday' && styles.activeButton,
-      ]}
-      onPress={() => handleFirstWeekdayChange('Sunday')}
-    >
-      <View style={styles.buttonContent}>
-        <Text
-          style={[
-            styles.buttonText,
-            firstWeekday === 'Sunday' && styles.activeButtonText,
-          ]}
-        >
-          {t('Sunday')}
-        </Text>
-        {firstWeekday === 'Sunday' && (
-          <Ionicons
-            name='checkmark'
-            size={18}
-            color='white'
-            style={styles.tickIcon}
-          />
-        )}
-      </View>
-    </TouchableOpacity>
-    
-  </View>
-</View>
-{/* --- END OF NEW SECTION --- */}
-
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('settingsTheme')}
-          </Text>
-          <View style={styles.buttonGroup}>
-            <TouchableOpacity
-              style={[
-                styles.button,
-                theme.background === '#FFFFFF' && styles.activeButton,
-                { minWidth: 150 },
+          {notificationPermissionGranted && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.timeRow,
+                { borderColor: theme.border, backgroundColor: theme.card },
+                pressed && styles.pressed,
               ]}
-              onPress={toggleTheme}
+              onPress={() => setShowTimePicker(true)}
             >
-              <Text
-                style={[
-                  styles.buttonText,
-                  theme.background === '#FFFFFF' && styles.activeButtonText,
-                ]}
-              >
-                {theme.background === '#FFFFFF'
-                  ? t('settingsSwitchDark')
-                  : t('settingsSwitchLight')}
+              <Ionicons name='time-outline' size={20} color={theme.text} />
+              <Text style={[styles.timeRowLabel, { color: theme.text }]}>
+                {t('notificationTime')}
               </Text>
-            </TouchableOpacity>
-          </View>
+              <Text style={[styles.timeRowValue, { color: theme.text }]}>
+                {formatTime(notificationTime)}
+              </Text>
+            </Pressable>
+          )}
+          {showTimePicker && (
+            <DateTimePicker
+              value={(() => {
+                const [hours, minutes] = notificationTime.split(':').map(Number);
+                const date = new Date();
+                date.setHours(hours, minutes, 0, 0);
+                return date;
+              })()}
+              mode='time'
+              is24Hour={timeFormat === '24h'}
+              display='default'
+              onChange={handleNotificationTimeChange}
+            />
+          )}
         </View>
 
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('dataManagement') || 'Data Management'}
-          </Text>
+        {renderSectionTitle(t('dataManagement'))}
 
-          <View style={styles.dataManagementButtonGroup}>
-            <TouchableOpacity
-              style={[
-                styles.dataManagementButton,
-                { backgroundColor: '#121212' },
-              ]}
-              onPress={exportDatabase}
-            >
-              <View style={styles.dataManagementButtonContent}>
-                <Ionicons
-                  name='share-outline'
-                  size={18}
-                  color={'#FFFFFF'}
-                  style={styles.dataButtonIcon}
-                />
-                <Text
-                  style={[
-                    styles.dataManagementButtonText,
-                    { color: '#FFFFFF' },
-                  ]}
-                  numberOfLines={2}
-                >
-                  {t('exportData') || 'Export Data'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.dataManagementButton,
-                { backgroundColor: '#FFFFFF' },
-              ]}
-              onPress={importDatabase}
-            >
-              <View style={styles.dataManagementButtonContent}>
-                <Ionicons
-                  name='download-outline'
-                  size={18}
-                  color={'#000000'}
-                  style={styles.dataButtonIcon}
-                />
-                <Text
-                  style={[
-                    styles.dataManagementButtonText,
-                    { color: '#000000' },
-                  ]}
-                  numberOfLines={2}
-                >
-                  {t('importData') || 'Import Data'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.card}>
+          {renderActionRow('share-outline', t('exportDatabase'), exportDatabase)}
+          {renderActionRow('download-outline', t('restoreFromBackup'), importDatabase)}
+          {renderActionRow('flask-outline', t('loadDemoData'), handleLoadDemoData)}
+          {renderActionRow(
+            'trash-outline',
+            t('removeDemoData'),
+            handleRemoveDemoData,
+            t('removeDemoDataConfirm'),
+          )}
         </View>
 
-        {/* --- DEMO DATA SECTION (temporary home; rebuilt in G4) --- */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('demoDataTitle')}
+        <View style={styles.card}>
+          <Text style={[styles.cardTitle, { color: theme.text }]}>
+            {t('imagePackTitle')}
           </Text>
-          <View style={styles.dataManagementButtonGroup}>
-            <TouchableOpacity
-              style={[
-                styles.dataManagementButton,
-                { backgroundColor: '#121212' },
-              ]}
-              onPress={handleLoadDemoData}
-            >
-              <View style={styles.dataManagementButtonContent}>
-                <Ionicons
-                  name='flask-outline'
-                  size={18}
-                  color={'#FFFFFF'}
-                  style={styles.dataButtonIcon}
-                />
-                <Text
-                  style={[
-                    styles.dataManagementButtonText,
-                    { color: '#FFFFFF' },
-                  ]}
-                  numberOfLines={2}
-                >
-                  {t('loadDemoData')}
-                </Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.dataManagementButton,
-                { backgroundColor: '#FFFFFF' },
-              ]}
-              onPress={handleRemoveDemoData}
-            >
-              <View style={styles.dataManagementButtonContent}>
-                <Ionicons
-                  name='trash-outline'
-                  size={18}
-                  color={'#000000'}
-                  style={styles.dataButtonIcon}
-                />
-                <Text
-                  style={[
-                    styles.dataManagementButtonText,
-                    { color: '#000000' },
-                  ]}
-                  numberOfLines={2}
-                >
-                  {t('removeDemoData')}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
+          <Text style={[styles.cardHint, { color: theme.text }]}>
+            {t('imagePackDownloadHint')}
+          </Text>
+          {renderActionRow('open-outline', t('downloadImagePack'), downloadImagePack)}
+          {renderActionRow('file-tray-full-outline', t('installImagePack'), installImagePack)}
         </View>
 
-        {/* --- NEW COMMUNITY SECTION --- */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('Community')}
-          </Text>
-          <View style={styles.dataManagementButtonGroup}>
-            <TouchableOpacity
-              style={[
-                styles.dataManagementButton,
-                { backgroundColor: '#121212' },
-              ]}
-              onPress={() =>
-                Linking.openURL(
-                  'https://github.com/Lutmak/simple-gym-tracker/issues',
-                )
-              }
-            >
-              <View style={styles.dataManagementButtonContent}>
-                <Ionicons
-                  name='bug'
-                  size={25}
-                  color={'#FFFFFF'}
-                  style={styles.dataButtonIcon}
-                />
-                <Text
-                  style={[
-                    styles.dataManagementButtonText,
-                    { color: '#FFFFFF' },
-                  ]}
-                  numberOfLines={3}
-                >
-                  {t('reportIssue')}
-                </Text>
-              </View>
-            </TouchableOpacity>
+        {renderSectionTitle(t('settingsAbout'))}
 
-            <TouchableOpacity
-              style={[
-                styles.dataManagementButton,
-                { backgroundColor: '#FFFFFF' },
-              ]}
-              onPress={() =>
-                Linking.openURL(
-                  'https://github.com/Lutmak/simple-gym-tracker',
-                )
-              }
-            >
-              <View style={styles.dataManagementButtonContent}>
-                <Ionicons
-                  name='logo-github'
-                  size={25}
-                  color={'#000000'}
-                  style={styles.dataButtonIcon}
-                />
-                <Text
-                  style={[
-                    styles.dataManagementButtonText,
-                    { color: '#000000' },
-                  ]}
-                  numberOfLines={3}
-                >
-                  {t('GitHub')}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.card}>
+          {renderActionRow(
+            'bug',
+            t('reportIssue'),
+            () =>
+              Linking.openURL(
+                'https://github.com/Lutmak/simple-gym-tracker/issues',
+              ),
+          )}
+          {renderActionRow('logo-github', t('GitHub'), () =>
+            Linking.openURL('https://github.com/Lutmak/simple-gym-tracker'),
+          )}
         </View>
       </ScrollView>
     </View>
@@ -985,162 +668,160 @@ export default function Settings() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: spacing.gutter,
-    paddingHorizontal: spacing.gutter,
-    backgroundColor: '#FFFFFF',
   },
-  backButton: {
-    position: 'absolute',
-    top: 20,
-    left: 10,
-    zIndex: 10,
-    padding: spacing.inline,
+  content: {
+    padding: spacing.gutter,
+    paddingBottom: spacing.section * 2,
   },
   title: {
     fontSize: fontSize.screenTitle,
     fontWeight: '900',
-    marginBottom: spacing.section,
     textAlign: 'center',
-    color: '#000000',
-  },
-  section: {
     marginBottom: spacing.section,
   },
   sectionTitle: {
     fontSize: fontSize.sectionTitle,
     fontWeight: '900',
-    textAlign: 'center',
+    marginTop: spacing.section,
     marginBottom: spacing.card,
-    color: '#000000',
+  },
+  card: {
+    borderWidth: 1,
+    borderRadius: radius.card,
+    padding: spacing.card,
+    marginBottom: spacing.cardGap,
+  },
+  cardTitle: {
+    fontSize: fontSize.cardTitle,
+    fontWeight: '700',
+  },
+  cardHint: {
+    fontSize: fontSize.helper,
+    opacity: 0.7,
+    marginTop: spacing.label,
+    marginBottom: spacing.card,
   },
   settingLabel: {
-    fontSize: fontSize.label,
-    fontWeight: '700',
-    marginBottom: spacing.label,
-    marginTop: spacing.card,
-  },
-  helperText: {
-    fontSize: fontSize.helper,
-    lineHeight: 18,
-    opacity: 0.7,
-    marginBottom: spacing.label,
-  },
-  defaultInput: {
-    marginBottom: 4,
-  },
-  buttonGroup: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  button: {
-    borderWidth: 1,
-    borderColor: '#000000',
-    borderRadius: 8,
-    paddingVertical: spacing.label,
-    paddingHorizontal: spacing.gutter,
-    backgroundColor: '#FFFFFF',
-  },
-  activeButton: {
-    backgroundColor: '#121212',
-  },
-  buttonText: {
-    fontSize: fontSize.button,
+    fontSize: fontSize.body,
     fontWeight: '600',
-    color: '#000000',
+    marginBottom: spacing.label,
   },
-  activeButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-  },
-  buttonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  tickIcon: {
-    marginLeft: spacing.label,
+  settingDivider: {
+    height: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.1)',
+    marginVertical: spacing.card,
+    opacity: 0.4,
   },
   dropdownButton: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'black',
-    borderRadius: 8,
-    paddingVertical: spacing.label,
+    borderRadius: radius.control,
     paddingHorizontal: spacing.card,
-    backgroundColor: '#121212',
+    paddingVertical: spacing.label,
+    minHeight: 44,
   },
-  dropdownIcon: {
-    marginLeft: spacing.label,
+  dropdownButtonText: {
+    fontSize: fontSize.button,
+    fontWeight: '600',
   },
   dropdownList: {
     marginTop: spacing.label,
     borderWidth: 1,
-    borderColor: 'black',
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
+    borderRadius: radius.control,
+    overflow: 'hidden',
   },
   dropdownItem: {
-    paddingVertical: spacing.label,
     paddingHorizontal: spacing.card,
-  },
-  activeDropdownItem: {
-    backgroundColor: '#121212',
+    paddingVertical: spacing.card,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   dropdownItemText: {
     fontSize: fontSize.button,
     fontWeight: '600',
   },
-  activeDropdownItemText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
+  choiceGroup: {
+    flexDirection: 'row',
+    gap: spacing.inline,
+  },
+  choiceSlot: {
+    flex: 1,
+  },
+  choiceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderRadius: radius.control,
+    paddingHorizontal: spacing.card,
+    paddingVertical: spacing.label,
+    minHeight: 44,
+  },
+  choiceButtonText: {
+    fontSize: fontSize.button,
+    fontWeight: '600',
+  },
+  choiceTick: {
+    marginLeft: spacing.label,
   },
   toggleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: spacing.label,
-    paddingHorizontal: spacing.card,
-    backgroundColor: '#121212',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#000000',
-    marginBottom: spacing.label,
+    minHeight: 44,
   },
   toggleText: {
     fontSize: fontSize.body,
     fontWeight: '600',
-  },
-  scrollContent: {
-    paddingBottom: 40,
-  },
-  dataButtonIcon: {
-    marginRight: 5,
-  },
-  dataManagementButtonGroup: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  dataManagementButton: {
-    borderWidth: 1,
-    borderColor: '#000000',
-    borderRadius: 8,
-    paddingVertical: spacing.label,
-    paddingHorizontal: spacing.card,
-    minWidth: 130,
     flex: 1,
-    marginHorizontal: 4,
+    marginRight: spacing.card,
   },
-  dataManagementButtonContent: {
+  timeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
+    borderWidth: 1,
+    borderRadius: radius.control,
+    paddingHorizontal: spacing.card,
+    paddingVertical: spacing.label,
+    minHeight: 44,
+    marginTop: spacing.card,
   },
-  dataManagementButtonText: {
+  timeRowLabel: {
+    fontSize: fontSize.body,
+    fontWeight: '600',
+    marginLeft: spacing.label,
+    flex: 1,
+  },
+  timeRowValue: {
+    fontSize: fontSize.body,
+    fontWeight: '700',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderRadius: radius.control,
+    paddingHorizontal: spacing.card,
+    paddingVertical: spacing.card,
+    minHeight: 46,
+    marginBottom: spacing.cardGap,
+  },
+  actionRowText: {
+    flex: 1,
+    marginLeft: spacing.card,
+  },
+  actionRowLabel: {
     fontSize: fontSize.button,
     fontWeight: '600',
-    flexShrink: 1,
+  },
+  actionRowHint: {
+    fontSize: fontSize.helper,
+    opacity: 0.7,
+    marginTop: spacing.label,
+  },
+  pressed: {
+    opacity: 0.7,
   },
 });

@@ -187,11 +187,15 @@ describe('validateImagePackArchive', () => {
       toBase64(zipPack({ 'Not_A_Catalog_Exercise': jpeg(1) })),
     );
     mockedFileSystem.makeDirectoryAsync.mockImplementation(
-      (path: string) => Promise.resolve(writes.push(path)),
+      (path: string) => {
+        writes.push(path);
+        return Promise.resolve();
+      },
     );
-    mockedFileSystem.writeAsStringAsync.mockImplementation((path: string) =>
-      Promise.resolve(writes.push(path)),
-    );
+    mockedFileSystem.writeAsStringAsync.mockImplementation((path: string) => {
+      writes.push(path);
+      return Promise.resolve();
+    });
 
     await expect(
       installImagePackFromUri('file:///picked/pack.zip', KNOWN_KEYS),
@@ -252,9 +256,19 @@ describe('installImagePackFromUri', () => {
     mockedFileSystem.writeAsStringAsync.mockImplementation((path: string) =>
       Promise.resolve(filesystemMock.write(path, 'file')),
     );
-    mockedFileSystem.getInfoAsync.mockImplementation((path: string) =>
-      Promise.resolve({ exists: filesystemMock.paths.has(path) }),
-    );
+    mockedFileSystem.getInfoAsync.mockImplementation((path: string) => {
+      const exists = filesystemMock.paths.has(path);
+      if (!exists) {
+        return Promise.resolve({ exists: false, uri: path, isDirectory: false });
+      }
+      return Promise.resolve({
+        exists: true as const,
+        uri: path,
+        size: 0,
+        isDirectory: true,
+        modificationTime: 0,
+      });
+    });
     mockedFileSystem.moveAsync.mockImplementation(
       ({ from, to }: { from: string; to: string }) => {
         const moved = [...filesystemMock.paths.keys()].filter(

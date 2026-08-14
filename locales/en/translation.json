@@ -58,12 +58,12 @@
     "settingsTheme": "Theme",
     "settingsSwitchDark": "Switch to Dark",
     "settingsSwitchLight": "Switch to Light",
-     "fiveThreeOneDefaults": "5/3/1 Defaults",
-     "fiveThreeOneDefaultsDescription": "These values are copied into new programs using the unit chosen in setup. Existing programs keep their saved settings.",
-     "includeDeload": "Include deload week",
-     "upperTmIncrement": "Upper-body TM increment",
-     "lowerTmIncrement": "Lower-body TM increment",
-     "warmupGeneration": "Generate warm-up ramps",
+    "settingsAppearance": "Appearance",
+    "settingsAbout": "About",
+    "settingsTimeFormat": "Time Format",
+    "notificationTime": "Notification time",
+    "dailyReminderTitle": "Workout reminder",
+    "dailyReminderBody": "Time to train. Open Simple: Gym Tracker.",
 
 
 
@@ -177,8 +177,8 @@
     "_comment_settings1": "These are Settings-related strings.",
 
     "dataManagement": "Data Management",
-    "exportData": "Export Data",
-    "importData": "Import Data",
+    "exportDatabase": "Export database",
+    "restoreFromBackup": "Restore from backup",
     "demoDataTitle": "Demo data",
     "loadDemoData": "Load demo data",
     "removeDemoData": "Remove demo data",
@@ -200,9 +200,22 @@
     "importSuccessMessage": "Database imported successfully. Please restart the app for changes to take effect.",
     "importFailedTitle": "Import Failed",
     "importErrorMessage": "Failed to import database",
+    "importErrorMessageDefault": "Database import failed. Your existing data was not replaced.",
+    "filePickerError": "An error occurred while selecting the file. Please try again.",
     "remindScheduledWorkouts": "Notify me about scheduled workouts",
     "dayInterval": "Day Interval:",
-    "settingsTimeFormat": "Time Format",
+    "imagePackTitle": "Exercise images",
+    "imagePackDownloadHint": "Download the image pack from the release page, then install the downloaded file here. The app never downloads it itself.",
+    "downloadImagePack": "Download image pack",
+    "installImagePack": "Install image pack",
+    "imagePackInstalled": "Image pack installed",
+    "imagePackInstalledMessage_one": "{{count}} image is stored on this device.",
+    "imagePackInstalledMessage_other": "{{count}} images are stored on this device.",
+    "imagePackInstallFailed": "Could not install the image pack",
+    "imagePackInstallError": "The images could not be stored on this device.",
+    "imagePackInvalid": "This file is not a valid image pack.",
+    "imagePackForeign": "This pack does not match this app's exercise catalog.",
+    "imagePackTooLarge": "This file is too large.",
 
 
     "_comment_Graphs": "These are Graphs-related strings.",
@@ -309,7 +322,6 @@
     "dayVolumeExplanation": "This graph shows the volume of a specific workout day within a time frame, allowing you to see your progress for that day in isolation.",
     
 
-    "Community": "Community",
     "reportIssue": "Report a Bug",
 
     "editExerciseLog": "Edit exercise log",
@@ -319,14 +331,12 @@
     "weightsValidationError": "Weights have to be above 0.",
 
      "roundingIncrement": "Rounding Increment",
-     "roundingIncrementPlaceholder": "e.g. 2.5",
      "roundingDirection": "Rounding Direction",
      "roundUp": "Up",
      "roundDown": "Down",
      "roundNearest": "Nearest",
      "tmPercentage": "Training Max Percentage",
      "tmPercentageDescription": "Used when estimating a training max from a recent set.",
-    "tmPercentagePlaceholder": "85-90",
      "estimateFromRecentSet": "Estimate from recent set",
      "recentWeight": "Recent weight",
      "recentReps": "Recent reps",

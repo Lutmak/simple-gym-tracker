@@ -26,6 +26,12 @@
   "settingsTheme": "Tema",
   "settingsSwitchDark": "Cambiar a modo oscuro",
   "settingsSwitchLight": "Cambiar a modo claro",
+  "settingsAppearance": "Apariencia",
+  "settingsAbout": "Acerca de",
+  "settingsTimeFormat": "Formato de hora",
+  "notificationTime": "Hora de notificación",
+  "dailyReminderTitle": "Recordatorio de entrenamiento",
+  "dailyReminderBody": "Hora de entrenar. Abre Simple: Gym Tracker.",
 
   "_comment_homepage": "Estas son cadenas relacionadas con la pantalla de inicio.",
 
@@ -112,8 +118,8 @@
     "completeSetRest": "Completar serie y descansar",
     "_comment_settings1": "Estas cadenas están relacionadas con la configuración.",
     "dataManagement": "Gestión de datos",
-    "exportData": "Exportar datos",
-    "importData": "Importar datos",
+    "exportDatabase": "Exportar base de datos",
+    "restoreFromBackup": "Restaurar copia de seguridad",
     "demoDataTitle": "Datos de demostración",
     "loadDemoData": "Cargar datos de demostración",
     "removeDemoData": "Quitar datos de demostración",
@@ -135,10 +141,23 @@
     "importSuccessMessage": "Base de datos importada con éxito. Reinicia la app para aplicar los cambios.",
     "importFailedTitle": "Error al importar",
     "importErrorMessage": "Error al importar la base de datos",
+    "importErrorMessageDefault": "La importación de la base de datos falló. Tus datos actuales no se han reemplazado.",
+    "filePickerError": "Ocurrió un error al seleccionar el archivo. Inténtalo de nuevo.",
     "remindScheduledWorkouts": "Recordar entrenamientos programados",
+    "imagePackTitle": "Imágenes de ejercicios",
+    "imagePackDownloadHint": "Descarga el paquete de imágenes desde la página de versiones y luego instala el archivo descargado aquí. La app nunca lo descarga por sí misma.",
+    "downloadImagePack": "Descargar paquete de imágenes",
+    "installImagePack": "Instalar paquete de imágenes",
+    "imagePackInstalled": "Paquete de imágenes instalado",
+    "imagePackInstalledMessage_one": "{{count}} imagen guardada en este dispositivo.",
+    "imagePackInstalledMessage_other": "{{count}} imágenes guardadas en este dispositivo.",
+    "imagePackInstallFailed": "No se pudo instalar el paquete de imágenes",
+    "imagePackInstallError": "Las imágenes no se pudieron guardar en este dispositivo.",
+    "imagePackInvalid": "Este archivo no es un paquete de imágenes válido.",
+    "imagePackForeign": "Este paquete no coincide con el catálogo de ejercicios de esta app.",
+    "imagePackTooLarge": "Este archivo es demasiado grande.",
 
     "set": "Serie",
-    "settingsTimeFormat": "Formato de hora",
 
     
       "_comment_Graphs": "Estas cadenas están relacionadas con gráficos.",
@@ -254,10 +273,9 @@
 "dayVolumeExplanation": "Este gráfico muestra el volumen de un día de entrenamiento específico dentro de un marco de tiempo, permitiéndote ver tu progreso para ese día de forma aislada.",
 
       
-"Community": "Comunidad",
-
     "editExerciseLog": "Editar registro de ejercicio",
     "editExerciseTipText": "Consejo: Puedes editar los registros de ejercicio haciendo clic en ellos.",
+    "reportIssue": "Informar de un error",
     "savingError": "Error al guardar",
     "weightsValidationError": "Los pesos deben ser superiores a 0.",
     "roundingIncrement": "Incremento de redondeo",

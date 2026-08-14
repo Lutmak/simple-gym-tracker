@@ -14,7 +14,7 @@ import { useTranslation } from 'react-i18next';
 
 type WeightLogNavigationProp = StackNavigationProp<
   WeightLogStackParamList,
-  'LogWeights' | 'WeightLogDetail' | 'AllLogs' | 'GraphsWorkoutDetails'
+  'WeightLogDetail' | 'AllLogs' | 'GraphsWorkoutDetails'
 >;
 
 export default function MyProgress() {

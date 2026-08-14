@@ -95,7 +95,6 @@
 
     "_comment_workoutDetails": "These are workot-details-related strings.",
 
-    "noExercises":"No exercises on this day",
 
 
     "repsValidationError": "Reps must be a number greater than 0.",
@@ -120,7 +119,6 @@
     "_comment_LogWorkouts": "These are Log-Workouts-related strings.",
     
     
-    "selectAWorkout":"Please select a workout.",
     "selectWorkout":"Select Workout",
     "selectDay":"Select Day",
 
@@ -139,11 +137,8 @@
 
     "_comment_LogWeights": "These are Log-Weights-related strings.",
 
-    "failedToLogWeights": "Failed to log weights.",
     "Set":"Set",
     "Weight":"Weight",
-    "noWorkoutScheduled": "You need to schedule a workout to track it!",
-    "trackWeights":"Track Weights",
 
 
 
@@ -168,48 +163,16 @@
     "Monday": "Monday",
     "Sunday": "Sunday",
     "notifications": "Notifications",
-    "workoutNotFound": "Workout not found.",
     "confirm": "Confirm",
 
     "_comment_startWorkout": "These are Start Workout-related strings.",
 
-    "startWorkout": "Start Workout",
-    "invalidRestTime": "Invalid Rest Time",
-    "pleaseEnterValidSeconds": "Please enter a valid number of seconds.",
-    "missingInformation": "Missing Information",
-    "enterRepsAndWeight": "Please enter both reps and weight before continuing.",
-    "exitWorkout": "Exit Workout?",
-    "exitWorkoutMessage": "Are you sure you want to exit? Your progress will be lost.",
-    "exit": "Exit",
-    "workoutCompleted": "Workout Completed!",
-    "totalTime": "Total Time",
-    "setsCompleted": "Sets Completed",
-    "completeWorkout": "Complete Workout",
-    "workoutTime": "Workout Time",
-    "restTime": "Rest Time",
     "sec": "sec",
     "addTime": "+15s",
-    "takeBreath": "Take a breath and prepare for your next set",
-    "upNext": "Up Next",
     "skipRest": "Skip Rest",
-    "goal": "Goal",
-    "repsDone": "Reps Done",
     "weightKgLbs": "Weight (kg/lbs)",
-    "finishWorkout": "Finish Workout",
     "completeSetRest": "Complete Set & Rest",
-    "completeSet": "Complete Set",
-    "upcomingSet": "Upcoming Set",
-    "OK": "OK",
-    "workoutSaved": "Workout Saved",
-    "workoutSavedMessage": "Your workout has been successfully logged!",
-    "loadingWorkout": "Loading workout...",
-    "exercises": "Exercises",
-    "totalSets": "Total Sets",
-    "restTimeBetweenSets": "Rest time between sets (seconds)",
-    "restTimeBetweenExercises": "Rest time between exercises (seconds)",
 
-    "workoutSettings": "Workout Settings",
-    "vibration": "Vibration",
 
     "_comment_settings1": "These are Settings-related strings.",
 
@@ -337,14 +300,8 @@
 
 
 
-    "skipToNextExercise": "Skip to Next Exercise",
-    "enableSetSwitchSound": "Enable Sound",
-    "autoFillWeights": "Auto-fill Weights",
-    "autoFillReps": "Auto-fill Reps",
-    "startedWorkoutTip": "Tip: You can switch to any exercise by pressing the three line button on the top right of the screen.",
 
 
-   "completing": "Completing",
 
 
     "Day Volume": "Day Volume",
@@ -354,11 +311,6 @@
 
     "Community": "Community",
     "reportIssue": "Report a Bug",
-    "logWeightsError": "Please make sure all fields are filled and not zero.",
-    "logWeightsTipText": "You can delete sets from exercises by long pressing on the set number.",
-    "exerciseNotes": "Notes",
-    "useLogsForRepsTitle": "Use previous reps",
-    "lastWorkoutInfo": "Previous workout",
 
     "editExerciseLog": "Edit exercise log",
     "editExerciseTipText": "Tip: You can edit exercise logs by clicking them.",
@@ -432,14 +384,6 @@
      "assistanceTemplate": "Seeded from",
      "noAssistanceTemplates": "No built-in assistance templates are available.",
      "noAssistanceTemplate": "No template",
-     "fiveThreeOneAmrap": "AMRAP",
-     "fiveThreeOneAmrapPrompt": "AMRAP: enter the reps you achieved",
-     "fiveThreeOneAmrapRepsPlaceholder": "Actual reps",
-     "fiveThreeOneWarmupTarget": "Warm-up target",
-     "fiveThreeOneCompleteWarmup": "Complete warm-up",
-     "fiveThreeOneWarmupError": "The warm-up could not be marked complete.",
-     "fiveThreeOneBelowTarget": "Below target. Log the reps you completed.",
-     "failedToSaveWorkout": "There was an error saving your workout. Please try again.",
     "today": "Today",
     "routines": "Routines",
     "progress": "Progress",
@@ -524,7 +468,41 @@
     "weekdayAndDate": "{{weekday}}, {{date}}",
     "freeLogging": "Free logging",
     "freeLoggingComing": "Free logging arrives in D7",
-    "sessionRunnerComing": "Session runner arrives in D6",
+    "finishSession": "Finish session",
+    "runnerWarmups": "Warm-ups",
+    "runnerWarmup": "Warm-up",
+    "runnerEditSet": "Edit set",
+    "runnerActualReps": "Actual reps",
+    "runnerBelowReps_one": "{{count}} rep short of target",
+    "runnerBelowReps_other": "{{count}} reps short of target",
+    "runnerBelowWeight": "{{weight}} {{unit}} below target",
+    "runnerRestPause": "Pause",
+    "runnerRestResume": "Resume",
+    "runnerRestDone": "Rest over — on to the next set",
+    "runnerSubtractTime": "-15s",
+    "finishUnloggedTitle": "Sets not logged",
+    "finishUnloggedMessage": "{{count}} sets not logged — finish anyway?",
+    "finishAnyway": "Finish anyway",
+    "finishConfirmTitle": "Finish session?",
+    "finishConfirmMessage": "Saving {{session}} · {{sets}} · {{exercises}}.",
+    "sessionSavedTitle": "Session saved",
+    "sessionSavedMessage": "{{session}} · {{sets}} · {{exercises}}",
+    "sessionSavedWhere": "It's on the Progress tab — where your logs and charts live.",
+    "sessionSavedSeeProgress": "View in Progress",
+    "runnerExitTitle": "Exit session?",
+    "runnerExitMessage": "Your logged sets are lost until you finish.",
+    "runnerExit": "Exit",
+    "runnerStay": "Stay",
+    "runnerNothingSavedTitle": "Nothing to save",
+    "runnerNothingSavedMessage": "You haven't logged any sets. Finish saves nothing.",
+    "runnerLoadFailed": "This session can't be started — it may already be finished.",
+    "runnerSaveFailed": "The session could not be saved.",
+    "setPosition": "Set {{n}} / {{total}}",
+    "runnerSetsCount_one": "{{count}} set",
+    "runnerSetsCount_other": "{{count}} sets",
+    "runnerExercisesCount_one": "{{count}} exercise",
+    "runnerExercisesCount_other": "{{count}} exercises",
+    "finishHelper": "{{logged}} of {{total}} sets logged",
     "routineNameLabel": "Routine name",
     "unitLabel": "Unit",
     "restMainSecondsLabel": "Rest between main sets (s)",

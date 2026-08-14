@@ -7,52 +7,21 @@
   import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
   import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
   import Ionicons from 'react-native-vector-icons/Ionicons';
-  import Home from './screens/Home'; // Assuming you have a Home screen component
-  import Workouts from './screens/Workouts';
-  import CreateWorkout from './screens/CreateWorkout';
   import { GestureHandlerRootView } from 'react-native-gesture-handler';
-  import { createNativeStackNavigator } from '@react-navigation/native-stack';
-  import WorkoutDetails from './screens/WorkoutDetails';
-  import MyCalendar from './screens/MyCalendar';
-  import LogWorkout from './screens/LogWorkout';
-  import MyProgress from './screens/MyProgress';
-  import LogWeights from './screens/LogWeights';
-  import WeightLogDetail from './screens/WeightLogDetail';
-  import RecurringWorkoutOptions from './screens/RecurringWorkoutOptions';
-  import CreateRecurringWorkout from './screens/CreateRecurringWorkout';
-  import ManageRecurringWorkouts from './screens/ManageRecurringWorkouts';
-  import RecurringWorkoutDetails from './screens/RecurringWorkoutDetails';
-  import EditRecurringWorkout from './screens/EditRecurringWorkout';
-  import StartedWorkoutInterface from './screens/StartedWorkoutInterface';
   import './utils/i18n'; // Ensure this is present to initialize i18n
   import i18n from './utils/i18n'; // Import the i18n instance
-  import { I18nextProvider } from 'react-i18next';
+  import { I18nextProvider, useTranslation } from 'react-i18next';
   import Settings from './screens/Settings';
+  import PlaceholderScreen from './screens/PlaceholderScreen';
   import { SettingsProvider, useSettings } from './context/SettingsContext';
   import { ThemeProvider, useTheme } from './context/ThemeContext';
-  import EditWorkout from './screens/EditWorkout';
-  import AllLogs from './screens/AllLogs';
-  import Difficulty from './screens/Difficulty';
-  import Template from './screens/Template';
-  import TemplateDetails from './screens/TemplateDetails';
-  import Programs from './screens/Programs';
-  import FiveThreeOneSetup from './screens/FiveThreeOneSetup';
-  import FiveThreeOneCycleGeneration from './screens/FiveThreeOneCycleGeneration';
-  import FiveThreeOneCycleReview from './screens/FiveThreeOneCycleReview';
-  import FiveThreeOneProgress from './screens/FiveThreeOneProgress';
   import * as Notifications from 'expo-notifications';
   import { runSchema } from './utils/schema';
   import { checkAndSyncPermissions } from './utils/notificationUtils';
-  import GraphsWorkoutDetails from './screens/GraphsWorkoutDetails';
-
 
 
 
   const Bottom = createBottomTabNavigator();
-  const WorkoutStackScreen = createNativeStackNavigator<WorkoutStackParamList>();
-  const WorkoutLogStackScreen= createNativeStackNavigator<WorkoutLogStackParamList>();
-  const WeightLogStackScreen= createNativeStackNavigator<WeightLogStackParamList>();
-  const StartWorkoutStackScreen = createNativeStackNavigator<StartWorkoutStackParamList>();
 
   
 
@@ -130,28 +99,6 @@
     CreateWorkout: undefined; // No parameters for this route
     WorkoutDetails: { workout_id: number }; // Add this
     EditWorkout: { workout_id: number }; // Only `workout_id` for editing a workout
-    TemplateList: undefined;
-    DifficultyList: undefined;
-    Difficulty: undefined;
-    Template: { workout_difficulty: string };
-    TemplateDetails: { workout_id: number };
-    Programs: undefined;
-    FiveThreeOneSetup: undefined;
-    FiveThreeOneGeneration: { programId: number };
-    FiveThreeOneReview: { programId: number; cycleId: number };
-    FiveThreeOneProgress: { programId: number };
-  };
-
-  export type WorkoutLogStackParamList = {
-    MyCalendar: {refresh?:boolean};  // No parameters for this route
-    LogWorkout: { selectedDate?: string };
-    RecurringWorkoutOptions: undefined;
-    CreateRecurringWorkout: undefined;
-    ManageRecurringWorkouts: undefined;
-    RecurringWorkoutDetails: { recurring_workout_id: number };
-    EditRecurringWorkout: { recurring_workout_id: number };
-    StartedWorkoutInterface: { workout_log_id: number };
-    LogWeights: { workout_log_id?: number };
   };
 
   export type WeightLogStackParamList = {
@@ -166,198 +113,6 @@
     StartWorkout: { fromNotification?: boolean } | undefined;
     StartedWorkoutInterface: { workout_log_id: number };
   }
-
-  // No SQLiteProvider here: AppContent's provider already wraps every tab. expo-sqlite's suspense
-  // path keeps one module-level database instance and reopens it whenever a provider mounts with
-  // props that differ from the current one, so a second provider closes the database out from
-  // under screens that are still querying it.
-  function WorkoutStack() {
-    return (
-      <WorkoutStackScreen.Navigator screenOptions={{
-        headerShown: false, // Disable headers for all screens in this stack
-      }}
-    >
-        <WorkoutStackScreen.Screen
-          name="WorkoutsList"
-          component={Workouts}
-          options={{ headerShown: false }}
-        />
-        <WorkoutStackScreen.Screen
-          name="CreateWorkout"
-          component={CreateWorkout}
-          options={{ title: 'Create Workout' }}
-        />
-        <WorkoutStackScreen.Screen
-          name='WorkoutDetails'
-          component={WorkoutDetails}
-          options={{title: 'WorkoutDetails'}}
-          />
-             <WorkoutStackScreen.Screen
-          name='EditWorkout'
-          component={EditWorkout}
-          options={{title: 'EditWorkout'}}
-          />
-                       <WorkoutStackScreen.Screen
-          name='Difficulty'
-          component={Difficulty}
-          options={{title: 'Difficulty'}}
-          />
-                       <WorkoutStackScreen.Screen
-          name='Template'
-          component={Template}
-          options={{title: 'Template'}}
-          />
-                       <WorkoutStackScreen.Screen
-          name='TemplateDetails'
-          component={TemplateDetails}
-          options={{title: 'TemplateDetails'}}
-          />
-         <WorkoutStackScreen.Screen
-           name="Programs"
-           component={Programs}
-           options={{ title: 'Programs' }}
-         />
-         <WorkoutStackScreen.Screen
-           name="FiveThreeOneSetup"
-           component={FiveThreeOneSetup}
-           options={{ title: '5/3/1 Setup' }}
-         />
-          <WorkoutStackScreen.Screen
-            name="FiveThreeOneGeneration"
-            component={FiveThreeOneCycleGeneration}
-            options={{ title: 'Generate 5/3/1 Cycle' }}
-          />
-          <WorkoutStackScreen.Screen
-            name="FiveThreeOneReview"
-            component={FiveThreeOneCycleReview}
-            options={{ title: 'Review 5/3/1 Cycle' }}
-          />
-          <WorkoutStackScreen.Screen
-            name="FiveThreeOneProgress"
-            component={FiveThreeOneProgress}
-            options={{ title: '5/3/1 Progress' }}
-          />
-      </WorkoutStackScreen.Navigator>
-    );
-  }
-
-  function WorkoutLogStack() {
-    return (
-      <WorkoutLogStackScreen.Navigator
-        screenOptions={{
-          headerShown: false, // Disable headers for all screens in this stack
-        }}
-      >
-        <WorkoutLogStackScreen.Screen
-          name="MyCalendar"
-          component={MyCalendar}
-          options={{ headerShown: false }} // No header for MyCalendar screen
-        />
-        <WorkoutLogStackScreen.Screen
-          name="LogWorkout"
-          component={LogWorkout}
-          options={{ title: 'Log a Workout' }} // Title for the LogWorkout screen
-        />
-        <WorkoutLogStackScreen.Screen
-          name="RecurringWorkoutOptions"
-          component={RecurringWorkoutOptions}
-          options={{ title: 'Recurring Workout Options' }}
-        /> 
-         <WorkoutLogStackScreen.Screen
-          name="CreateRecurringWorkout"
-          component={CreateRecurringWorkout}
-          options={{ title: 'Create Recurring Workout' }}
-        /> 
-        <WorkoutLogStackScreen.Screen
-          name="ManageRecurringWorkouts"
-          component={ManageRecurringWorkouts}
-          options={{ title: 'Manage Recurring Workouts' }}
-        /> 
-         <WorkoutLogStackScreen.Screen
-          name="RecurringWorkoutDetails"
-          component={RecurringWorkoutDetails}
-          options={{ title: 'Recurring Workout Details' }}
-        /> 
-        <WorkoutLogStackScreen.Screen
-          name="EditRecurringWorkout"
-          component={EditRecurringWorkout}
-          options={{ title: 'Edit Recurring Workout' }}
-        />
-        <WorkoutLogStackScreen.Screen
-          name="StartedWorkoutInterface"
-          component={StartedWorkoutInterface}
-          options={{ headerShown: false }}
-        />
-        <WorkoutLogStackScreen.Screen
-          name="LogWeights"
-          component={LogWeights}
-          options={{ headerShown: false }}
-        />
-      </WorkoutLogStackScreen.Navigator>
-
-      
-    );
-  }
-
-
-  function WeightLogStack() {
-    return (
-      <WeightLogStackScreen.Navigator
-        screenOptions={{
-          headerShown: false, // Disable headers for all screens in this stack
-        }}
-      >
-        <WeightLogStackScreen.Screen
-          name="GraphsWorkoutDetails"
-          component={GraphsWorkoutDetails}
-          options={{ headerShown: false }}
-        />
-        <WeightLogStackScreen.Screen
-          name="MyProgress"
-          component={MyProgress}
-          options={{ headerShown: false }} // No header for MyCalendar screen
-        />
-        <WeightLogStackScreen.Screen
-          name="LogWeights"
-          component={LogWeights}
-          options={{ title: 'Log Weights' }} // Title for the LogWorkout screen
-        />
-
-  <WeightLogStackScreen.Screen
-          name="WeightLogDetail"
-          component={WeightLogDetail}
-          options={{ headerShown: false }} // No header for MyCalendar screen
-        />
-      <WeightLogStackScreen.Screen
-          name="AllLogs"
-          component={AllLogs}
-          options={{ headerShown: false }} // No header for MyCalendar screen
-        />    
-      
-      </WeightLogStackScreen.Navigator>
-    );
-  }
-
-  /*function StartWorkoutStack() {
-    return (
-      <StartWorkoutStackScreen.Navigator
-        screenOptions={{
-          headerShown: false, // Disable headers for all screens in this stack
-        }}
-      >
-        <StartWorkoutStackScreen.Screen
-          name="StartWorkout"
-          component={StartWorkout}
-          options={{ headerShown: false }}
-        />
-        <StartWorkoutStackScreen.Screen
-          name="StartedWorkoutInterface"
-          component={StartedWorkoutInterface}
-          options={{ headerShown: false }}
-        />
-      </StartWorkoutStackScreen.Navigator>
-    );
-  }*/
 
 // The schema lives in utils/schema.ts (pure, testable); this is the app-side
 // adapter that runs it before any screen renders. The bundled assets/SimpleDB.db
@@ -376,8 +131,13 @@ const initialiseSchema = async (db: SQLiteDatabase) => {
 };
 
 // Define AppContent here
+const TodayScreen = () => <PlaceholderScreen titleKey="today" />;
+const RoutinesScreen = () => <PlaceholderScreen titleKey="routines" />;
+const ProgressScreen = () => <PlaceholderScreen titleKey="progress" />;
+
 const AppContent = () => {
   const { theme } = useTheme();
+  const { t } = useTranslation();
   const { notificationPermissionGranted, setNotificationPermissionGranted } =
     useSettings();
 
@@ -387,6 +147,10 @@ const AppContent = () => {
     }
   }, [notificationPermissionGranted, setNotificationPermissionGranted]);
 
+  // No second SQLiteProvider anywhere: expo-sqlite's suspense path keeps one module-level
+  // database instance and reopens it whenever a provider mounts with props that differ from the
+  // current one, so a second provider closes the database out from under screens that are still
+  // querying it. Everything else uses useSQLiteContext().
   return (
     <>
       <StatusBar barStyle={theme.type === 'light' ? "dark-content" : "light-content"} />
@@ -397,7 +161,7 @@ const AppContent = () => {
           </View>
         }
       />
-      <SQLiteProvider databaseName="SimpleDB.db" useSuspense onInit={initialiseSchema}>
+  <SQLiteProvider databaseName="SimpleDB.db" useSuspense onInit={initialiseSchema}>
         <Bottom.Navigator
           screenOptions={{
             headerShown: false,
@@ -412,38 +176,30 @@ const AppContent = () => {
           }}
         >
           <Bottom.Screen
-            name="Home"
-            component={Home}
+            name="Today"
+            component={TodayScreen}
             options={{
+              tabBarLabel: t('today'),
               tabBarButton: (props) => (
-                <TabButton {...props} iconName="home" />
+                <TabButton {...props} iconName="today" />
               ),
             }}
           />
           <Bottom.Screen
-            name="My Workouts"
-            component={WorkoutStack}
+            name="Routines"
+            component={RoutinesScreen}
             options={{
+              tabBarLabel: t('routines'),
               tabBarButton: (props) => (
                 <TabButton {...props} iconName="barbell" />
               ),
             }}
           />
-
           <Bottom.Screen
-            name="My Calendar"
-            component={WorkoutLogStack}
+            name="Progress"
+            component={ProgressScreen}
             options={{
-              tabBarButton: (props) => (
-                <TabButton {...props} iconName="calendar" />
-              ),
-            }}
-          />
-
-          <Bottom.Screen
-            name="My Progress"
-            component={WeightLogStack}
-            options={{
+              tabBarLabel: t('progress'),
               tabBarButton: (props) => (
                 <TabButton {...props} iconName="trending-up" />
               ),
@@ -454,6 +210,7 @@ const AppContent = () => {
          name="Settings"
          component={Settings}
          options={{
+           tabBarLabel: t('settings'),
            tabBarButton: (props) => (
              <TabButton {...props} iconName="settings-sharp" />
            ),

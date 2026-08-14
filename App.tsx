@@ -15,6 +15,7 @@
   import Settings from './screens/Settings';
   import PlaceholderScreen from './screens/PlaceholderScreen';
   import TodayScreen from './screens/TodayScreen';
+  import StartSessionScreen from './screens/StartSessionScreen';
   import RoutinesListScreen from './screens/RoutinesListScreen';
   import RoutineDetailsScreen from './screens/RoutineDetailsScreen';
   import ActivateRoutineScreen from './screens/ActivateRoutineScreen';
@@ -103,15 +104,9 @@
 
   export type WeightLogStackParamList = {
     MyProgress: undefined;
-    LogWeights: { workout_log_id?: number };
     WeightLogDetail:{ workoutName: string }
     AllLogs: undefined;
     GraphsWorkoutDetails: undefined;
-  }
-
-  export type StartWorkoutStackParamList = {
-    StartWorkout: { fromNotification?: boolean } | undefined;
-    StartedWorkoutInterface: { workout_log_id: number };
   }
 
   export type RoutinesStackParamList = {
@@ -167,10 +162,9 @@ const TodayStack = () => {
       />
       <TodayStackNavigator.Screen
         name="StartSession"
+        component={StartSessionScreen}
         options={{ title: t('todayStartSession') }}
-      >
-        {() => <PlaceholderScreen titleKey="sessionRunnerComing" />}
-      </TodayStackNavigator.Screen>
+      />
       <TodayStackNavigator.Screen name="FreeLogging" options={{ title: t('freeLogging') }}>
         {() => <PlaceholderScreen titleKey="freeLoggingComing" />}
       </TodayStackNavigator.Screen>

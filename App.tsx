@@ -5,6 +5,7 @@
   import { SQLiteProvider, type SQLiteBindParams, type SQLiteDatabase } from 'expo-sqlite';
   import { Asset } from 'expo-asset';
   import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+  import { createNativeStackNavigator } from '@react-navigation/native-stack';
   import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
   import Ionicons from 'react-native-vector-icons/Ionicons';
   import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -13,11 +14,16 @@
   import { I18nextProvider, useTranslation } from 'react-i18next';
   import Settings from './screens/Settings';
   import PlaceholderScreen from './screens/PlaceholderScreen';
+  import RoutinesListScreen from './screens/RoutinesListScreen';
+  import RoutineDetailsScreen from './screens/RoutineDetailsScreen';
+  import ActivateRoutineScreen from './screens/ActivateRoutineScreen';
+  import EditRoutineScreen from './screens/EditRoutineScreen';
   import { SettingsProvider, useSettings } from './context/SettingsContext';
   import { ThemeProvider, useTheme } from './context/ThemeContext';
   import * as Notifications from 'expo-notifications';
   import { runSchema } from './utils/schema';
   import { checkAndSyncPermissions } from './utils/notificationUtils';
+  import { fontSize } from './utils/scale';
 
 
 
@@ -114,6 +120,13 @@
     StartedWorkoutInterface: { workout_log_id: number };
   }
 
+  export type RoutinesStackParamList = {
+    RoutinesList: undefined;
+    RoutineDetails: { routineId?: number; presetKey?: string };
+    ActivateRoutine: { presetKey: string };
+    EditRoutine: { routineId: number };
+  };
+
 // The schema lives in utils/schema.ts (pure, testable); this is the app-side
 // adapter that runs it before any screen renders. The bundled assets/SimpleDB.db
 // predates the new model: runSchema drops the obsolete Iteration 2 tables and
@@ -132,8 +145,45 @@ const initialiseSchema = async (db: SQLiteDatabase) => {
 
 // Define AppContent here
 const TodayScreen = () => <PlaceholderScreen titleKey="today" />;
-const RoutinesScreen = () => <PlaceholderScreen titleKey="routines" />;
 const ProgressScreen = () => <PlaceholderScreen titleKey="progress" />;
+
+const RoutinesStackNavigator = createNativeStackNavigator<RoutinesStackParamList>();
+
+const RoutinesStack = () => {
+  const { theme } = useTheme();
+  const { t } = useTranslation();
+  return (
+    <RoutinesStackNavigator.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: theme.background },
+        headerTintColor: theme.text,
+        headerTitleStyle: { fontSize: fontSize.cardTitle, fontWeight: '700' },
+        contentStyle: { backgroundColor: theme.background },
+      }}
+    >
+      <RoutinesStackNavigator.Screen
+        name="RoutinesList"
+        component={RoutinesListScreen}
+        options={{ headerShown: false }}
+      />
+      <RoutinesStackNavigator.Screen
+        name="RoutineDetails"
+        component={RoutineDetailsScreen}
+        options={{ title: t('routines') }}
+      />
+      <RoutinesStackNavigator.Screen
+        name="ActivateRoutine"
+        component={ActivateRoutineScreen}
+        options={{ title: t('setStartingWeights') }}
+      />
+      <RoutinesStackNavigator.Screen
+        name="EditRoutine"
+        component={EditRoutineScreen}
+        options={{ title: t('editRoutineTitle') }}
+      />
+    </RoutinesStackNavigator.Navigator>
+  );
+};
 
 const AppContent = () => {
   const { theme } = useTheme();
@@ -187,7 +237,7 @@ const AppContent = () => {
           />
           <Bottom.Screen
             name="Routines"
-            component={RoutinesScreen}
+            component={RoutinesStack}
             options={{
               tabBarLabel: t('routines'),
               tabBarButton: (props) => (

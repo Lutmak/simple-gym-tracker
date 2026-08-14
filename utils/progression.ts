@@ -391,6 +391,6 @@ function metReason(exercise: RoutineExercise, sets: PerformedSet[]): string {
   return `hiciste ${reps} con ${weight}`;
 }
 
-function roundTo(weight: number, increment: number): number {
+export function roundTo(weight: number, increment: number): number {
   return Math.round(weight / increment) * increment;
 }

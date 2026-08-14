@@ -41,17 +41,9 @@
     "Exercise Stats": "Exercise Stats",
     
 
-    "workoutNameErrorMessage": "Please enter a workout name.",
-    "provideDayNamesErrorMessage": "Please provide names for all days.",
-    "fillExercisesErrorMessage": "Please complete all exercises with valid data.",
-    "failedToCreateWorkoutErrorMessage": "Failed to create workout. Please try again.",
 
 
-    "workoutNamePlaceholder": "Workout Name",
-    "dayNamePlaceholder": "Day Name",
-    "exerciseNamePlaceholder": "Exercise Name",
 
-    "setsPlaceholder": "Sets",
     "repsPlaceholder": "Reps",
 
 
@@ -84,10 +76,6 @@
 
     "_comment_workoutlist": "These are workoutlist-related strings.",
 
-    "MyWorkouts": "My Workouts",
-    "CreateAWorkout" : "New\nWorkout",
-    "CreateAWorkoutButton" : "Create a new workout",
-    "WorkoutListTip" : "Tip: You can delete most things by long pressing on it, try it when you get the chance!",
 
 
     "_comment_myworkoutspage": "These are myworkoutspage-related strings.",
@@ -99,42 +87,23 @@
     "_comment_createWorkout": "These are create-workout-related strings.",
 
     "deleteDayTitle": "Delete Day",
-    "deleteDayMessage": "Are you sure you want to delete this day?",
 
-    "deleteExerciseTitle": "Delete Exercise",
-    "deleteExerciseMessage": "Are you sure you want to delete this exercise?",
     "addExercise": "+ Add Exercise",
     "addDay": "+ Add Day",
-    "saveWorkout":"Save Workout",
 
 
 
     "_comment_workoutDetails": "These are workot-details-related strings.",
 
     "noExercises":"No exercises on this day",
-    "addExerciseFromDetails": "Add Exercise",
-    "addDayFromDetails":"Add Day",
-    "emptyWorkoutDetails":" No days or exercises available for this workout.",
 
-    "deleteDayTitleDetails": "Delete Day",
-    "deleteDayMessageDetails": "Are you sure you want to delete this day? This action will also delete the days from the upcoming planned workouts",
-    "deleteExerciseTitleDetails": "Delete Exercise",
-    "deleteExerciseMessageDetails": "Are you sure you want to delete this exercise? This action will also delete the exercise from the upcoming planned workouts",
 
     "repsValidationError": "Reps must be a number greater than 0.",
-    "setsValidationError": "Sets must be a number greater than 0.",
-    "exerciseNameValidationError": "Exercise name cannot be empty.",
-    "dayNameValidationError": "Day name cannot be empty.",
 
 
 
     "_comment_editWorkout": "These are edit-workout-related strings.",
     
-    "fetchWorkoutDetailsError": "Failed to update workout details.",
-    "isSaving": "Saving...",
-    "saveChanges": "Save Changes",
-    "daysAndExercises": "Days and Exercises",
-    "editWorkout": "Edit Workout",
 
 
     "_comment_myCalendar": "These are my-calendar-related strings.",
@@ -199,7 +168,6 @@
     "Monday": "Monday",
     "Sunday": "Sunday",
     "notifications": "Notifications",
-    "anErrorOccurred": "An error occurred.",
     "workoutNotFound": "Workout not found.",
     "confirm": "Confirm",
 
@@ -329,12 +297,6 @@
     "settingsFirstWeekday": "First Day of the Week",
 
 
-    "workoutDetailsTip": "Tip: You can see additional information about an exercise by pressing to it's name.",
-    "webLink": "Web Link",
-    "webLinkPlaceholder": "https://example.com (optional)",
-    "invalidLinkTitle": "Invalid Link",
-    "invalidLinkMessage": "The link must start with \"http://\" or \"https://\".",
-    "exerciseDetails": "Exercise Details",
 
     "fileNotSelectedError": "No file was selected or the file is invalid.",
     "workoutAlreadyExistsError": "A workout with this name already exists.",
@@ -353,7 +315,6 @@
     "Calves": "Calves",
     "Quads": "Quads",
 
-    "muscleGroup": "Muscle Group",
 
 
     "Workout Volume": "Workout Volume",
@@ -396,7 +357,6 @@
     "logWeightsError": "Please make sure all fields are filled and not zero.",
     "logWeightsTipText": "You can delete sets from exercises by long pressing on the set number.",
     "exerciseNotes": "Notes",
-    "exerciseNotesPlaceholder": "Notes for exercise (optional)",
     "useLogsForRepsTitle": "Use previous reps",
     "lastWorkoutInfo": "Previous workout",
 
@@ -534,7 +494,6 @@
     "missingWeightsTitle": "Missing values",
     "missingWeightsMessage": "Enter a value for every weight field.",
     "editRoutineTitle": "Edit routine",
-    "editRoutineComing": "Editing routines arrives in a later iteration.",
     "weekdayFullSun": "Sunday",
     "weekdayFullMon": "Monday",
     "weekdayFullTue": "Tuesday",
@@ -565,5 +524,59 @@
     "weekdayAndDate": "{{weekday}}, {{date}}",
     "freeLogging": "Free logging",
     "freeLoggingComing": "Free logging arrives in D7",
-    "sessionRunnerComing": "Session runner arrives in D6"
+    "sessionRunnerComing": "Session runner arrives in D6",
+    "routineNameLabel": "Routine name",
+    "unitLabel": "Unit",
+    "restMainSecondsLabel": "Rest between main sets (s)",
+    "restAccessorySecondsLabel": "Rest between accessory sets (s)",
+    "trainingDaysSection": "Training days",
+    "sessionNamePlaceholder": "Day name",
+    "reassignDayHint": "Tap the day to move it to another weekday",
+    "dayTakenTitle": "Day in use",
+    "dayTakenMessage": "{{weekday}} already belongs to \"{{name}}\". Move that session first.",
+    "removeDayTitle": "Remove training day",
+    "removeDayMessage": "Remove \"{{name}}\"? Its exercises are removed too.",
+    "moveDayUp": "Move day up",
+    "moveDayDown": "Move day down",
+    "moveDayTitle": "Move {{name}}",
+    "maxSessionsTitle": "A week has seven days",
+    "maxSessionsMessage": "A routine can have at most one session per weekday.",
+    "roleLabel": "Role",
+    "roleMain": "Main",
+    "roleAccessory": "Accessory",
+    "removeExerciseTitle": "Remove exercise",
+    "removeExerciseMessage": "Remove \"{{name}}\" from this day?",
+    "moveExerciseUp": "Move up",
+    "moveExerciseDown": "Move down",
+    "loadSourceLabel": "Load",
+    "loadSourceAbsolute": "Absolute",
+    "loadSourceTrainingMaxPct": "Training max %",
+    "weightLabel": "Weight ({{unit}})",
+    "unitOverrideLabel": "Exercise unit",
+    "unitOverrideNone": "None",
+    "amrapLabel": "AMRAP",
+    "amrapOn": "ON",
+    "amrapOff": "OFF",
+    "savedTitle": "Routine saved",
+    "savedMessage": "\"{{name}}\" was updated. Logged history is unchanged.",
+    "saveFailedTitle": "Could not save",
+    "saveFailedMessage": "The routine was not changed.",
+    "editErrorRoutineNameRequired": "Enter a routine name.",
+    "editErrorRoundingIncrementInvalid": "Enter a positive rounding increment.",
+    "editErrorRestInvalid": "Rest must be 0 or more seconds.",
+    "editErrorSessionNameRequired": "Enter a name for every training day.",
+    "editErrorDuplicateWeekday": "Two training days share the same weekday.",
+    "editErrorSetsInvalid": "\"{{exercise}}\" needs at least one set.",
+    "editErrorRepsInvalid": "\"{{exercise}}\" needs at least one rep.",
+    "editErrorTrainingMaxMissing": "Enter a training max for \"{{exercise}}\".",
+    "editErrorWeightMissing": "Enter a weight for \"{{exercise}}\".",
+    "pickerTitle": "Choose an exercise",
+    "pickerMuscleFilter": "Filtered by: {{muscles}}",
+    "pickerAllExercises": "All exercises",
+    "pickerSearchPlaceholder": "Search exercises",
+    "pickerCustomExercise": "Custom exercise",
+    "pickerCustomNamePlaceholder": "Exercise name",
+    "pickerCustomNameRequired": "Enter an exercise name.",
+    "pickerAddCustom": "Add",
+    "pickerEmpty": "No exercises found"
   }

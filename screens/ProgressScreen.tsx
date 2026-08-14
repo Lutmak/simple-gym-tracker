@@ -36,6 +36,13 @@ import {
   type RoutineProgressData,
   type WeekDetailData,
 } from '../utils/routineProgress';
+import {
+  loadExercisesWithHistory,
+  loadExerciseSeries,
+  type ExerciseSeries,
+  type ExerciseSessionPoint,
+  type ExerciseSummary,
+} from '../utils/exerciseHistory';
 import type { RoutineDatabase } from '../utils/routineActions';
 
 const MONTH_KEYS = [
@@ -84,6 +91,10 @@ export default function ProgressScreen() {
   const [routineData, setRoutineData] = useState<RoutineProgressData | null>(null);
   const [series, setSeries] = useState<MainLiftSeries[]>([]);
   const [calendarLogs, setCalendarLogs] = useState<CalendarLogRow[]>([]);
+  const [view, setView] = useState<'routine' | 'exercises'>('routine');
+  const [exerciseSummaries, setExerciseSummaries] = useState<ExerciseSummary[]>([]);
+  const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
+  const [exerciseSeries, setExerciseSeries] = useState<ExerciseSeries | null>(null);
   const [weekDetail, setWeekDetail] = useState<SelectedWeek | null>(null);
   const [weekData, setWeekData] = useState<WeekDetailData | null>(null);
   const [dayPopup, setDayPopup] = useState<number | null>(null);
@@ -106,49 +117,84 @@ export default function ProgressScreen() {
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
-      loadProgressRoutines(routineDb)
-        .then(async (loaded) => {
-          if (cancelled) {
-            return;
-          }
-          setRoutines(loaded);
-          const preferred =
-            selectedId !== null && loaded.some((routine) => routine.routineId === selectedId)
-              ? selectedId
-              : (loaded.find((routine) => routine.isActive)?.routineId ??
-                loaded[0]?.routineId ??
-                null);
-          setSelectedId((current) => (current === preferred ? current : preferred));
-          if (preferred === null) {
-            setRoutineData(null);
-            setSeries([]);
-            setCalendarLogs([]);
-            return;
-          }
-          const [data, liftSeries, logs] = await Promise.all([
-            loadRoutineProgress(routineDb, preferred),
-            loadMainLiftSeries(routineDb, preferred),
-            loadCalendarLogs(routineDb),
-          ]);
-          if (!cancelled) {
-            setRoutineData(data);
-            setSeries(liftSeries);
-            setCalendarLogs(logs);
-          }
-        })
-        .catch((error) => {
-          console.error('Error loading progress:', error);
-          if (!cancelled) {
-            setRoutineData(null);
-            setSeries([]);
-            setCalendarLogs([]);
-          }
-        });
+      const load = async () => {
+        const [loaded, logs, summaries] = await Promise.all([
+          loadProgressRoutines(routineDb),
+          loadCalendarLogs(routineDb),
+          loadExercisesWithHistory(routineDb),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        setRoutines(loaded);
+        setCalendarLogs(logs);
+        setExerciseSummaries(summaries);
+        const preferred =
+          selectedId !== null && loaded.some((routine) => routine.routineId === selectedId)
+            ? selectedId
+            : (loaded.find((routine) => routine.isActive)?.routineId ??
+              loaded[0]?.routineId ??
+              null);
+        setSelectedId((current) => (current === preferred ? current : preferred));
+        const preferredExercise =
+          selectedExercise !== null &&
+          summaries.some((entry) => entry.name === selectedExercise)
+            ? selectedExercise
+            : (summaries[0]?.name ?? null);
+        setSelectedExercise((current) =>
+          current === preferredExercise ? current : preferredExercise,
+        );
+        if (preferred === null) {
+          setRoutineData(null);
+          setSeries([]);
+          return;
+        }
+        const [data, liftSeries] = await Promise.all([
+          loadRoutineProgress(routineDb, preferred),
+          loadMainLiftSeries(routineDb, preferred),
+        ]);
+        if (!cancelled) {
+          setRoutineData(data);
+          setSeries(liftSeries);
+        }
+      };
+      load().catch((error) => {
+        console.error('Error loading progress:', error);
+        if (!cancelled) {
+          setRoutineData(null);
+          setSeries([]);
+          setCalendarLogs([]);
+          setExerciseSummaries([]);
+        }
+      });
       return () => {
         cancelled = true;
       };
-    }, [db, selectedId]),
+    }, [db, selectedId, selectedExercise]),
   );
+
+  React.useEffect(() => {
+    if (selectedExercise === null) {
+      setExerciseSeries(null);
+      return;
+    }
+    let cancelled = false;
+    loadExerciseSeries(routineDb, selectedExercise)
+      .then((series) => {
+        if (!cancelled) {
+          setExerciseSeries(series);
+        }
+      })
+      .catch((error) => {
+        console.error('Error loading the exercise history:', error);
+        if (!cancelled) {
+          setExerciseSeries(null);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [db, selectedExercise]);
 
   const markers = useMemo(() => buildCalendarMarkers(calendarLogs), [calendarLogs]);
   const formatDate = (stamp: number): string => {
@@ -394,6 +440,162 @@ export default function ProgressScreen() {
           style={styles.chart}
         />
       </View>
+    );
+  };
+
+  const renderExerciseChip = (entry: ExerciseSummary) => {
+    const selected = entry.name === selectedExercise;
+    return (
+      <Pressable
+        key={entry.name}
+        style={({ pressed }) => [
+          styles.chip,
+          { borderColor: theme.border },
+          selected && { backgroundColor: theme.buttonBackground, borderColor: theme.buttonBackground },
+          pressed && styles.pressed,
+        ]}
+        onPress={() => setSelectedExercise(entry.name)}
+        accessibilityRole="button"
+      >
+        <Text
+          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          style={[
+            styles.chipText,
+            { color: theme.text },
+            selected && { color: theme.buttonText },
+          ]}
+          numberOfLines={1}
+        >
+          {entry.name}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  const renderMetricChart = (
+    titleKey: string,
+    points: readonly ExerciseSessionPoint[],
+    unit: string,
+    valueOf: (point: ExerciseSessionPoint) => number,
+  ) => {
+    const chartWidth = Math.max(200, width - spacing.gutter * 2 - spacing.card * 2);
+    if (points.length === 0) {
+      return (
+        <View
+          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+        >
+          <Text style={[styles.cardTitle, { color: theme.text }]}>{t(titleKey)}</Text>
+          <Text style={[styles.helper, { color: theme.text }]}>{t('progressNoData')}</Text>
+        </View>
+      );
+    }
+    if (!hasChartableSeries(points)) {
+      const point = points[0];
+      return (
+        <View
+          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+        >
+          <Text style={[styles.cardTitle, { color: theme.text }]}>{t(titleKey)}</Text>
+          <Text style={[styles.singlePoint, { color: theme.text }]}>
+            {point === undefined
+              ? ''
+              : `${formatWeight(valueOf(point))} ${unit}`}
+          </Text>
+          <Text style={[styles.helper, { color: theme.text }]}>{t('progressSinglePoint')}</Text>
+        </View>
+      );
+    }
+    return (
+      <View
+        style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+      >
+        <Text style={[styles.cardTitle, { color: theme.text }]}>{t(titleKey)}</Text>
+        <LineChart
+          data={{
+            labels: chartLabels(points),
+            datasets: [{ data: points.map(valueOf) }],
+          }}
+          width={chartWidth}
+          height={180}
+          withShadow={false}
+          withInnerLines
+          withOuterLines
+          withDots
+          bezier={false}
+          fromZero={false}
+          yAxisSuffix={` ${unit}`}
+          chartConfig={{
+            backgroundColor: theme.card,
+            backgroundGradientFrom: theme.card,
+            backgroundGradientTo: theme.card,
+            decimalPlaces: 1,
+            color: () => theme.buttonBackground,
+            labelColor: () => theme.text,
+            propsForDots: {
+              r: '3',
+              strokeWidth: '1',
+              stroke: theme.border,
+            },
+          }}
+          style={styles.chart}
+        />
+      </View>
+    );
+  };
+
+  const renderExerciseHistory = () => {
+    if (exerciseSummaries.length === 0) {
+      return (
+        <View
+          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+        >
+          <Text style={[styles.cardTitle, { color: theme.text }]}>
+            {t('progressExerciseHistory')}
+          </Text>
+          <Text style={[styles.helper, { color: theme.text }]}>{t('progressHistoryNone')}</Text>
+        </View>
+      );
+    }
+    return (
+      <>
+        <Text style={[styles.sectionTitle, { color: theme.text }]}>
+          {t('progressExerciseHistory')}
+        </Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipRow}
+        >
+          {exerciseSummaries.map(renderExerciseChip)}
+        </ScrollView>
+        {exerciseSeries === null || exerciseSeries.exerciseName !== selectedExercise ? null : (
+          <>
+            {exerciseSeries.mixedUnits && (
+              <Text style={[styles.helper, { color: theme.text }]}>
+                {t('progressHistoryMixedUnits')}
+              </Text>
+            )}
+            {renderMetricChart(
+              'progressLoadOverTime',
+              exerciseSeries.points,
+              exerciseSeries.unit,
+              (point) => point.weight,
+            )}
+            {renderMetricChart(
+              'progressEstimated1rm',
+              exerciseSeries.points,
+              exerciseSeries.unit,
+              (point) => point.estimated1RM,
+            )}
+            {renderMetricChart(
+              'progressVolume',
+              exerciseSeries.points,
+              exerciseSeries.unit,
+              (point) => point.volume,
+            )}
+          </>
+        )}
+      </>
     );
   };
 
@@ -707,84 +909,143 @@ export default function ProgressScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <Text style={[styles.title, { color: theme.text }]}>{t('progress')}</Text>
 
-        {routines.length > 0 && (
-          <>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.chipRow}
+        <View style={styles.viewSwitcher}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.viewSwitchChip,
+              { borderColor: theme.border },
+              view === 'routine' && {
+                backgroundColor: theme.buttonBackground,
+                borderColor: theme.buttonBackground,
+              },
+              pressed && styles.pressed,
+            ]}
+            onPress={() => setView('routine')}
+            accessibilityRole="button"
+          >
+            <Text
+              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+              style={[
+                styles.chipText,
+                { color: theme.text },
+                view === 'routine' && { color: theme.buttonText },
+              ]}
             >
-              {routines.map(renderRoutineChip)}
-            </ScrollView>
+              {t('progressViewRoutine')}
+            </Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.viewSwitchChip,
+              { borderColor: theme.border },
+              view === 'exercises' && {
+                backgroundColor: theme.buttonBackground,
+                borderColor: theme.buttonBackground,
+              },
+              pressed && styles.pressed,
+            ]}
+            onPress={() => setView('exercises')}
+            accessibilityRole="button"
+          >
+            <Text
+              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+              style={[
+                styles.chipText,
+                { color: theme.text },
+                view === 'exercises' && { color: theme.buttonText },
+              ]}
+            >
+              {t('progressViewExercises')}
+            </Text>
+          </Pressable>
+        </View>
 
-            {routineData === null || routineData.routine.routineId !== selectedId ? null : (
+        {view === 'routine' ? (
+          <>
+            {routines.length > 0 && (
               <>
-                {routineData.cycles.length === 0 ? (
-                  <View
-                    style={[
-                      styles.card,
-                      { backgroundColor: theme.card, borderColor: theme.border },
-                    ]}
-                  >
-                    <Text style={[styles.cardTitle, { color: theme.text }]}>
-                      {routineData.routine.name}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.chipRow}
+                >
+                  {routines.map(renderRoutineChip)}
+                </ScrollView>
+
+                {routineData === null || routineData.routine.routineId !== selectedId ? null : (
+                  <>
+                    {routineData.cycles.length === 0 ? (
+                      <View
+                        style={[
+                          styles.card,
+                          { backgroundColor: theme.card, borderColor: theme.border },
+                        ]}
+                      >
+                        <Text style={[styles.cardTitle, { color: theme.text }]}>
+                          {routineData.routine.name}
+                        </Text>
+                        <Text style={[styles.helper, { color: theme.text }]}>
+                          {t('progressNoCycles')}
+                        </Text>
+                      </View>
+                    ) : (
+                      routineData.cycles.map((cycleView) =>
+                        renderCycleCard(cycleView.cycle, cycleView.weeks),
+                      )
+                    )}
+
+                    <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                      {t('progressMainLifts')}
                     </Text>
-                    <Text style={[styles.helper, { color: theme.text }]}>
-                      {t('progressNoCycles')}
-                    </Text>
-                  </View>
-                ) : (
-                  routineData.cycles.map((view) => renderCycleCard(view.cycle, view.weeks))
+                    {series.map(renderLiftChart)}
+
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.secondaryButton,
+                        styles.freeLoggingButton,
+                        { borderColor: theme.border },
+                        pressed && styles.pressed,
+                      ]}
+                      onPress={goToFreeLogging}
+                      accessibilityRole="button"
+                    >
+                      <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
+                        {t('freeLogging')}
+                      </Text>
+                    </Pressable>
+                  </>
                 )}
+              </>
+            )}
 
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                  {t('progressMainLifts')}
-                </Text>
-                {series.map(renderLiftChart)}
-
+            {routines.length === 0 && (
+              <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                <Text style={[styles.cardTitle, { color: theme.text }]}>{t('progress')}</Text>
+                <Text style={[styles.helper, { color: theme.text }]}>{t('progressNoRoutines')}</Text>
                 <Pressable
                   style={({ pressed }) => [
-                    styles.secondaryButton,
-                    styles.freeLoggingButton,
-                    { borderColor: theme.border },
+                    styles.primaryButton,
+                    { backgroundColor: theme.buttonBackground },
                     pressed && styles.pressed,
                   ]}
                   onPress={goToFreeLogging}
                   accessibilityRole="button"
                 >
-                  <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
+                  <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
                     {t('freeLogging')}
                   </Text>
                 </Pressable>
-              </>
+              </View>
             )}
+
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>
+              {t('progressCalendar')}
+            </Text>
+            {renderCalendar()}
           </>
+        ) : (
+          renderExerciseHistory()
         )}
-
-        {routines.length === 0 && (
-          <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <Text style={[styles.cardTitle, { color: theme.text }]}>{t('progress')}</Text>
-            <Text style={[styles.helper, { color: theme.text }]}>{t('progressNoRoutines')}</Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.primaryButton,
-                { backgroundColor: theme.buttonBackground },
-                pressed && styles.pressed,
-              ]}
-              onPress={goToFreeLogging}
-              accessibilityRole="button"
-            >
-              <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-                {t('freeLogging')}
-              </Text>
-            </Pressable>
-          </View>
-        )}
-
-        <Text style={[styles.sectionTitle, { color: theme.text }]}>
-          {t('progressCalendar')}
-        </Text>
-        {renderCalendar()}
       </ScrollView>
       {renderWeekDetail()}
       {renderDayPopup()}
@@ -816,6 +1077,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.inline,
     marginBottom: spacing.section,
+  },
+  viewSwitcher: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: spacing.inline,
+    marginBottom: spacing.section,
+  },
+  viewSwitchChip: {
+    flex: 1,
+    maxWidth: 220,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    paddingHorizontal: spacing.card,
+    minHeight: touchTarget.control,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   chip: {
     borderRadius: radius.pill,

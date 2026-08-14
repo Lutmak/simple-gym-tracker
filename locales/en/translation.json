@@ -548,7 +548,22 @@
     "weekdayShortWed": "W",
     "weekdayShortThu": "T",
     "weekdayShortFri": "F",
-    "weekdayShortSat": "S"
-
-    }
-  
+    "weekdayShortSat": "S",
+    "_comment_today": "These are Today-screen strings (D5).",
+    "todaySession": "Today's session",
+    "noSessionTodayTitle": "Nothing scheduled today",
+    "noActiveRoutineTitle": "Start with a routine",
+    "noActiveRoutineMessage": "Choose a preset or create your own routine. Today's session will appear here.",
+    "goToRoutines": "Browse routines",
+    "missedSessionsTitle": "Missed sessions",
+    "missedSessionPrompt": "Not logged — move it, do it today, or discard it.",
+    "missedMove": "Move",
+    "missedDoToday": "Do it today",
+    "missedDiscard": "Discard",
+    "missedMoveHint": "Pick a day",
+    "todayStartSession": "Start session",
+    "weekdayAndDate": "{{weekday}}, {{date}}",
+    "freeLogging": "Free logging",
+    "freeLoggingComing": "Free logging arrives in D7",
+    "sessionRunnerComing": "Session runner arrives in D6"
+  }

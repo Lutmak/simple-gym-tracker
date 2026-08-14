@@ -14,6 +14,7 @@
   import { I18nextProvider, useTranslation } from 'react-i18next';
   import Settings from './screens/Settings';
   import PlaceholderScreen from './screens/PlaceholderScreen';
+  import TodayScreen from './screens/TodayScreen';
   import RoutinesListScreen from './screens/RoutinesListScreen';
   import RoutineDetailsScreen from './screens/RoutineDetailsScreen';
   import ActivateRoutineScreen from './screens/ActivateRoutineScreen';
@@ -127,6 +128,12 @@
     EditRoutine: { routineId: number };
   };
 
+  export type TodayStackParamList = {
+    Today: undefined;
+    StartSession: { weekSessionId: number };
+    FreeLogging: undefined;
+  };
+
 // The schema lives in utils/schema.ts (pure, testable); this is the app-side
 // adapter that runs it before any screen renders. The bundled assets/SimpleDB.db
 // predates the new model: runSchema drops the obsolete Iteration 2 tables and
@@ -144,8 +151,39 @@ const initialiseSchema = async (db: SQLiteDatabase) => {
 };
 
 // Define AppContent here
-const TodayScreen = () => <PlaceholderScreen titleKey="today" />;
 const ProgressScreen = () => <PlaceholderScreen titleKey="progress" />;
+
+const TodayStackNavigator = createNativeStackNavigator<TodayStackParamList>();
+
+const TodayStack = () => {
+  const { theme } = useTheme();
+  const { t } = useTranslation();
+  return (
+    <TodayStackNavigator.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: theme.background },
+        headerTintColor: theme.text,
+        headerTitleStyle: { fontSize: fontSize.cardTitle, fontWeight: '700' },
+        contentStyle: { backgroundColor: theme.background },
+      }}
+    >
+      <TodayStackNavigator.Screen
+        name="Today"
+        component={TodayScreen}
+        options={{ headerShown: false }}
+      />
+      <TodayStackNavigator.Screen
+        name="StartSession"
+        options={{ title: t('todayStartSession') }}
+      >
+        {() => <PlaceholderScreen titleKey="sessionRunnerComing" />}
+      </TodayStackNavigator.Screen>
+      <TodayStackNavigator.Screen name="FreeLogging" options={{ title: t('freeLogging') }}>
+        {() => <PlaceholderScreen titleKey="freeLoggingComing" />}
+      </TodayStackNavigator.Screen>
+    </TodayStackNavigator.Navigator>
+  );
+};
 
 const RoutinesStackNavigator = createNativeStackNavigator<RoutinesStackParamList>();
 
@@ -227,7 +265,7 @@ const AppContent = () => {
         >
           <Bottom.Screen
             name="Today"
-            component={TodayScreen}
+            component={TodayStack}
             options={{
               tabBarLabel: t('today'),
               tabBarButton: (props) => (

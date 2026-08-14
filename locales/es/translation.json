@@ -415,5 +415,22 @@
     "weekdayShortWed": "X",
     "weekdayShortThu": "J",
     "weekdayShortFri": "V",
-    "weekdayShortSat": "S"
+    "weekdayShortSat": "S",
+    "_comment_today": "Textos de la pantalla Hoy (D5).",
+    "todaySession": "Sesión de hoy",
+    "noSessionTodayTitle": "Nada programado hoy",
+    "noActiveRoutineTitle": "Empieza con una rutina",
+    "noActiveRoutineMessage": "Elige una rutina predefinida o crea la tuya. Tu sesión de hoy aparecerá aquí.",
+    "goToRoutines": "Ver rutinas",
+    "missedSessionsTitle": "Sesiones pendientes",
+    "missedSessionPrompt": "Sin registrar: muévela, hazla hoy o descártala.",
+    "missedMove": "Mover",
+    "missedDoToday": "Hacerla hoy",
+    "missedDiscard": "Descartar",
+    "missedMoveHint": "Elige un día",
+    "todayStartSession": "Empezar sesión",
+    "weekdayAndDate": "{{weekday}}, {{date}}",
+    "freeLogging": "Registro libre",
+    "freeLoggingComing": "El registro libre llega en D7",
+    "sessionRunnerComing": "El runner de sesión llega en D6"
   }

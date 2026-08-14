@@ -80,9 +80,9 @@ Full credit and thanks to **Başar Subaşı** for the original work, which remai
 
 ## 🌍 **Languages**
 
-🇨🇿 🇩🇪 🇩🇰 🇬🇷 🇬🇧 🇪🇸 🇫🇮 🇫🇷 🇮🇹 🇯🇵 🇰🇷 🇳🇱 🇳🇴 🇵🇱 🇵🇹 🇷🇴 🇷🇺 🇸🇮 🇸🇪 🇹🇷 🇺🇦 🇨🇳
+🇬🇧 English · 🇪🇸 Español
 
-Translations are inherited from upstream. To add a language or improve an existing one, open a pull request against `locales/` — English (`locales/en/translation.json`) is the fallback, so any key missing from your language falls back to English rather than breaking.
+The app ships exactly two locales, `en` and `es`, kept in identical key coverage by a parity test (`locales/localeParity.test.ts`). To add a key, add it to both `locales/en/translation.json` and `locales/es/translation.json` in the same commit.
 
 ## 🛠️ **How It Works**
 

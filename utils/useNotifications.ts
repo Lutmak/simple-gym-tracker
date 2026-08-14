@@ -4,7 +4,8 @@ import {
   requestNotificationPermissions,
   scheduleWorkoutNotification, 
   cancelWorkoutNotification,
-  getAllScheduledNotifications
+  getAllScheduledNotifications,
+  scheduleDailyWorkoutReminder
 } from './notificationUtils';
 import { useSettings } from '../context/SettingsContext';
 
@@ -114,6 +115,20 @@ export const useNotifications = () => {
     }
   }, []);
 
+  // 6) Schedule the single daily reminder at the global notification time.
+  //    Permission is enforced by scheduleDailyWorkoutReminder; the context
+  //    flag updates after the screen's request resolves, so gating here would
+  //    read a stale value on the first schedule.
+  const scheduleDailyReminder = useCallback(async (time: string) => {
+    const [hour, minute] = time.split(':').map(Number);
+    const notificationId = await scheduleDailyWorkoutReminder(hour, minute);
+    if (notificationId) {
+      const notifications = await getAllScheduledNotifications();
+      setScheduledNotifications(notifications);
+    }
+    return notificationId;
+  }, []);
+
   return {
     loading,
     scheduledNotifications,
@@ -122,6 +137,7 @@ export const useNotifications = () => {
     requestNotificationPermission,
     scheduleNotification,
     cancelNotification,
-    cancelAllNotifications
+    cancelAllNotifications,
+    scheduleDailyReminder,
   };
 };

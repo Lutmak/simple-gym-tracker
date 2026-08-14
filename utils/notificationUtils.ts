@@ -105,6 +105,40 @@ export const scheduleWorkoutNotification = async ({
   }
 };
 
+// Schedule a daily reminder at the global notification time
+export const scheduleDailyWorkoutReminder = async (
+  hour: number,
+  minute: number,
+): Promise<string | null> => {
+  try {
+    // Ensure we have permission
+    const hasPermission = await requestNotificationPermissions();
+    if (!hasPermission) {
+      console.log('Notification permission not granted');
+      return null;
+    }
+
+    const notificationId = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: i18n.t('dailyReminderTitle'),
+        body: i18n.t('dailyReminderBody'),
+        data: { kind: 'daily-reminder' },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.DAILY,
+        hour,
+        minute,
+      },
+    });
+
+    console.log(`Scheduled daily reminder: ${notificationId}`);
+    return notificationId;
+  } catch (error) {
+    console.error('Error scheduling daily reminder:', error);
+    return null;
+  }
+};
+
 // Cancel a scheduled notification
 export const cancelWorkoutNotification = async (notificationId: string): Promise<boolean> => {
   try {

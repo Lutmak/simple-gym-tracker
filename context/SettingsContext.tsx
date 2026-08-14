@@ -4,13 +4,7 @@ import React, {
   useEffect,
   useState,
 } from 'react';
-import {
-  DEFAULT_FIVE_THREE_ONE_DEFAULTS,
-  loadSettings,
-  mergeFiveThreeOneDefaults,
-  saveSettings,
-  type FiveThreeOneDefaults,
-} from '../utils/settingsStorage';
+import { loadSettings, saveSettings } from '../utils/settingsStorage';
 import i18n from '../utils/i18n';
 import * as Localization from 'expo-localization';
 import { requestNotificationPermissions } from '../utils/notificationUtils';
@@ -59,6 +53,11 @@ const getDeviceFirstWeekday = (): 'Sunday' | 'Monday' => {
   return 'Monday';
 };
 
+const DEFAULT_NOTIFICATION_TIME = '08:00';
+
+const isTimeOfDay = (value: unknown): value is string =>
+  typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+
 // 1) Create the type for your context values:
 type SettingsContextType = {
   language: string;
@@ -73,9 +72,9 @@ type SettingsContextType = {
   setFirstWeekday: (day: 'Sunday' | 'Monday') => void;
   notificationPermissionGranted: boolean;
   setNotificationPermissionGranted: (granted: boolean) => void;
+  notificationTime: string;
+  setNotificationTime: (time: string) => void;
   requestNotificationPermission: () => Promise<boolean>;
-  fiveThreeOneDefaults: FiveThreeOneDefaults;
-  setFiveThreeOneDefaults: (defaults: FiveThreeOneDefaults) => void;
 };
 
 // 2) Declare the actual context:
@@ -95,8 +94,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   );
   const [notificationPermissionGranted, setNotificationPermissionGranted] =
     useState(false);
-  const [fiveThreeOneDefaults, setFiveThreeOneDefaults] =
-    useState<FiveThreeOneDefaults>(() => ({ ...DEFAULT_FIVE_THREE_ONE_DEFAULTS }));
+  const [notificationTime, setNotificationTime] = useState(
+    DEFAULT_NOTIFICATION_TIME,
+  );
 
   // Function to request notification permission
   const requestNotificationPermission = async (): Promise<boolean> => {
@@ -148,8 +148,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         setNotificationPermissionGranted(
           Boolean(savedSettings.notificationPermissionGranted),
         );
-        setFiveThreeOneDefaults(
-          mergeFiveThreeOneDefaults(savedSettings.fiveThreeOneDefaults),
+        setNotificationTime(
+          isTimeOfDay(savedSettings.notificationTime)
+            ? savedSettings.notificationTime
+            : DEFAULT_NOTIFICATION_TIME,
         );
       } else {
         const fallbackLng = 'en';
@@ -161,7 +163,6 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         setDateFormat(deviceDateFormat);
         setWeightFormat(deviceWeightFormat);
         setFirstWeekday(deviceFirstWeekday);
-        setFiveThreeOneDefaults({ ...DEFAULT_FIVE_THREE_ONE_DEFAULTS });
       }
       setIsInitialized(true);
     };
@@ -184,7 +185,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         weightFormat,
         firstWeekday,
         notificationPermissionGranted,
-        fiveThreeOneDefaults,
+        notificationTime,
       });
     };
     persistSettings();
@@ -195,7 +196,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     weightFormat,
     firstWeekday,
     notificationPermissionGranted,
-    fiveThreeOneDefaults,
+    notificationTime,
     isInitialized,
   ]);
 
@@ -214,9 +215,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         setFirstWeekday,
         notificationPermissionGranted,
         setNotificationPermissionGranted,
+        notificationTime,
+        setNotificationTime,
         requestNotificationPermission,
-        fiveThreeOneDefaults,
-        setFiveThreeOneDefaults,
       }}
     >
       {children}

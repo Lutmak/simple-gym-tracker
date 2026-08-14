@@ -6,14 +6,14 @@
   import { Asset } from 'expo-asset';
   import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
   import { createNativeStackNavigator } from '@react-navigation/native-stack';
-  import { NavigationContainer, NavigationContainerRef, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
+  import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
   import Ionicons from 'react-native-vector-icons/Ionicons';
   import { GestureHandlerRootView } from 'react-native-gesture-handler';
   import './utils/i18n'; // Ensure this is present to initialize i18n
   import i18n from './utils/i18n'; // Import the i18n instance
   import { I18nextProvider, useTranslation } from 'react-i18next';
   import Settings from './screens/Settings';
-  import PlaceholderScreen from './screens/PlaceholderScreen';
+  import ProgressScreen from './screens/ProgressScreen';
   import TodayScreen from './screens/TodayScreen';
   import StartSessionScreen from './screens/StartSessionScreen';
   import FreeLoggingScreen from './screens/FreeLoggingScreen';
@@ -105,13 +105,6 @@
   
 
 
-  export type WeightLogStackParamList = {
-    MyProgress: undefined;
-    WeightLogDetail:{ workoutName: string }
-    AllLogs: undefined;
-    GraphsWorkoutDetails: undefined;
-  }
-
   export type RoutinesStackParamList = {
     RoutinesList: undefined;
     RoutineDetails: { routineId?: number; presetKey?: string };
@@ -144,19 +137,6 @@ const initialiseSchema = async (db: SQLiteDatabase) => {
 };
 
 // Define AppContent here
-const ProgressScreen = () => {
-  const navigation = useNavigation<NavigationProp<ParamListBase>>();
-  return (
-    <PlaceholderScreen
-      titleKey="progress"
-      action={{
-        labelKey: 'freeLogging',
-        onPress: () => navigation.navigate('Today', { screen: 'FreeLogging' }),
-      }}
-    />
-  );
-};
-
 const TodayStackNavigator = createNativeStackNavigator<TodayStackParamList>();
 
 const TodayStack = () => {

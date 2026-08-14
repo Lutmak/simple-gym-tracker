@@ -1,25 +1,19 @@
 {
-    
-  
-   "_comment_global": "These are global strings",
-
-
-    "alertCancel" : "CANCEL",
+    "_comment_global": "These are global strings",
+    "alertCancel": "CANCEL",
     "alertDelete": "DELETE",
     "errorTitle": "Error",
-    "Cancel":"Cancel",
-    "Delete":"Delete",
-    "Save":"Save",
-    "Sets":"sets",
-    "Reps":"reps",
-    "Today":"Today",
-    "Tomorrow":"Tomorrow",
-    "Yesterday":"Yesterday",
+    "Cancel": "Cancel",
+    "Delete": "Delete",
+    "Save": "Save",
+    "Sets": "sets",
+    "Reps": "reps",
+    "Today": "Today",
+    "Tomorrow": "Tomorrow",
+    "Yesterday": "Yesterday",
     "set": "Set",
-
     "_comment_calendar": "These are calendar-related strings.",
     "locale": "en",
-    
     "January": "January",
     "February": "February",
     "March": "March",
@@ -32,25 +26,8 @@
     "October": "October",
     "November": "November",
     "December": "December",
-
-    "View Logs": "View Logs",
-    "Logs": "Logs",
-    "Graph Type": "Graph Type",
-    "Metric": "Metric",
-    "Select Exercise": "Select Exercise",
-    "Exercise Stats": "Exercise Stats",
-    
-
-
-
-
     "repsPlaceholder": "Reps",
-
-
     "_comment_settings": "These are settings-related strings.",
-  
-
-
     "settingsTitle": "Settings",
     "settingsLanguage": "Language",
     "settingsDateFormat": "Date Format",
@@ -58,124 +35,52 @@
     "settingsTheme": "Theme",
     "settingsSwitchDark": "Switch to Dark",
     "settingsSwitchLight": "Switch to Light",
-     "fiveThreeOneDefaults": "5/3/1 Defaults",
-     "fiveThreeOneDefaultsDescription": "These values are copied into new programs using the unit chosen in setup. Existing programs keep their saved settings.",
-     "includeDeload": "Include deload week",
-     "upperTmIncrement": "Upper-body TM increment",
-     "lowerTmIncrement": "Lower-body TM increment",
-     "warmupGeneration": "Generate warm-up ramps",
-
-
-
-
-
+    "fiveThreeOneDefaults": "5/3/1 Defaults",
+    "fiveThreeOneDefaultsDescription": "These values are copied into new programs using the unit chosen in setup. Existing programs keep their saved settings.",
+    "includeDeload": "Include deload week",
+    "upperTmIncrement": "Upper-body TM increment",
+    "lowerTmIncrement": "Lower-body TM increment",
+    "warmupGeneration": "Generate warm-up ramps",
     "_comment_homepage": "These are homepage-related strings.",
-
-
-
-
     "_comment_workoutlist": "These are workoutlist-related strings.",
-
-
-
     "_comment_myworkoutspage": "These are myworkoutspage-related strings.",
-
     "deleteWorkoutTitle": "Deleting {{workoutName}}",
     "deleteWorkoutMessage": "Are you sure you want to delete \"{{workoutName}}\"? This action won't affect existing logs.",
-
-
     "_comment_createWorkout": "These are create-workout-related strings.",
-
     "deleteDayTitle": "Delete Day",
-
     "addExercise": "+ Add Exercise",
     "addDay": "+ Add Day",
-
-
-
     "_comment_workoutDetails": "These are workot-details-related strings.",
-
-
-
     "repsValidationError": "Reps must be a number greater than 0.",
-
-
-
     "_comment_editWorkout": "These are edit-workout-related strings.",
-    
-
-
-    "_comment_myCalendar": "These are my-calendar-related strings.",
-
-  
-   "noUpcomingWorkouts": "No upcoming workouts scheduled.",
-    "upcomingWorkouts": "Upcoming Workouts",
-    "noUntrackedWorkouts": "No untracked workouts found.",
-    "untrackedWorkouts": "Untracked Workouts",
-    "noWorkoutToday": "No workout scheduled for today.",
-    "todaysWorkout": "Today's Workout",
-
-
     "_comment_LogWorkouts": "These are Log-Workouts-related strings.",
-    
-    
-    "selectWorkout":"Select Workout",
-    "selectDay":"Select Day",
-
-
-    "_comment_MyProgress": "These are My-Progress-related strings.",
-
-    "deleteLogsTitle": "Delete Logs",
-    "deleteLogsMessage": "Are you sure you want to delete all logs associated with this workout?",
-    "failedToDeleteDays": "Failed to delete associated days.",
-    "myProgress":"My Progress",
-    "trackAWorkout":"Track a Workout",
-    "notTracking":"You are not tracking any workouts.",
-    "myProgressTip": "Tip: You can track the exercises at the workouts you've done. Down to the every. single. detail.",
+    "selectWorkout": "Select Workout",
+    "selectDay": "Select Day",
     "allTracks": "All Logs",
-
-
     "_comment_LogWeights": "These are Log-Weights-related strings.",
-
-    "Set":"Set",
-    "Weight":"Weight",
-
-
-
+    "Set": "Set",
+    "Weight": "Weight",
     "_comment_WeightLogDetails": "These are Weight-Log-Details-related strings.",
-
     "deleteWeightLog": "Are you sure you want to delete all logs for this day on this date?",
     "weightLog": "logs",
     "dateFrom": "Date From:",
     "pickStartDate": "Pick a start date",
     "dateTo": "Date To:",
     "pickEndDate": "Pick an end date",
-    "clearSelection":"Clear Selection",
-    "noLog":"No logs available between the selected dates.",
-
-
-
-
-
-
+    "clearSelection": "Clear Selection",
+    "noLog": "No logs available between the selected dates.",
     "_comment_recurringWorkouts": "These are Recurring Workouts-related strings.",
-
     "Monday": "Monday",
     "Sunday": "Sunday",
     "notifications": "Notifications",
     "confirm": "Confirm",
-
     "_comment_startWorkout": "These are Start Workout-related strings.",
-
     "sec": "sec",
     "addTime": "+15s",
     "skipRest": "Skip Rest",
     "weightKgLbs": "Weight (kg/lbs)",
     "completeSetRest": "Complete Set & Rest",
-
-
     "_comment_settings1": "These are Settings-related strings.",
-
     "dataManagement": "Data Management",
     "exportData": "Export Data",
     "importData": "Import Data",
@@ -203,67 +108,13 @@
     "remindScheduledWorkouts": "Notify me about scheduled workouts",
     "dayInterval": "Day Interval:",
     "settingsTimeFormat": "Time Format",
-
-
-    "_comment_Graphs": "These are Graphs-related strings.",
-
-    "Graphs": "Graphs",
-    "SelectWorkoutforGraph": "Select a Workout for Graphs",
-    "forCommit": "this is for a commit",
-   
-    "No data available for the selected criteria": "No data available for the selected criteria",
-    "Combined Effort Score": "Combined Effort Score",
-    "About CES": "About CES",
-    "About 1RM": "About 1RM",
-    "CESExplanation": "CES (Combined Effort Score) measures your total workout volume accounting for weight, reps, and intensity.",
-    "1RMExplanation": "1RM (One Rep Max) estimates the maximum weight you could lift for a single repetition based on your performance.\n(This is not the actual 1RM, developer of the app is not responsible for any injuries if you use this estimate as your 1RM)",
-    "Time Frame": "Time Frame",
-    "Estimated 1RM": "Estimated 1RM",
-    "Week": "Week",
-    "Month": "Month",
-    "Year": "Year",
-    "All Time": "All Time",
-    "Select an exercise": "Select an exercise",
-    "No exercises available": "No exercises available",
-    "Track a workout first to see your progress": "Track a workout first to see your progress",
-    "No workout data available for graphs": "No workout data available for graphs",
     "workoutReminderTitle": "Workout Reminder: {{workoutName}}",
     "workoutReminderBody": "Time for your {{dayName}} workout!",
     "Workout in Progress": "Workout in Progress",
     "Workout in Progress Message": "Don't forget to complete your workout!",
-
-
-    "_comment_GraphsWorkoutDetails": "These are Graphs-Workout-Details-related strings.",
-
-    "setGraph": "Sets",
-    "Time": "Time",
-    "completionTime": "Completion Time",
-    "horizontalScrollHint": "Scroll horizontally to see more data",
-    "weightProgressionBySets": "Weight Progression by Sets",
-    "About Sets Progression": "About Sets Graph",
-    "About Completion Time": "About Time Graph",
-    "SetsGraph": "Sets Graph",
-    "TimeGraph": "Time Graph",
-    "timeGraphExplanation": "This graph shows how long it takes you to complete your workout sessions over time.",
-    "setsGraphExplanation": "This graph shows the weight progression for each set over time. Each line and color represents a different set, allowing you to track how your performance throughout your workout sessions.",
-    "graphTipText": "Tip: You can press the dots on the graph to get additional information about that workout session.",
-
-
-    "RepsCapital": "Reps",
-    "RepsGraph": "Reps Graph",
-    "About Reps Progression": "About Reps Graph",
-    "repsGraphExplanation": "This graph shows the reps you've done for individual sets. Each line and color represents a different set number like the Sets Graph but with the Y axis being the reps instead of weights. Perfect for tracking bodyweight exercises!",
-
-    "Workout Days": "Workout Days",
-
-
     "settingsFirstWeekday": "First Day of the Week",
-
-
-
     "fileNotSelectedError": "No file was selected or the file is invalid.",
     "workoutAlreadyExistsError": "A workout with this name already exists.",
-
     "Unspecified": "Unspecified",
     "Chest": "Chest",
     "Back": "Back",
@@ -277,62 +128,27 @@
     "Hamstrings": "Hamstrings",
     "Calves": "Calves",
     "Quads": "Quads",
-
-
-
-    "Workout Volume": "Workout Volume",
-    "Muscle Distribution": "Muscle Distribution",
-    "Overall Muscle Groups": "Overall Muscle Groups",
-    "Muscle Group Volume": "Muscle Group Volume",
-
-    "Workout Stats": "Workout Stats",
-    "Overall Stats": "Overall Stats",
-
-    "About Muscle Distribution": "About Muscle Distribution",
-    "About Muscle Group Volume": "About Muscle Group Volume",
-    "About Overall Muscle Groups": "About Overall Muscle Groups",
-    
-
-    "muscleDistributionExplanation": "This graph shows the distribution of muscle groups in your workouts, allowing you to adjust it for your goals.",
-    "muscleGroupVolumeExplanation": "This graph shows the volume done by each muscle group in your workouts within a time frame, allowing you to track your progress in each muscle group.",
-    "overallMuscleGroupsExplanation": "This graph shows the set count of sets done by each muscle group in your workouts within a time frame, allowing you to see how much you're working each muscle group.",
-    "workoutVolumeExplanation": "This graph shows the volume of your workouts within a time frame, allowing you to see how you performed in each workout.",
-
-
-
-
-
-
-
-    "Day Volume": "Day Volume",
-    "About Day Volume": "About Day Volume",
-    "dayVolumeExplanation": "This graph shows the volume of a specific workout day within a time frame, allowing you to see your progress for that day in isolation.",
-    
-
     "Community": "Community",
     "reportIssue": "Report a Bug",
-
     "editExerciseLog": "Edit exercise log",
     "editExerciseTipText": "Tip: You can edit exercise logs by clicking them.",
-
     "savingError": "Saving Error",
     "weightsValidationError": "Weights have to be above 0.",
-
-     "roundingIncrement": "Rounding Increment",
-     "roundingIncrementPlaceholder": "e.g. 2.5",
-     "roundingDirection": "Rounding Direction",
-     "roundUp": "Up",
-     "roundDown": "Down",
-     "roundNearest": "Nearest",
-     "tmPercentage": "Training Max Percentage",
-     "tmPercentageDescription": "Used when estimating a training max from a recent set.",
+    "roundingIncrement": "Rounding Increment",
+    "roundingIncrementPlaceholder": "e.g. 2.5",
+    "roundingDirection": "Rounding Direction",
+    "roundUp": "Up",
+    "roundDown": "Down",
+    "roundNearest": "Nearest",
+    "tmPercentage": "Training Max Percentage",
+    "tmPercentageDescription": "Used when estimating a training max from a recent set.",
     "tmPercentagePlaceholder": "85-90",
-     "estimateFromRecentSet": "Estimate from recent set",
-     "recentWeight": "Recent weight",
-     "recentReps": "Recent reps",
-     "enterRecentSet": "Enter a positive recent weight and whole-number reps.",
-     "estimatedTrainingMax": "Estimated training max",
-     "addAccessory": "Add accessory",
+    "estimateFromRecentSet": "Estimate from recent set",
+    "recentWeight": "Recent weight",
+    "recentReps": "Recent reps",
+    "enterRecentSet": "Enter a positive recent weight and whole-number reps.",
+    "estimatedTrainingMax": "Estimated training max",
+    "addAccessory": "Add accessory",
     "today": "Today",
     "routines": "Routines",
     "progress": "Progress",
@@ -587,5 +403,23 @@
     "reviewEnterOwnValue": "Your own value",
     "reviewLoadFailed": "Could not load the review.",
     "reviewApplyFailed": "Could not apply the review.",
-    "reviewStartFailed": "Could not start the next cycle."
-  }
+    "reviewStartFailed": "Could not start the next cycle.",
+    "progressCycleHeader": "Cycle {{n}}",
+    "progressCurrentWeek": "Current",
+    "progressMainLifts": "Main lifts",
+    "progressNoData": "No logged sessions for this exercise yet.",
+    "progressSinglePoint": "One session logged — the trend appears with the next one.",
+    "progressCalendar": "Calendar",
+    "progressLogsOn": "Logged on {{date}}",
+    "progressPlanned": "Planned",
+    "progressLogged": "Logged",
+    "progressWeekDetailTitle": "Week {{week}} · Cycle {{cycle}}",
+    "progressEditRoutine": "Edit routine",
+    "progressNoRoutines": "Activate or create a routine to see its progress here.",
+    "progressNoCycles": "This routine has no cycles yet — its progress appears once a week is started.",
+    "progressStatusCompleted": "Completed",
+    "progressStatusMoved": "Moved",
+    "progressStatusDiscarded": "Discarded",
+    "progressPreviousMonth": "Previous month",
+    "progressNextMonth": "Next month"
+}

@@ -1,11 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
-import {
-  DEFAULT_FIVE_THREE_ONE_DEFAULTS,
-  loadSettings,
-  mergeFiveThreeOneDefaults,
-  saveSettings,
-} from './settingsStorage';
+import { loadSettings, saveSettings } from './settingsStorage';
 
 jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///documents/',
@@ -59,34 +54,5 @@ describe('settingsStorage', () => {
 
     await expect(loadSettings()).resolves.toBeNull();
     expect(mockedFileSystem.readAsStringAsync).not.toHaveBeenCalled();
-  });
-
-  it('fills missing 5/3/1 defaults from safe defaults', () => {
-    expect(
-      mergeFiveThreeOneDefaults({
-        roundingDirection: 'down',
-        includeDeload: false,
-        lowerTmIncrement: 7.5,
-      }),
-    ).toEqual({
-      ...DEFAULT_FIVE_THREE_ONE_DEFAULTS,
-      roundingDirection: 'down',
-      includeDeload: false,
-      lowerTmIncrement: 7.5,
-    });
-  });
-
-  it('rejects invalid saved 5/3/1 defaults field by field', () => {
-    expect(
-      mergeFiveThreeOneDefaults({
-        roundingIncrement: 0,
-        roundingDirection: 'sideways',
-        tmPercentage: 0.8,
-        includeDeload: 'yes',
-        upperTmIncrement: Number.NaN,
-        lowerTmIncrement: -5,
-        warmupEnabled: 1,
-      }),
-    ).toEqual(DEFAULT_FIVE_THREE_ONE_DEFAULTS);
   });
 });

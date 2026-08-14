@@ -6,7 +6,7 @@
   import { Asset } from 'expo-asset';
   import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
   import { createNativeStackNavigator } from '@react-navigation/native-stack';
-  import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
+  import { NavigationContainer, NavigationContainerRef, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
   import Ionicons from 'react-native-vector-icons/Ionicons';
   import { GestureHandlerRootView } from 'react-native-gesture-handler';
   import './utils/i18n'; // Ensure this is present to initialize i18n
@@ -16,6 +16,7 @@
   import PlaceholderScreen from './screens/PlaceholderScreen';
   import TodayScreen from './screens/TodayScreen';
   import StartSessionScreen from './screens/StartSessionScreen';
+  import FreeLoggingScreen from './screens/FreeLoggingScreen';
   import RoutinesListScreen from './screens/RoutinesListScreen';
   import RoutineDetailsScreen from './screens/RoutineDetailsScreen';
   import ActivateRoutineScreen from './screens/ActivateRoutineScreen';
@@ -141,7 +142,18 @@ const initialiseSchema = async (db: SQLiteDatabase) => {
 };
 
 // Define AppContent here
-const ProgressScreen = () => <PlaceholderScreen titleKey="progress" />;
+const ProgressScreen = () => {
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
+  return (
+    <PlaceholderScreen
+      titleKey="progress"
+      action={{
+        labelKey: 'freeLogging',
+        onPress: () => navigation.navigate('Today', { screen: 'FreeLogging' }),
+      }}
+    />
+  );
+};
 
 const TodayStackNavigator = createNativeStackNavigator<TodayStackParamList>();
 
@@ -167,9 +179,11 @@ const TodayStack = () => {
         component={StartSessionScreen}
         options={{ title: t('todayStartSession') }}
       />
-      <TodayStackNavigator.Screen name="FreeLogging" options={{ title: t('freeLogging') }}>
-        {() => <PlaceholderScreen titleKey="freeLoggingComing" />}
-      </TodayStackNavigator.Screen>
+      <TodayStackNavigator.Screen
+        name="FreeLogging"
+        component={FreeLoggingScreen}
+        options={{ title: t('freeLogging') }}
+      />
     </TodayStackNavigator.Navigator>
   );
 };

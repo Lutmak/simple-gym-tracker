@@ -22,6 +22,7 @@
   import ActivateRoutineScreen from './screens/ActivateRoutineScreen';
   import EditRoutineScreen from './screens/EditRoutineScreen';
   import FiveThreeOneSetupScreen from './screens/FiveThreeOneSetupScreen';
+  import CycleReviewScreen from './screens/CycleReviewScreen';
   import { SettingsProvider, useSettings } from './context/SettingsContext';
   import { ThemeProvider, useTheme } from './context/ThemeContext';
   import * as Notifications from 'expo-notifications';
@@ -117,6 +118,7 @@
     ActivateRoutine: { presetKey: string };
     EditRoutine: { routineId: number };
     FiveThreeOneSetup: { presetKey: string };
+    CycleReview: { routineId: number; cycleId: number };
   };
 
   export type TodayStackParamList = {
@@ -226,6 +228,11 @@ const RoutinesStack = () => {
         name="FiveThreeOneSetup"
         component={FiveThreeOneSetupScreen}
         options={{ title: t('fiveThreeOneSetupTitle') }}
+      />
+      <RoutinesStackNavigator.Screen
+        name="CycleReview"
+        component={CycleReviewScreen}
+        options={{ title: t('cycleReviewTitle') }}
       />
     </RoutinesStackNavigator.Navigator>
   );

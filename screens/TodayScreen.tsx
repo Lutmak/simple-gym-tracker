@@ -18,6 +18,7 @@ import {
   type TodaySessionInfo,
   type TodayState,
 } from '../utils/today';
+import { loadReviewEntry, type ReviewEntry } from '../utils/cycleReview';
 import type { RoutineDatabase } from '../utils/routineActions';
 import type { TodayStackParamList } from '../App';
 
@@ -52,6 +53,7 @@ export default function TodayScreen({ navigation }: Props) {
   const db = useSQLiteContext();
 
   const [state, setState] = useState<TodayState | null>(null);
+  const [reviewEntry, setReviewEntry] = useState<ReviewEntry | null>(null);
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
 
   const routineDb: RoutineDatabase = {
@@ -69,6 +71,9 @@ export default function TodayScreen({ navigation }: Props) {
     loadTodayState(routineDb, dayStampOf(new Date()))
       .then(setState)
       .catch((error) => console.error('Error loading today:', error));
+    loadReviewEntry(routineDb)
+      .then(setReviewEntry)
+      .catch((error) => console.error('Error loading the review entry:', error));
   }, [db]);
 
   useFocusEffect(
@@ -244,6 +249,42 @@ export default function TodayScreen({ navigation }: Props) {
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         <Text style={[styles.title, { color: theme.text }]}>{t('today')}</Text>
+
+        {reviewEntry !== null && (
+          <View
+            style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+          >
+            <Text style={[styles.cardTitle, { color: theme.text }]}>{t('reviewWeek')}</Text>
+            <Text style={[styles.helper, { color: theme.text }]}>
+              {t('reviewWeekMessage', {
+                cycle: reviewEntry.cycleNumber,
+                week: reviewEntry.currentWeek,
+              })}
+            </Text>
+            <Pressable
+              style={({ pressed }) => [
+                styles.primaryButton,
+                { backgroundColor: theme.buttonBackground },
+                pressed && styles.pressed,
+              ]}
+              onPress={() =>
+                navigation
+                  .getParent()
+                  ?.navigate('Routines', {
+                    screen: 'CycleReview',
+                    params: {
+                      routineId: reviewEntry.routineId,
+                      cycleId: reviewEntry.cycleId,
+                    },
+                  })
+              }
+            >
+              <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
+                {t('reviewWeek')}
+              </Text>
+            </Pressable>
+          </View>
+        )}
 
         {state.routine === null ? (
           <View

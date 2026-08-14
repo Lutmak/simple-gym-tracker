@@ -5,7 +5,7 @@ import React, {
   useState,
 } from 'react';
 import { loadSettings, saveSettings } from '../utils/settingsStorage';
-import i18n from '../utils/i18n';
+import i18n, { SUPPORTED_LOCALES } from '../utils/i18n';
 import * as Localization from 'expo-localization';
 import { requestNotificationPermissions } from '../utils/notificationUtils';
 
@@ -116,7 +116,10 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       const deviceFirstWeekday = getDeviceFirstWeekday();
 
       if (savedSettings) {
-        setLanguage(savedSettings.language || 'en');
+        const savedLanguage = savedSettings.language || 'en';
+        setLanguage(
+          SUPPORTED_LOCALES.includes(savedLanguage) ? savedLanguage : 'en',
+        );
         const savedDateFormat =
           savedSettings.dateFormat === 'mm-dd-yyyy' ||
           savedSettings.dateFormat === 'dd-mm-yyyy'
@@ -154,10 +157,11 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             : DEFAULT_NOTIFICATION_TIME,
         );
       } else {
-        const fallbackLng = 'en';
-        const defaultLocale =
-          Localization.getLocales()[0]?.languageCode || fallbackLng;
-        setLanguage(defaultLocale);
+        const deviceLocale =
+          Localization.getLocales()[0]?.languageCode || 'en';
+        setLanguage(
+          SUPPORTED_LOCALES.includes(deviceLocale) ? deviceLocale : 'en',
+        );
         setTimeFormat(deviceTimeFormat);
         // ADDED: Initialize state based on device format
         setDateFormat(deviceDateFormat);

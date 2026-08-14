@@ -101,13 +101,6 @@
   
 
 
-  export type WorkoutStackParamList = {
-    WorkoutsList: undefined; // No parameters for this route
-    CreateWorkout: undefined; // No parameters for this route
-    WorkoutDetails: { workout_id: number }; // Add this
-    EditWorkout: { workout_id: number }; // Only `workout_id` for editing a workout
-  };
-
   export type WeightLogStackParamList = {
     MyProgress: undefined;
     LogWeights: { workout_log_id?: number };

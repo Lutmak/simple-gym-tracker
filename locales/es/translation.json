@@ -13,16 +13,8 @@
   "Tomorrow": "Mañana",
   "Yesterday": "Ayer",
 
-  "workoutNameErrorMessage": "Por favor, introduce un nombre para el entrenamiento.",
-  "provideDayNamesErrorMessage": "Por favor, asigna nombres para todos los días.",
-  "fillExercisesErrorMessage": "Por favor, completa todos los ejercicios con datos válidos.",
-  "failedToCreateWorkoutErrorMessage": "Error al crear el entrenamiento. Por favor, inténtalo de nuevo.",
   
-  "workoutNamePlaceholder": "Nombre del entrenamiento",
-  "dayNamePlaceholder": "Nombre del día",
-  "exerciseNamePlaceholder": "Nombre del ejercicio",
 
-  "setsPlaceholder": "Series",
   "repsPlaceholder": "Repeticiones",
 
   "_comment_settings": "Estas son cadenas relacionadas con ajustes.",
@@ -40,10 +32,6 @@
 
   "_comment_workoutlist": "Estas son cadenas relacionadas con la lista de entrenamientos.",
 
-  "MyWorkouts": "Mis Entrenamientos",
-  "CreateAWorkout": "Nuevo\nEntrenamiento",
-  "CreateAWorkoutButton": "Crear un nuevo entrenamiento",
-  "WorkoutListTip": "Consejo: Puedes eliminar la mayoría de los elementos manteniendo pulsado sobre ellos. ¡Pruébalo cuando tengas la oportunidad!",
 
   "_comment_myworkoutspage": "Estas son cadenas relacionadas con la página de mis entrenamientos.",
 
@@ -53,38 +41,19 @@
   "_comment_createWorkout": "Estas son cadenas relacionadas con la creación de entrenamientos.",
 
   "deleteDayTitle": "Eliminar día",
-  "deleteDayMessage": "¿Estás seguro de que quieres eliminar este día?",
 
-  "deleteExerciseTitle": "Eliminar ejercicio",
-  "deleteExerciseMessage": "¿Estás seguro de que quieres eliminar este ejercicio?",
   "addExercise": "+ Añadir ejercicio",
   "addDay": "+ Añadir día",
-  "saveWorkout": "Guardar entrenamiento",
 
   "_comment_workoutDetails": "Estas son cadenas relacionadas con los detalles de un entrenamiento.",
 
   "noExercises": "No hay ejercicios para este día",
-  "addExerciseFromDetails": "Añadir ejercicio",
-  "addDayFromDetails": "Añadir día",
-  "emptyWorkoutDetails": " No hay días o ejercicios disponibles para este entrenamiento.",
 
-  "deleteDayTitleDetails": "Eliminar día",
-  "deleteDayMessageDetails": "¿Estás seguro de que quieres eliminar este día? Esta acción también eliminará los días de los próximos entrenamientos planificados.",
-  "deleteExerciseTitleDetails": "Eliminar ejercicio",
-  "deleteExerciseMessageDetails": "¿Estás seguro de que quieres eliminar este ejercicio? Esta acción también eliminará el ejercicio de los próximos entrenamientos planificados.",
 
   "repsValidationError": "Las repeticiones deben ser un número mayor que 0.",
-  "setsValidationError": "Las series deben ser un número mayor que 0.",
-  "exerciseNameValidationError": "El nombre del ejercicio no puede estar vacío.",
-  "dayNameValidationError": "El nombre del día no puede estar vacío.",
 
   "_comment_editWorkout": "Estas son cadenas relacionadas con la edición de entrenamientos.",
 
-  "fetchWorkoutDetailsError": "Error al actualizar los detalles del entrenamiento.",
-  "isSaving": "Guardando...",
-  "saveChanges": "Guardar cambios",
-  "daysAndExercises": "Días y ejercicios",
-  "editWorkout": "Editar entrenamiento",
 
   "_comment_myCalendar": "Estas son cadenas relacionadas con Mi Calendario.",
 
@@ -139,7 +108,6 @@
     "Monday": "Lunes",
     "Sunday": "Domingo",
     "notifications": "Notificaciones",
-    "anErrorOccurred": "Ocurrió un error.",
     "workoutNotFound": "Entrenamiento no encontrado.",
     "confirm": "Confirmar",
     "_comment_startWorkout": "Estas cadenas están relacionadas con el inicio del entrenamiento.",
@@ -280,12 +248,6 @@
       "About Reps Progression": "Acerca del gráfico de repeticiones",
       "repsGraphExplanation": "Este gráfico muestra las repeticiones que has hecho para series individuales. Cada línea y color representa un número de serie diferente, como el gráfico de series, pero con el eje Y siendo las repeticiones en lugar de los pesos. ¡Perfecto para seguir ejercicios de peso corporal!",
 
-      "workoutDetailsTip": "Consejo: Puedes ver información adicional sobre un ejercicio tocando su nombre.",
-"webLink": "Enlace web",
-"webLinkPlaceholder": "https://example.com (opcional)",
-"invalidLinkTitle": "Enlace inválido",
-"invalidLinkMessage": "El enlace debe comenzar con \"http://\" o \"https://\".",
-"exerciseDetails": "Detalles del ejercicio",
 "fileNotSelectedError": "No se ha seleccionado ningún archivo o el archivo no es válido.",
 "workoutAlreadyExistsError": "Ya existe un entrenamiento con este nombre.",
 "Unspecified": "No especificado",
@@ -304,7 +266,6 @@
 
 
 
-"muscleGroup": "Grupo muscular",
 "Workout Volume": "Volumen de entrenamiento",
 "Muscle Distribution": "Distribución muscular",
 "Overall Muscle Groups": "Grupos musculares generales",
@@ -339,7 +300,6 @@
 "logWeightsError": "Por favor, asegúrate de que todos los campos estén llenos y no sean cero.",
 "logWeightsTipText": "Puedes eliminar series de ejercicios presionando largo en el número de serie.",
 "exerciseNotes": "Notas",
-"exerciseNotesPlaceholder": "Notas para el ejercicio (opcional)",
 "useLogsForRepsTitle": "Usar repeticiones anteriores",
 "lastWorkoutInfo": "Entrenamiento anterior",
 
@@ -347,6 +307,7 @@
     "editExerciseTipText": "Consejo: Puedes editar los registros de ejercicio haciendo clic en ellos.",
     "savingError": "Error al guardar",
     "weightsValidationError": "Los pesos deben ser superiores a 0.",
+    "roundingIncrement": "Incremento de redondeo",
     "today": "Hoy",
     "routines": "Rutinas",
     "progress": "Progreso",
@@ -401,7 +362,6 @@
     "missingWeightsTitle": "Faltan valores",
     "missingWeightsMessage": "Introduce un valor en todos los campos de peso.",
     "editRoutineTitle": "Editar rutina",
-    "editRoutineComing": "La edición de rutinas llegará en una próxima iteración.",
     "weekdayFullSun": "Domingo",
     "weekdayFullMon": "Lunes",
     "weekdayFullTue": "Martes",
@@ -432,5 +392,59 @@
     "weekdayAndDate": "{{weekday}}, {{date}}",
     "freeLogging": "Registro libre",
     "freeLoggingComing": "El registro libre llega en D7",
-    "sessionRunnerComing": "El runner de sesión llega en D6"
+    "sessionRunnerComing": "El runner de sesión llega en D6",
+    "routineNameLabel": "Nombre de la rutina",
+    "unitLabel": "Unidad",
+    "restMainSecondsLabel": "Descanso entre series principales (s)",
+    "restAccessorySecondsLabel": "Descanso entre series accesorias (s)",
+    "trainingDaysSection": "Días de entrenamiento",
+    "sessionNamePlaceholder": "Nombre del día",
+    "reassignDayHint": "Toca el día para moverlo a otro día de la semana",
+    "dayTakenTitle": "Día ocupado",
+    "dayTakenMessage": "El {{weekday}} ya pertenece a «{{name}}». Muévela primero.",
+    "removeDayTitle": "Eliminar día de entrenamiento",
+    "removeDayMessage": "¿Eliminar «{{name}}»? Sus ejercicios también se eliminarán.",
+    "moveDayUp": "Subir día",
+    "moveDayDown": "Bajar día",
+    "moveDayTitle": "Mover {{name}}",
+    "maxSessionsTitle": "Una semana tiene siete días",
+    "maxSessionsMessage": "Una rutina puede tener como máximo una sesión por día de la semana.",
+    "roleLabel": "Función",
+    "roleMain": "Principal",
+    "roleAccessory": "Accesorio",
+    "removeExerciseTitle": "Eliminar ejercicio",
+    "removeExerciseMessage": "¿Eliminar «{{name}}» de este día?",
+    "moveExerciseUp": "Subir",
+    "moveExerciseDown": "Bajar",
+    "loadSourceLabel": "Carga",
+    "loadSourceAbsolute": "Peso fijo",
+    "loadSourceTrainingMaxPct": "% del máximo",
+    "weightLabel": "Peso ({{unit}})",
+    "unitOverrideLabel": "Unidad del ejercicio",
+    "unitOverrideNone": "Ninguna",
+    "amrapLabel": "AMRAP",
+    "amrapOn": "ON",
+    "amrapOff": "OFF",
+    "savedTitle": "Rutina guardada",
+    "savedMessage": "«{{name}}» se ha actualizado. El historial registrado no cambia.",
+    "saveFailedTitle": "No se pudo guardar",
+    "saveFailedMessage": "La rutina no se ha modificado.",
+    "editErrorRoutineNameRequired": "Introduce un nombre para la rutina.",
+    "editErrorRoundingIncrementInvalid": "Introduce un incremento de redondeo positivo.",
+    "editErrorRestInvalid": "El descanso debe ser 0 o más segundos.",
+    "editErrorSessionNameRequired": "Pon nombre a todos los días de entrenamiento.",
+    "editErrorDuplicateWeekday": "Dos días de entrenamiento comparten el mismo día de la semana.",
+    "editErrorSetsInvalid": "«{{exercise}}» necesita al menos una serie.",
+    "editErrorRepsInvalid": "«{{exercise}}» necesita al menos una repetición.",
+    "editErrorTrainingMaxMissing": "Introduce un máximo de entrenamiento para «{{exercise}}».",
+    "editErrorWeightMissing": "Introduce un peso para «{{exercise}}».",
+    "pickerTitle": "Elige un ejercicio",
+    "pickerMuscleFilter": "Filtrado por: {{muscles}}",
+    "pickerAllExercises": "Todos los ejercicios",
+    "pickerSearchPlaceholder": "Buscar ejercicios",
+    "pickerCustomExercise": "Ejercicio personalizado",
+    "pickerCustomNamePlaceholder": "Nombre del ejercicio",
+    "pickerCustomNameRequired": "Introduce el nombre del ejercicio.",
+    "pickerAddCustom": "Añadir",
+    "pickerEmpty": "No se encontraron ejercicios"
   }

@@ -14,11 +14,17 @@
  * and the current position, and semantic colours only for state that must be read at a glance.
  * The maintainer's words, 2026-08-14: "me agradaba el estilo anterior: negro, gris y blanco".
  *
- * `accent` is the single chromatic departure from the monochrome ramp. It must be a colour the
- * active-tab indicator and the primary action can share: black/white would make the active tab
- * differ from inactive text in weight only, which is exactly the "reads as nothing" complaint V2
- * is asked to fix. Blue was chosen over the other candidates because it cannot be mistaken for
- * either semantic colour in either theme.
+ * `accent` is **not** chromatic: it is the ink of the theme — black in light, white in dark. The
+ * first implementation used blue, on the argument that a monochrome accent would leave the active
+ * tab differing from an inactive one in weight alone. That argument does not hold: an active tab
+ * is `accent` ink at weight 700 **with** a filled icon **and** an indicator pill, against
+ * `textSecondary` grey at 500 with an outline icon and no pill. Three differences, one of which is
+ * colour — black against 60% grey is a colour difference.
+ *
+ * Reviewed on the emulator, 2026-08-15: blue read as a second design language. Four accent-filled
+ * segmented options on one Settings screen is not "used sparingly", and it contradicted the
+ * maintainer's stated palette. Semantic colours stay chromatic — they are the only thing that must
+ * be read at a glance without reading the word next to it.
  *
  * The `inputFill`/`disabled`/`scrim` tokens are not in the §3.5 list because the list predates
  * the primitives that need them: an input resting fill, an off-state control fill, and the sheet
@@ -63,7 +69,7 @@ export const lightTokens: ThemeTokens = {
   inputFill: '#F7F7F7',
   textPrimary: '#000000',
   textSecondary: 'rgba(0, 0, 0, 0.6)',
-  accent: '#2563EB',
+  accent: '#000000',
   onAccent: '#FFFFFF',
   success: '#2E7D32',
   warning: '#B45309',
@@ -79,7 +85,7 @@ export const darkTokens: ThemeTokens = {
   inputFill: '#1E1E1E',
   textPrimary: '#FFFFFF',
   textSecondary: 'rgba(255, 255, 255, 0.6)',
-  accent: '#60A5FA',
+  accent: '#FFFFFF',
   onAccent: '#000000',
   success: '#81C784',
   warning: '#FBBF24',

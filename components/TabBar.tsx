@@ -33,6 +33,14 @@ import { Button } from './Button';
  * so the pill never overlaps a neighbour, whatever the longest label is. It is
  * raised half its height above the bar line; the hitSlop keeps the raised part
  * inside its touch target.
+ *
+ * The bar reserves that raised half as its own top padding rather than letting
+ * the button draw outside the bar's box. A transform does not affect layout, so
+ * without the padding the pill floats over whatever the screen has at its
+ * bottom edge — observed on the emulator, 2026-08-15, covering the last card of
+ * Settings. Reserving it here fixes every screen at once, including the ones
+ * Phases H–S have not rebuilt yet, because React Navigation lays the scene out
+ * above the bar's measured height.
  */
 
 interface TabConfig {
@@ -220,6 +228,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
 const styles = StyleSheet.create({
   bar: {
     borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: touchTarget.control / 2,
   },
   row: {
     height: tabBar.height,

@@ -51,7 +51,7 @@ interface TabConfig {
 }
 
 const TAB_CONFIG: readonly TabConfig[] = [
-  { routeName: 'Home', labelKey: 'home', icon: 'home-outline', iconActive: 'home' },
+  { routeName: 'Inicio', labelKey: 'home', icon: 'home-outline', iconActive: 'home' },
   {
     routeName: 'Progress',
     labelKey: 'progress',
@@ -183,14 +183,14 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
   const onCentrePress = () => {
     const current = action ?? { label: 'freeLog' as const, weekSessionId: null };
     if (current.label === 'resolve') {
-      navigation.navigate('Home');
+      navigation.navigate('Inicio');
       return;
     }
     if (current.label === 'freeLog') {
-      navigation.navigate('Home', { screen: 'FreeLogging' });
+      navigation.navigate('Inicio', { screen: 'FreeLogging' });
       return;
     }
-    navigation.navigate('Home', {
+    navigation.navigate('Inicio', {
       screen: 'StartSession',
       params: { weekSessionId: current.weekSessionId },
     });

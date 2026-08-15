@@ -31,7 +31,7 @@ export const dayStampOf = (date: Date): number => {
 };
 
 /** Whole UTC day (noon) of an arbitrary epoch-seconds stamp. */
-const dayStampOfStamp = (stamp: number): number => {
+export const dayStampOfStamp = (stamp: number): number => {
   const date = new Date(stamp * 1000);
   return Math.floor(
     Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 12, 0, 0) / 1000,
@@ -183,7 +183,7 @@ export interface SessionQueueState {
   upcoming: UpcomingSession | null;
 }
 
-interface QueueRow {
+export interface QueueRow {
   weekSession: QueueWeekSessionRow;
   session: QueueSessionRow;
   cycle: QueueCycleRow;
@@ -191,7 +191,7 @@ interface QueueRow {
 }
 
 /** Every week session with a datable cycle start, carrying its nominal date. */
-function buildQueueRows(input: SessionQueueInput): QueueRow[] {
+export function buildQueueRows(input: SessionQueueInput): QueueRow[] {
   const sessionById = new Map(input.sessions.map((session) => [session.sessionId, session]));
   const cycleById = new Map(input.cycles.map((cycle) => [cycle.cycleId, cycle]));
   const rows: QueueRow[] = [];
@@ -541,7 +541,7 @@ const toWeekSessionRow = (row: Record<string, unknown>): QueueWeekSessionRow => 
 });
 
 /** The active routine's queue inputs — cycles, plan rows and every week session. */
-async function loadSessionQueueInput(db: RoutineDatabase): Promise<SessionQueueInput> {
+export async function loadSessionQueueInput(db: RoutineDatabase): Promise<SessionQueueInput> {
   const routineRow = await db.get(
     `SELECT routine_id, name, unit, rounding_increment
      FROM Routines WHERE is_active = 1 LIMIT 1;`,

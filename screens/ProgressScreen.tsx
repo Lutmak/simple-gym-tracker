@@ -253,7 +253,7 @@ export default function ProgressScreen() {
   };
 
   const goToFreeLogging = () => {
-    navigation.navigate('Home', { screen: 'FreeLogging' });
+    navigation.navigate('Inicio', { screen: 'FreeLogging' });
   };
 
   const chartLabels = (points: readonly MainLiftPoint[]): string[] => {

@@ -14,7 +14,7 @@
   import { I18nextProvider, useTranslation } from 'react-i18next';
   import Settings from './screens/Settings';
   import ProgressScreen from './screens/ProgressScreen';
-  import HomeScreen from './screens/HomeScreen';
+  import InicioScreen from './screens/InicioScreen';
   import StartSessionScreen from './screens/StartSessionScreen';
   import FreeLoggingScreen from './screens/FreeLoggingScreen';
   import RoutinesListScreen from './screens/RoutinesListScreen';
@@ -141,8 +141,9 @@
     CycleReview: { routineId: number; cycleId: number };
   };
 
-  export type HomeStackParamList = {
-    HomeIndex: undefined;
+  export type InicioStackParamList = {
+    /** H2 consumes this request and presents its standard resolution Sheet. */
+    InicioIndex: { resolutionWeekSessionId?: number } | undefined;
     StartSession: { weekSessionId: number };
     FreeLogging: undefined;
   };
@@ -164,13 +165,13 @@ const initialiseSchema = async (db: SQLiteDatabase) => {
 };
 
 // Define AppContent here
-const HomeStackNavigator = createNativeStackNavigator<HomeStackParamList>();
+const InicioStackNavigator = createNativeStackNavigator<InicioStackParamList>();
 
-const HomeStack = () => {
+const InicioStack = () => {
   const { theme } = useTheme();
   const { t } = useTranslation();
   return (
-    <HomeStackNavigator.Navigator
+    <InicioStackNavigator.Navigator
       screenOptions={{
         headerStyle: { backgroundColor: theme.background },
         headerTintColor: theme.text,
@@ -178,22 +179,22 @@ const HomeStack = () => {
         contentStyle: { backgroundColor: theme.background },
       }}
     >
-      <HomeStackNavigator.Screen
-        name="HomeIndex"
-        component={HomeScreen}
+      <InicioStackNavigator.Screen
+        name="InicioIndex"
+        component={InicioScreen}
         options={{ headerShown: false }}
       />
-      <HomeStackNavigator.Screen
+      <InicioStackNavigator.Screen
         name="StartSession"
         component={StartSessionScreen}
-        options={{ title: t('todayStartSession') }}
+        options={{ title: t('inicioStartSession') }}
       />
-      <HomeStackNavigator.Screen
+      <InicioStackNavigator.Screen
         name="FreeLogging"
         component={FreeLoggingScreen}
         options={{ title: t('freeLogging') }}
       />
-    </HomeStackNavigator.Navigator>
+    </InicioStackNavigator.Navigator>
   );
 };
 
@@ -281,8 +282,8 @@ const AppContent = () => {
           }}
         >
           <Bottom.Screen
-            name="Home"
-            component={HomeStack}
+            name="Inicio"
+            component={InicioStack}
           />
           <Bottom.Screen
             name="Progress"

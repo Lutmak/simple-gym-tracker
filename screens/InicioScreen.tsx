@@ -244,6 +244,7 @@ export default function InicioScreen({ navigation }: Props) {
       </Section>
       <Text style={[styles.streak, { color: tokens.textPrimary }]} testID="inicio-streak">
         {t('inicioStreak', {
+          count: data.streak.weeks,
           weeks: data.streak.weeks,
           completed: data.streak.current.completed,
           planned: data.streak.current.planned,

@@ -25,6 +25,7 @@
   import CycleReviewScreen from './screens/CycleReviewScreen';
   import { SettingsProvider, useSettings } from './context/SettingsContext';
   import { ThemeProvider, useTheme } from './context/ThemeContext';
+  import { QueueRevisionProvider } from './context/QueueRevision';
   import * as Notifications from 'expo-notifications';
   import { runSchema } from './utils/schema';
   import { checkAndSyncPermissions } from './utils/notificationUtils';
@@ -271,6 +272,7 @@ const AppContent = () => {
         }
       />
   <SQLiteProvider databaseName="SimpleDB.db" useSuspense onInit={initialiseSchema}>
+    <QueueRevisionProvider>
     <NavigationContainer ref={navigationRef} theme={navigationThemeFor(tokens.mode)}>
         <Bottom.Navigator
           tabBar={(props) => <TabBar {...props} />}
@@ -298,6 +300,7 @@ const AppContent = () => {
 
                  </Bottom.Navigator>
     </NavigationContainer>
+    </QueueRevisionProvider>
                  </SQLiteProvider>
          </>
   );

@@ -7,6 +7,7 @@ import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
 import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
+import { useQueueRevision } from '../context/QueueRevision';
 import { dayStampOf, loadSessionQueue, type SessionQueueState } from '../utils/today';
 import { centreActionFor, type CentreLabelKind } from '../utils/shell';
 import { fontSize, spacing, tabBar, tabIndicator, touchTarget } from '../utils/scale';
@@ -24,7 +25,9 @@ import { Button } from './Button';
  * The bar loads the queue itself (pure DB reads, no React in utils/today.ts):
  * on mount, on every tab switch, and on every navigation state change — a
  * finished or resolved session leaves the bar on the correct label without any
- * screen telling it to reload.
+ * screen telling it to reload. Resolutions that happen in place (no navigation
+ * event) announce themselves through the queue-revision context; the bar
+ * reloads on every revision bump.
  *
  * The centre button takes its natural width — the four tabs share the rest —
  * so the pill never overlaps a neighbour, whatever the longest label is. It is
@@ -112,6 +115,7 @@ function TabItem({
 export function TabBar({ state, insets }: BottomTabBarProps) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
+  const { revision } = useQueueRevision();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const db = useSQLiteContext();
   const [queue, setQueue] = useState<SessionQueueState | null>(null);
@@ -137,7 +141,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
 
   useEffect(() => {
     reload();
-  }, [reload, state.index]);
+  }, [reload, state.index, revision]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('state', reload);

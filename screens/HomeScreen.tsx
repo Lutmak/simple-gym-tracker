@@ -6,6 +6,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
+import { useQueueRevision } from '../context/QueueRevision';
 import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 import { fontSize, radius, spacing } from '../utils/scale';
 import {
@@ -51,6 +52,7 @@ export default function HomeScreen({ navigation }: Props) {
   const { theme } = useTheme();
   const { t } = useTranslation();
   const { dateFormat, firstWeekday } = useSettings();
+  const { bump } = useQueueRevision();
   const db = useSQLiteContext();
 
   const [state, setState] = useState<SessionQueueState | null>(null);
@@ -98,6 +100,7 @@ export default function HomeScreen({ navigation }: Props) {
       .then(() => {
         setExpandedMove(null);
         reload();
+        bump();
       })
       .catch((error) => console.error('Error resolving missed session:', error));
   };

@@ -170,6 +170,23 @@ export default function InicioScreen({ navigation, route }: Props) {
     setResolutionSheetVisible(true);
   }, [data, navigation, resolutionRequestId]);
 
+  const handleSheetClosed = useCallback(() => {
+    if (pendingReopenId === null) {
+      setPendingReopenSession(null);
+      setResolutionSession(null);
+      return;
+    }
+    setPendingReopenId(null);
+    setPendingReopenSession(null);
+    setResolutionSessionId(pendingReopenId);
+    setResolutionSession(pendingReopenSession);
+    setResolutionStep('outcomes');
+    setMoveDayPlan(null);
+    setCalendarVisible(false);
+    setResolutionError(null);
+    setResolutionSheetVisible(true);
+  }, [pendingReopenId, pendingReopenSession]);
+
   if (data === null) {
     return (
       <Screen>
@@ -213,23 +230,6 @@ export default function InicioScreen({ navigation, route }: Props) {
     setCalendarVisible(false);
     setResolutionError(null);
   };
-
-  const handleSheetClosed = useCallback(() => {
-    if (pendingReopenId === null) {
-      setPendingReopenSession(null);
-      setResolutionSession(null);
-      return;
-    }
-    setPendingReopenId(null);
-    setPendingReopenSession(null);
-    setResolutionSessionId(pendingReopenId);
-    setResolutionSession(pendingReopenSession);
-    setResolutionStep('outcomes');
-    setMoveDayPlan(null);
-    setCalendarVisible(false);
-    setResolutionError(null);
-    setResolutionSheetVisible(true);
-  }, [pendingReopenId, pendingReopenSession]);
 
   const finishResolution = (next: InicioData | null) => {
     if (!navigation.isFocused()) {

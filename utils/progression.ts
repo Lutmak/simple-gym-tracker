@@ -5,6 +5,11 @@
  *
  * `proposeNextTargets` dispatches on the routine's `progressionRule` to the
  * `linear` implementation or the `wave` adapter over `utils/fiveThreeOne.ts`.
+ *
+ * Extra sets (§3.4) can never move a proposal on their own: every evaluation
+ * reads only the first `targetSets` sets of an exercise's history — the
+ * planned work sets. Extra sets enter history and count toward volume, but
+ * the proposal is computed from the plan.
  */
 
 import {
@@ -232,7 +237,12 @@ function cycleEndTmProposal(
 
   amrapWeeks.forEach((weekEntry, index) => {
     const sets = weekEntry.exercises[exercise.identifier]?.sets ?? [];
-    const amrapSet = sets.length >= 3 ? sets[sets.length - 1] : null;
+    // Extra sets append after the planned ones; the AMRAP set is the LAST PLANNED
+    // set, so the history is cut to the planned count first (§3.4).
+    const plannedSets = sets.slice(0, exercise.targetSets);
+    const amrapSet = plannedSets.length >= exercise.targetSets
+      ? plannedSets[plannedSets.length - 1]
+      : null;
     if (amrapSet === null) {
       return;
     }
@@ -301,7 +311,10 @@ function linearProposeNextTargets(
     }
     const unit = exercise.unitOverride ?? routine.unit;
     const sets = currentCycle?.exercises[exercise.identifier]?.sets ?? [];
-    const evaluation = evaluate(exercise, sets);
+    // Extra sets (§3.4) append after the planned ones; the proposal — verdict,
+    // reason and all — reads only the first targetSets sets.
+    const plannedSets = sets.slice(0, exercise.targetSets);
+    const evaluation = evaluate(exercise, plannedSets);
 
     if (evaluation.kind === 'met') {
       const increment = routine.roundingIncrement;
@@ -311,7 +324,7 @@ function linearProposeNextTargets(
         currentTarget,
         proposedTarget: roundTo(currentTarget + increment, increment),
         unit,
-        reason: metReason(exercise, sets),
+        reason: metReason(exercise, plannedSets),
         advisory: false,
       });
     } else {
@@ -354,12 +367,16 @@ type Evaluation =
   | { kind: 'rep-short'; setIndex: number; actualReps: number };
 
 function evaluate(exercise: RoutineExercise, sets: PerformedSet[]): Evaluation {
-  if (sets.length < exercise.targetSets) {
-    return { kind: 'set-short', doneSets: sets.length };
+  // The proposal reads only planned work sets: extra sets (§3.4) are appended
+  // after the planned ones and are cut here, so they can never rescue a
+  // short session or change a verdict on their own.
+  const plannedSets = sets.slice(0, exercise.targetSets);
+  if (plannedSets.length < exercise.targetSets) {
+    return { kind: 'set-short', doneSets: plannedSets.length };
   }
-  const setIndex = sets.findIndex((set) => set.reps < exercise.targetReps);
+  const setIndex = plannedSets.findIndex((set) => set.reps < exercise.targetReps);
   if (setIndex !== -1) {
-    return { kind: 'rep-short', setIndex, actualReps: sets[setIndex].reps };
+    return { kind: 'rep-short', setIndex, actualReps: plannedSets[setIndex].reps };
   }
   return { kind: 'met' };
 }

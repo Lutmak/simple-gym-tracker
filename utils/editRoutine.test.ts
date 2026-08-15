@@ -179,6 +179,7 @@ describe('buildEditRows — pure draft to plan rows', () => {
       roundingIncrement: 2.5,
       restMainSeconds: 180,
       restAccessorySeconds: 90,
+      plannedJokers: null,
     });
     expect(rows.sessions).toEqual([
       { sessionId: null, weekday: 1, name: 'Upper', sortOrder: 1 },
@@ -249,34 +250,58 @@ describe('buildEditRows — pure draft to plan rows', () => {
     }
   });
 
-  it('rejects a missing training max and a missing absolute weight', () => {
-    expect(() =>
-      buildEditRows({
-        ...draft(),
-        sessions: [
-          {
-            ...draft().sessions[0],
-            exercises: [
-              { ...draft().sessions[0].exercises[0], trainingMaxWeight: null },
-            ],
-          },
-        ],
-      }),
-    ).toThrowError(EditRoutineValidationError);
+  it('passes a missing training max and a missing absolute weight through as NULL', () => {
+    const rows = buildEditRows({
+      ...draft(),
+      sessions: [
+        {
+          ...draft().sessions[0],
+          exercises: [
+            { ...draft().sessions[0].exercises[0], trainingMaxWeight: null },
+          ],
+        },
+        {
+          ...draft().sessions[1],
+          exercises: [
+            { ...draft().sessions[1].exercises[0], absoluteWeight: null },
+          ],
+        },
+      ],
+    });
 
-    expect(() =>
-      buildEditRows({
-        ...draft(),
-        sessions: [
-          {
-            ...draft().sessions[1],
-            exercises: [
-              { ...draft().sessions[1].exercises[0], absoluteWeight: null },
-            ],
-          },
-        ],
-      }),
-    ).toThrowError(EditRoutineValidationError);
+    const [press, custom] = rows.exercises;
+    expect(press.trainingMaxWeight).toBeNull();
+    expect(press.trainingMaxPct).toBe(0.9);
+    expect(custom.absoluteWeight).toBeNull();
+  });
+
+  it('treats a zero weight as no load, not a 0 in the plan', () => {
+    const rows = buildEditRows({
+      ...draft(),
+      sessions: [
+        {
+          ...draft().sessions[0],
+          exercises: [
+            { ...draft().sessions[0].exercises[0], trainingMaxWeight: 0 },
+          ],
+        },
+        {
+          ...draft().sessions[1],
+          exercises: [
+            { ...draft().sessions[1].exercises[0], absoluteWeight: 0 },
+          ],
+        },
+      ],
+    });
+
+    const [press, custom] = rows.exercises;
+    expect(press.trainingMaxWeight).toBeNull();
+    expect(custom.absoluteWeight).toBeNull();
+  });
+
+  it('keeps planned jokers only when the draft carries them', () => {
+    expect(buildEditRows(draft()).routine.plannedJokers).toBeNull();
+    expect(buildEditRows({ ...draft(), plannedJokers: 2 }).routine.plannedJokers).toBe(2);
   });
 
   it('rejects non-positive sets and reps', () => {
@@ -482,8 +507,8 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
     const invalid = db
       .prepare(
         `SELECT COUNT(*) AS n FROM SessionExercises
-         WHERE (load_source = 'training_max_pct' AND (training_max_pct IS NULL OR training_max_weight IS NULL))
-            OR (load_source = 'absolute' AND absolute_weight IS NULL)
+         WHERE (load_source = 'training_max_pct' AND training_max_pct IS NULL)
+            OR (load_source = 'absolute' AND (training_max_pct IS NOT NULL OR training_max_weight IS NOT NULL))
             OR (load_source = 'bodyweight' AND (absolute_weight IS NOT NULL OR training_max_pct IS NOT NULL OR training_max_weight IS NOT NULL));`,
       )
       .get() as { n: number };

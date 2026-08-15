@@ -8,6 +8,9 @@ import {
   SCHEMA_STATEMENTS,
   seedCatalog,
   ensureWeightLogUnitColumn,
+  ensureWeightLogTimingColumns,
+  ensureSessionExercisesColumns,
+  ensureRoutinesPlannedJokers,
   type SchemaExecutor,
 } from './schema';
 
@@ -104,7 +107,14 @@ describe('runSchema', () => {
     await runSchema(executor);
 
     expect(columnNames(db, 'Weight_Log')).toEqual(
-      expect.arrayContaining(['weight_log_id', 'unit', 'reps_logged', 'weight_logged']),
+      expect.arrayContaining([
+        'weight_log_id',
+        'unit',
+        'reps_logged',
+        'weight_logged',
+        'started_at',
+        'completed_at',
+      ]),
     );
     expect(columnNames(db, 'Routines')).toEqual(
       expect.arrayContaining([
@@ -118,6 +128,7 @@ describe('runSchema', () => {
         'rest_main_seconds',
         'rest_accessory_seconds',
         'is_active',
+        'planned_jokers',
       ]),
     );
     expect(columnNames(db, 'SessionExercises')).toEqual(
@@ -132,6 +143,8 @@ describe('runSchema', () => {
         'absolute_weight',
         'unit_override',
         'sort_order',
+        'bar_profile',
+        'bar_weight',
       ]),
     );
     expect(columnNames(db, 'Progression_Proposal')).toEqual(
@@ -251,6 +264,137 @@ describe('runSchema', () => {
 
     db.prepare(`UPDATE Routines SET is_active = 0 WHERE routine_key = 'first'`).run();
     expect(() => insertRoutine('second')).not.toThrow();
+  });
+
+  it('allows a routine to carry no loads — every weight column may be NULL (§3.2)', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    db.prepare(
+      `INSERT INTO Routines
+         (routine_key, name, origin, progression_rule, unit, rounding_increment,
+          rest_main_seconds, rest_accessory_seconds, is_active, created_at)
+       VALUES ('nw', 'No Weights', 'user', 'wave', 'kg', 2.5, 180, 90, 1, 0);`,
+    ).run();
+    db.prepare(
+      `INSERT INTO Sessions (routine_id, weekday, name, sort_order)
+       VALUES (1, 1, 'Day', 1);`,
+    ).run();
+
+    // A training-max exercise with NO training max yet — the CHECK used to reject this.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO SessionExercises
+             (session_id, catalog_exercise_id, exercise_name, role, target_sets, target_reps,
+              load_source, training_max_pct, training_max_weight, absolute_weight,
+              unit_override, is_amrap, sort_order)
+           VALUES (1, NULL, 'Squat', 'main', 3, 5, 'training_max_pct', 0.9, NULL, NULL, NULL, 1, 1);`,
+        )
+        .run(),
+    ).not.toThrow();
+
+    // An absolute exercise with no starting weight.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO SessionExercises
+             (session_id, catalog_exercise_id, exercise_name, role, target_sets, target_reps,
+              load_source, training_max_pct, training_max_weight, absolute_weight,
+              unit_override, is_amrap, sort_order)
+           VALUES (1, NULL, 'Curl', 'accessory', 3, 10, 'absolute', NULL, NULL, NULL, NULL, 0, 2);`,
+        )
+        .run(),
+    ).not.toThrow();
+
+    // The mutual exclusion still holds: a pct row must not carry an absolute weight.
+    expect(() =>
+      db
+        .prepare(
+          `INSERT INTO SessionExercises
+             (session_id, catalog_exercise_id, exercise_name, role, target_sets, target_reps,
+              load_source, training_max_pct, training_max_weight, absolute_weight,
+              unit_override, is_amrap, sort_order)
+           VALUES (1, NULL, 'Bad', 'accessory', 3, 10, 'training_max_pct', 0.9, NULL, 20, NULL, 0, 3);`,
+        )
+        .run(),
+    ).toThrow();
+  });
+
+  it('adds the M2 columns to a legacy Weight_Log, SessionExercises and Routines, idempotently', async () => {
+    const { db, executor } = connect();
+    db.exec(`
+      CREATE TABLE Weight_Log (
+        weight_log_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        workout_log_id INTEGER NOT NULL,
+        logged_exercise_id INTEGER NOT NULL,
+        exercise_name TEXT NOT NULL,
+        set_number INTEGER NOT NULL,
+        weight_logged REAL NOT NULL,
+        reps_logged INTEGER NOT NULL,
+        FOREIGN KEY (workout_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE CASCADE,
+        FOREIGN KEY (logged_exercise_id) REFERENCES Logged_Exercises(logged_exercise_id),
+        UNIQUE (workout_log_id, logged_exercise_id, set_number)
+      );
+      CREATE TABLE SessionExercises (
+        session_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        session_id INTEGER NOT NULL,
+        catalog_exercise_id TEXT,
+        exercise_name TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('main', 'accessory')),
+        target_sets INTEGER NOT NULL,
+        target_reps INTEGER NOT NULL,
+        load_source TEXT NOT NULL,
+        training_max_pct REAL,
+        training_max_weight REAL,
+        absolute_weight REAL,
+        unit_override TEXT,
+        is_amrap INTEGER NOT NULL DEFAULT 0,
+        sort_order INTEGER NOT NULL
+      );
+      CREATE TABLE Routines (
+        routine_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        routine_key TEXT UNIQUE,
+        name TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        progression_rule TEXT NOT NULL,
+        unit TEXT NOT NULL,
+        rounding_increment REAL NOT NULL,
+        rest_main_seconds INTEGER NOT NULL,
+        rest_accessory_seconds INTEGER NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+    `);
+
+    expect(columnNames(db, 'Weight_Log')).not.toContain('started_at');
+    expect(columnNames(db, 'SessionExercises')).not.toContain('bar_profile');
+    expect(columnNames(db, 'Routines')).not.toContain('planned_jokers');
+
+    await ensureWeightLogTimingColumns(executor);
+    await ensureSessionExercisesColumns(executor);
+    await ensureRoutinesPlannedJokers(executor);
+
+    expect(columnNames(db, 'Weight_Log')).toEqual(
+      expect.arrayContaining(['started_at', 'completed_at']),
+    );
+    expect(columnNames(db, 'SessionExercises')).toEqual(
+      expect.arrayContaining(['bar_profile', 'bar_weight']),
+    );
+    expect(columnNames(db, 'Routines')).toEqual(
+      expect.arrayContaining(['planned_jokers']),
+    );
+
+    // Idempotent: a second pass changes nothing.
+    await ensureWeightLogTimingColumns(executor);
+    await ensureSessionExercisesColumns(executor);
+    await ensureRoutinesPlannedJokers(executor);
+    expect(columnNames(db, 'Weight_Log')).toEqual(
+      expect.arrayContaining(['started_at', 'completed_at']),
+    );
+    expect(columnNames(db, 'Routines')).toEqual(
+      expect.arrayContaining(['planned_jokers']),
+    );
   });
 
   it('seeds the catalog idempotently', async () => {

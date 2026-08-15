@@ -8,10 +8,17 @@
  * History tables are never touched: Workout_Log / Logged_Exercises /
  * Weight_Log copy their values at log time and never reference the plan
  * (§3.2). Weight fields are normalized per load source so the SessionExercises
- * CHECK constraint holds by construction; invalid drafts throw
- * `EditRoutineValidationError` with a user-facing code.
+ * CHECK constraint holds by construction — and a missing weight stays NULL:
+ * a routine is valid with no loads, the first logged session learns the
+ * baseline (§3.2). Invalid drafts throw `EditRoutineValidationError` with a
+ * user-facing code.
  */
 
+import {
+  defaultBarProfileForEquipment,
+  type BarProfileKey,
+} from './barProfiles';
+import { usableWeight } from './learnedWeights';
 import type {
   RoutineDatabase,
   RoutineLoadSource,
@@ -33,6 +40,12 @@ export interface EditExercise {
   absoluteWeight: number | null;
   unitOverride: RoutineUnit | null;
   isAmrap: boolean;
+  /** The catalog equipment of a catalog-backed exercise — the bar-profile default. */
+  equipment?: string | null;
+  /** A stored bar profile; the caller omits it to keep the catalog default. */
+  barProfile?: BarProfileKey | null;
+  /** The custom bar weight, in the exercise's unit. */
+  barWeight?: number | null;
 }
 
 export interface EditSession {
@@ -50,6 +63,8 @@ export interface EditRoutine {
   restMainSeconds: number;
   restAccessorySeconds: number;
   sessions: EditSession[];
+  /** Planned jokers (§3.4); omitted means the current value is kept. */
+  plannedJokers?: number;
 }
 
 export type EditRoutineError =
@@ -59,9 +74,7 @@ export type EditRoutineError =
   | { code: 'sessionNameRequired' }
   | { code: 'duplicateWeekday' }
   | { code: 'setsInvalid'; exercise: string }
-  | { code: 'repsInvalid'; exercise: string }
-  | { code: 'trainingMaxMissing'; exercise: string }
-  | { code: 'weightMissing'; exercise: string };
+  | { code: 'repsInvalid'; exercise: string };
 
 export class EditRoutineValidationError extends Error {
   readonly detail: EditRoutineError;
@@ -80,6 +93,8 @@ export interface EditRoutineRows {
     roundingIncrement: number;
     restMainSeconds: number;
     restAccessorySeconds: number;
+    /** Null when the draft does not carry it — the stored value is kept. */
+    plannedJokers: number | null;
   };
   sessions: {
     sessionId: number | null;
@@ -102,6 +117,8 @@ export interface EditRoutineRows {
     unitOverride: RoutineUnit | null;
     isAmrap: boolean;
     sortOrder: number;
+    barProfile: BarProfileKey | null;
+    barWeight: number | null;
   }[];
 }
 
@@ -109,7 +126,10 @@ const fail = (detail: EditRoutineError): never => {
   throw new EditRoutineValidationError(detail);
 };
 
-/** Normalizes the weight fields per load source, mirroring the SessionExercises CHECK. */
+/**
+ * Normalizes the weight fields per load source, mirroring the SessionExercises
+ * CHECK. A missing weight stays NULL — targets are learned, never demanded.
+ */
 const normalizedLoad = (
   exercise: EditExercise,
 ): {
@@ -120,24 +140,20 @@ const normalizedLoad = (
 } => {
   switch (exercise.loadSource) {
     case 'training_max_pct':
-      if (exercise.trainingMaxWeight === null || exercise.trainingMaxWeight <= 0) {
-        fail({ code: 'trainingMaxMissing', exercise: exercise.name });
-      }
       return {
         loadSource: 'training_max_pct',
         trainingMaxPct: exercise.trainingMaxPct ?? 0.9,
-        trainingMaxWeight: exercise.trainingMaxWeight,
+        // A non-positive value is not a load — it stays NULL until the first
+        // logged session learns it (§3.2).
+        trainingMaxWeight: usableWeight(exercise.trainingMaxWeight),
         absoluteWeight: null,
       };
     case 'absolute':
-      if (exercise.absoluteWeight === null || exercise.absoluteWeight <= 0) {
-        fail({ code: 'weightMissing', exercise: exercise.name });
-      }
       return {
         loadSource: 'absolute',
         trainingMaxPct: null,
         trainingMaxWeight: null,
-        absoluteWeight: exercise.absoluteWeight,
+        absoluteWeight: usableWeight(exercise.absoluteWeight),
       };
     case 'bodyweight':
       return {
@@ -209,6 +225,9 @@ export function buildEditRows(draft: EditRoutine): EditRoutineRows {
         unitOverride: exercise.unitOverride,
         isAmrap: exercise.isAmrap,
         sortOrder: index + 1,
+        barProfile:
+          exercise.barProfile ?? defaultBarProfileForEquipment(exercise.equipment ?? null),
+        barWeight: exercise.barWeight ?? null,
       };
     }),
   );
@@ -220,6 +239,7 @@ export function buildEditRows(draft: EditRoutine): EditRoutineRows {
       roundingIncrement: draft.roundingIncrement,
       restMainSeconds: draft.restMainSeconds,
       restAccessorySeconds: draft.restAccessorySeconds,
+      plannedJokers: draft.plannedJokers ?? null,
     },
     sessions,
     exercises,
@@ -259,7 +279,8 @@ export async function saveRoutineEdit(
     await db.run(
       `UPDATE Routines
          SET name = ?, unit = ?, rounding_increment = ?,
-             rest_main_seconds = ?, rest_accessory_seconds = ?
+             rest_main_seconds = ?, rest_accessory_seconds = ?,
+             planned_jokers = COALESCE(?, planned_jokers)
        WHERE routine_id = ?;`,
       [
         rows.routine.name,
@@ -267,6 +288,7 @@ export async function saveRoutineEdit(
         rows.routine.roundingIncrement,
         rows.routine.restMainSeconds,
         rows.routine.restAccessorySeconds,
+        rows.routine.plannedJokers,
         routineId,
       ],
     );
@@ -332,8 +354,8 @@ export async function saveRoutineEdit(
             `INSERT INTO SessionExercises
                (session_id, catalog_exercise_id, exercise_name, role, target_sets,
                 target_reps, load_source, training_max_pct, training_max_weight,
-                absolute_weight, unit_override, is_amrap, sort_order)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+                absolute_weight, unit_override, is_amrap, sort_order, bar_profile, bar_weight)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
             [
               sessionId,
               exercise.catalogExerciseId,
@@ -348,6 +370,8 @@ export async function saveRoutineEdit(
               exercise.unitOverride,
               exercise.isAmrap ? 1 : 0,
               exercise.sortOrder,
+              exercise.barProfile,
+              exercise.barWeight,
             ],
           );
           const exerciseIdRow = await db.get('SELECT last_insert_rowid() AS id;', []);
@@ -362,7 +386,7 @@ export async function saveRoutineEdit(
                    target_sets = ?, target_reps = ?, load_source = ?,
                    training_max_pct = ?, training_max_weight = ?,
                    absolute_weight = ?, unit_override = ?, is_amrap = ?,
-                   sort_order = ?
+                   sort_order = ?, bar_profile = ?, bar_weight = ?
              WHERE session_exercise_id = ? AND session_id = ?;`,
             [
               exercise.catalogExerciseId,
@@ -377,6 +401,8 @@ export async function saveRoutineEdit(
               exercise.unitOverride,
               exercise.isAmrap ? 1 : 0,
               exercise.sortOrder,
+              exercise.barProfile,
+              exercise.barWeight,
               exercise.exerciseId,
               sessionId,
             ],

@@ -74,6 +74,25 @@ export interface PerformedSetGroup {
   sets: PerformedSet[];
 }
 
+/**
+ * Extra sets (§3.4) never reach a proposal or the AMRAP review: each group is
+ * cut to its exercise's planned set count, keeping only the first `targetSets`
+ * logged sets. Applied once at load time, so `buildCycleHistory` and the
+ * AMRAP rows both read planned work sets only.
+ */
+export function plannedWorkSets(
+  groups: readonly PerformedSetGroup[],
+  exercises: readonly ReviewExercise[],
+): PerformedSetGroup[] {
+  const targetByExercise = new Map(exercises.map((exercise) => [exercise.name, exercise.targetSets]));
+  return groups.map((group) => {
+    const targetSets = targetByExercise.get(group.exerciseName);
+    return targetSets === undefined
+      ? group
+      : { ...group, sets: group.sets.slice(0, targetSets) };
+  });
+}
+
 export interface CycleExerciseStatus {
   cycleNumber: number;
   sessionExerciseId: number;
@@ -495,7 +514,10 @@ async function loadReviewSource(
     cycle,
     cycles,
     exercises,
-    setGroups,
+    // Cut to the planned work sets here, once, for the whole review (§3.4):
+    // extra sets count toward volume but never toward a proposal or the AMRAP
+    // history the review shows.
+    setGroups: plannedWorkSets(setGroups, exercises),
     statuses,
     rows: proposalRows.map(toProposalRow),
   };

@@ -1,6 +1,7 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { runSchema, type SchemaExecutor } from './schema';
 import { loadDemoData } from './demoData';
+import { buildExerciseSeries } from './exerciseHistory';
 import {
   belowTarget,
   buildLogRows,
@@ -12,6 +13,11 @@ import {
   type RunnerDraft,
   type RunnerSession,
 } from './sessionRunner';
+import {
+  writeWaveRoutine,
+  type WaveDayDraft,
+  type WaveSetupDraft,
+} from './waveSetup';
 import type { RoutineDatabase } from './routineActions';
 
 type TestExecutor = SchemaExecutor & {
@@ -280,6 +286,72 @@ describe('buildLogRows — the §3.2 history rows', () => {
     expect(first[0].unit).toBe('kg');
     expect(second[0].unit).toBe('kg');
   });
+
+  it('stores the per-set unit override on the row — an lb set inside a kg session stays lb', async () => {
+    const { executor } = connect();
+    const session = await fixture(executor);
+    const draft = planned(session);
+    const firstSquatSet = draft[0][0];
+    if (firstSquatSet === null) {
+      throw new Error('Fixture draft missing the squat set');
+    }
+    draft[0][0] = { ...firstSquatSet, weight: 225, unit: 'lb' };
+
+    const rows = buildLogRows(session, draft);
+
+    const squatSets = rows.weightLog.filter((s) => s.loggedExerciseIndex === 0);
+    expect(squatSets.map((s) => s.unit)).toEqual(['lb', 'kg', 'kg']);
+    expect(squatSets[0].weight).toBe(225);
+    // The other sets and the other exercise keep the session unit.
+    const rowSets = rows.weightLog.filter((s) => s.loggedExerciseIndex === 1);
+    expect(rowSets.every((s) => s.unit === 'kg')).toBe(true);
+  });
+
+  it('carries extra sets (§3.4) through the log path — appended, sequenced, with their own unit', async () => {
+    const { executor } = connect();
+    const session = await fixture(executor);
+    const draft = planned(session);
+    draft[0].push({ reps: 3, weight: 105, unit: 'lb' }, { reps: 1, weight: 107.5 });
+
+    const rows = buildLogRows(session, draft);
+
+    const squatSets = rows.weightLog.filter((s) => s.loggedExerciseIndex === 0);
+    expect(squatSets.map((s) => s.setNumber)).toEqual([1, 2, 3, 4, 5]);
+    expect(squatSets.map((s) => s.unit)).toEqual(['kg', 'kg', 'kg', 'lb', 'kg']);
+    // The extras are ordinary history rows: volume counts them like any set.
+    const historyRows = squatSets.map((s) => ({
+      date: rows.workoutLog.workoutDate,
+      setNumber: s.setNumber,
+      weight: s.weight,
+      reps: s.reps,
+      unit: s.unit,
+    }));
+    const series = buildExerciseSeries(historyRows);
+    expect(series.points[0].volume).toBe(102.5 * 5 * 3 + 105 * 3 + 107.5 * 1);
+    expect(series.points[0].volume).toBeGreaterThan(102.5 * 5 * 3);
+  });
+
+  it('writes the per-set timing columns from the draft (§3.9)', async () => {
+    const { executor } = connect();
+    const session = await fixture(executor);
+    const draft = planned(session);
+    const started = 1780000000000;
+    const completed = 1780000035000;
+    for (const exerciseSets of draft) {
+      for (const set of exerciseSets) {
+        if (set !== null) {
+          set.startedAt = started;
+          set.completedAt = completed;
+        }
+      }
+    }
+
+    const rows = buildLogRows(session, draft);
+
+    expect(rows.weightLog[0]).toMatchObject({ startedAt: started, completedAt: completed });
+    expect(rows.weightLog.every((s) => s.startedAt === started)).toBe(true);
+    expect(rows.weightLog.every((s) => s.completedAt === completed)).toBe(true);
+  });
 });
 
 describe('sessionTotals', () => {
@@ -468,3 +540,213 @@ describe('saveSessionLog — one atomic transaction', () => {
     expect(weekSession.status).toBe('pending');
   });
 });
+
+describe('saveSessionLog — learned baselines (§3.2)', () => {
+  const waveDraft = (overrides: Record<string, unknown> = {}): WaveSetupDraft => ({
+    name: 'Wave Test',
+    unit: 'kg',
+    roundingIncrement: 2.5,
+    roundingDirection: 'nearest',
+    tmPercentage: 0.9,
+    includeDeload: true,
+    warmupsEnabled: true,
+    upperTmIncrement: 2.5,
+    lowerTmIncrement: 5,
+    assistanceBias: 'hybrid',
+    days: [],
+    ...(overrides as Partial<WaveSetupDraft>),
+  });
+
+  const waveDay = (overrides: Record<string, unknown> = {}): WaveDayDraft => ({
+    key: 'd1',
+    weekday: 1,
+    liftName: 'Squat',
+    catalogExerciseId: null,
+    category: 'lower',
+    trainingMax: null,
+    assistanceStartWeight: null,
+    assistance: [],
+    ...(overrides as Partial<WaveDayDraft>),
+  });
+
+  /** One pending week session for a freshly written wave routine. */
+  const pendingWaveWeekSession = async (
+    executor: TestExecutor,
+    routineId: number,
+  ): Promise<number> => {
+    await executor.run(
+      `INSERT INTO Cycles (routine_id, cycle_number, weeks, status, current_week, started_at)
+       VALUES (?, 1, 4, 'active', 1, ?);`,
+      [routineId, TODAY],
+    );
+    const cycle = await executor.get(
+      'SELECT cycle_id FROM Cycles WHERE routine_id = ? AND cycle_number = 1;',
+      [routineId],
+    );
+    if (!cycle) {
+      throw new Error('No wave cycle');
+    }
+    await executor.run(
+      'INSERT INTO CycleWeeks (cycle_id, week_number) VALUES (?, 1);',
+      [cycle.cycle_id],
+    );
+    const week = await executor.get(
+      'SELECT cycle_week_id FROM CycleWeeks WHERE cycle_id = ? AND week_number = 1;',
+      [cycle.cycle_id],
+    );
+    if (!week) {
+      throw new Error('No wave week');
+    }
+    const session = await executor.get(
+      `SELECT session_id FROM Sessions WHERE routine_id = ? ORDER BY sort_order LIMIT 1;`,
+      [routineId],
+    );
+    if (!session) {
+      throw new Error('No wave session');
+    }
+    await executor.run(
+      `INSERT INTO WeekSessions (cycle_week_id, session_id, status)
+       VALUES (?, ?, 'pending');`,
+      [week.cycle_week_id, session.session_id],
+    );
+    const weekSession = await executor.get(
+      `SELECT ws.week_session_id FROM WeekSessions ws
+       JOIN Sessions s ON s.session_id = ws.session_id
+       WHERE s.routine_id = ? ORDER BY ws.week_session_id LIMIT 1;`,
+      [routineId],
+    );
+    if (!weekSession) {
+      throw new Error('No pending wave week session');
+    }
+    return Number(weekSession.week_session_id);
+  };
+
+  const withSquatWeight = (session: RunnerSession, weight: number): RunnerDraft => {
+    const draft: RunnerDraft = [[], []];
+    for (let index = 0; index < squat(session).targetSets; index += 1) {
+      draft[0].push({ reps: 5, weight });
+    }
+    for (let index = 0; index < row(session).targetSets; index += 1) {
+      draft[1].push({ reps: 10, weight: 22.5 });
+    }
+    return draft;
+  };
+
+  it('writes the linear starting load from the first logged set when the plan value is NULL', async () => {
+    const { db, executor } = connect();
+    const session = await fixture(executor);
+    db.prepare('UPDATE SessionExercises SET absolute_weight = NULL WHERE session_exercise_id = ?;')
+      .run(squat(session).sessionExerciseId);
+
+    await saveSessionLog(executor, session.weekSessionId, session, withSquatWeight(session, 100));
+
+    const row = db
+      .prepare('SELECT absolute_weight FROM SessionExercises WHERE session_exercise_id = ?;')
+      .get(squat(session).sessionExerciseId) as { absolute_weight: number | null };
+    expect(row.absolute_weight).toBe(100);
+  });
+
+  it('derives the wave training max from the first logged set (Epley x TM pct)', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+    const routineId = await writeWaveRoutine(
+      executor,
+      waveDraft({ days: [waveDay({ key: 'd1', liftName: 'Squat', trainingMax: null })] }),
+    );
+    const weekSessionId = await pendingWaveWeekSession(executor, routineId);
+    const session = await loadRunnerSession(executor, weekSessionId, TODAY);
+
+    const draft: RunnerDraft = [[{ reps: 5, weight: 100 }], []];
+    await saveSessionLog(executor, weekSessionId, session, draft);
+
+    const row = db
+      .prepare(
+        `SELECT e.training_max_weight FROM SessionExercises e
+         JOIN Sessions s ON s.session_id = e.session_id
+         WHERE s.routine_id = ? AND e.role = 'main';`,
+      )
+      .get(routineId) as { training_max_weight: number | null };
+    // Epley 100 x (1 + 5/30) = 116.67; x 0.9 = 105.
+    expect(row.training_max_weight).toBe(105);
+  });
+
+  it('never overwrites a baseline the user set by hand', async () => {
+    const { db, executor } = connect();
+    const session = await fixture(executor);
+    db.prepare('UPDATE SessionExercises SET absolute_weight = 50 WHERE session_exercise_id = ?;')
+      .run(squat(session).sessionExerciseId);
+
+    await saveSessionLog(executor, session.weekSessionId, session, withSquatWeight(session, 120));
+
+    const row = db
+      .prepare('SELECT absolute_weight FROM SessionExercises WHERE session_exercise_id = ?;')
+      .get(squat(session).sessionExerciseId) as { absolute_weight: number | null };
+    expect(row.absolute_weight).toBe(50);
+  });
+
+  it('converts a set logged in the other unit once, for the plan — the log row keeps its unit', async () => {
+    const { db, executor } = connect();
+    const session = await fixture(executor);
+    db.prepare('UPDATE SessionExercises SET absolute_weight = NULL WHERE session_exercise_id = ?;')
+      .run(squat(session).sessionExerciseId);
+
+    const draft = withSquatWeight(session, 100);
+    draft[0][0] = { reps: 5, weight: 100, unit: 'lb' };
+    await saveSessionLog(executor, session.weekSessionId, session, draft);
+
+    const plan = db
+      .prepare('SELECT absolute_weight FROM SessionExercises WHERE session_exercise_id = ?;')
+      .get(squat(session).sessionExerciseId) as { absolute_weight: number | null };
+    expect(plan.absolute_weight).toBeCloseTo(45.36, 1);
+
+    // The history row keeps the lb value and unit — nothing was converted there.
+    const logged = db
+      .prepare(
+        `SELECT wl.weight_logged, wl.unit FROM Weight_Log wl
+         JOIN Logged_Exercises le ON le.logged_exercise_id = wl.logged_exercise_id
+         WHERE le.exercise_name = 'Barbell Full Squat' AND wl.set_number = 1
+         ORDER BY wl.weight_log_id DESC LIMIT 1;`,
+      )
+      .get() as { weight_logged: number; unit: string };
+    expect(logged.weight_logged).toBe(100);
+    expect(logged.unit).toBe('lb');
+  });
+
+  it('reads back exactly what was stored — the lb set is never converted anywhere', async () => {
+    const { db, executor } = connect();
+    const session = await fixture(executor);
+    const draft = planned(session);
+    const firstSquatSet = draft[0][0];
+    if (firstSquatSet === null) {
+      throw new Error('Fixture draft missing the squat set');
+    }
+    draft[0][0] = { ...firstSquatSet, weight: 225, unit: 'lb' };
+    await saveSessionLog(executor, session.weekSessionId, session, draft);
+
+    const rows = await loadExerciseRows(db);
+    const squatSets = rows.filter((row) => row.exercise_name === 'Barbell Full Squat');
+    const first = [...squatSets].reverse().find((row) => row.set_number === 1);
+    expect(first).toMatchObject({ weight_logged: 225, unit: 'lb' });
+    expect(squatSets.filter((row) => row.set_number > 1).every((row) => row.unit === 'kg')).toBe(
+      true,
+    );
+  });
+});
+
+type WeightLogRow = {
+  exercise_name: string;
+  set_number: number;
+  weight_logged: number;
+  unit: string;
+};
+
+const loadExerciseRows = async (
+  db: DatabaseSync,
+): Promise<WeightLogRow[]> =>
+  db
+    .prepare(
+      `SELECT le.exercise_name, wl.set_number, wl.weight_logged, wl.unit
+       FROM Weight_Log wl JOIN Logged_Exercises le ON le.logged_exercise_id = wl.logged_exercise_id
+       ORDER BY wl.weight_log_id;`,
+    )
+    .all() as WeightLogRow[];

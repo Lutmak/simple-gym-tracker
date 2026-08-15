@@ -13,9 +13,10 @@
  * The write path follows the D2 copy machinery (`utils/routineActions.ts`):
  * one Routines row with progression_rule 'wave' and user origin, one Session
  * per day, a main SessionExercise per day loaded from the training max, and
- * one accessory row per assistance row. The SessionExercises CHECK requires
- * an absolute weight for 'absolute' rows, so the setup collects ONE assistance
- * start weight per day and every accessory row of that day shares it.
+ * one accessory row per assistance row. Weights are learned, never demanded
+ * (§3.2): a missing training max or assistance start weight is written as
+ * NULL, and the first logged session fills it in. Bar profiles default from
+ * the catalog equipment when the draft carries it (utils/barProfiles.ts).
  *
  * Rounding direction affects only setup-time arithmetic (the estimator and
  * the ramp preview): the Routines table stores no direction, so the runtime
@@ -30,6 +31,7 @@ import {
   type RoundingDirection,
   type WarmupSet,
 } from './fiveThreeOne';
+import { defaultBarProfileForEquipment } from './barProfiles';
 import type { RoutineCopyRows, RoutineDatabase, RoutineUnit } from './routineActions';
 
 export type AssistanceBias = 'hypertrophy' | 'strength' | 'hybrid';
@@ -41,6 +43,8 @@ export interface WaveAssistanceRow {
   name: string;
   sets: number;
   reps: number;
+  /** The catalog equipment of the chosen exercise — the bar-profile default. */
+  equipment?: string | null;
 }
 
 export interface WaveDayDraft {
@@ -49,11 +53,13 @@ export interface WaveDayDraft {
   liftName: string;
   catalogExerciseId: string | null;
   category: LiftCategory;
-  /** The training max in the routine's unit — entered once, per lift. */
+  /** The training max in the routine's unit — entered once, per lift. Null until learned. */
   trainingMax: number | null;
-  /** One start weight shared by every accessory row of the day (§ ruling 3c). */
+  /** One start weight shared by every accessory row of the day. Null until learned. */
   assistanceStartWeight: number | null;
   assistance: WaveAssistanceRow[];
+  /** The catalog equipment of the chosen lift — the bar-profile default. */
+  equipment?: string | null;
 }
 
 export interface WaveSetupDraft {
@@ -69,6 +75,8 @@ export interface WaveSetupDraft {
   lowerTmIncrement: number;
   assistanceBias: AssistanceBias;
   days: WaveDayDraft[];
+  /** Planned jokers (§3.4); 0 when omitted — off by default. */
+  plannedJokers?: number;
 }
 
 export interface DefaultTrainingDay {
@@ -180,8 +188,6 @@ export type WaveSetupError =
   | { code: 'noTrainingDays' }
   | { code: 'duplicateWeekday' }
   | { code: 'liftNameRequired'; day: string }
-  | { code: 'trainingMaxMissing'; lift: string }
-  | { code: 'assistanceStartWeightMissing'; day: string }
   | { code: 'assistanceNameRequired'; exercise: string }
   | { code: 'assistanceSetsInvalid'; exercise: string }
   | { code: 'assistanceRepsInvalid'; exercise: string };
@@ -201,6 +207,10 @@ const fail = (detail: WaveSetupError): never => {
 };
 
 const isPositive = (value: number): boolean => Number.isFinite(value) && value > 0;
+
+/** A non-positive weight is not a load — it stays NULL until learned (§3.2). */
+const usable = (weight: number | null): number | null =>
+  weight !== null && isPositive(weight) ? weight : null;
 
 const isPositiveInteger = (value: number): boolean =>
   Number.isInteger(value) && value > 0;
@@ -231,12 +241,6 @@ const assertDay = (day: WaveDayDraft): void => {
   const liftName = day.liftName.trim();
   if (liftName === '') {
     fail({ code: 'liftNameRequired', day: day.key });
-  }
-  if (!isPositive(day.trainingMax ?? NaN)) {
-    fail({ code: 'trainingMaxMissing', lift: liftName });
-  }
-  if (day.assistance.length > 0 && !isPositive(day.assistanceStartWeight ?? NaN)) {
-    fail({ code: 'assistanceStartWeightMissing', day: liftName });
   }
   for (const exercise of day.assistance) {
     if (exercise.name.trim() === '') {
@@ -284,11 +288,15 @@ export function buildWaveRoutineRows(draft: WaveSetupDraft): RoutineCopyRows {
       targetReps: WAVE_MAIN_REPS,
       loadSource: 'training_max_pct' as const,
       trainingMaxPct: draft.tmPercentage,
-      trainingMaxWeight: day.trainingMax,
+      // A non-positive training max is not a load — it stays NULL until the
+      // first logged session learns it (§3.2).
+      trainingMaxWeight: usable(day.trainingMax),
       absoluteWeight: null,
       unitOverride: null,
       isAmrap: true,
       sortOrder: 1,
+      barProfile: defaultBarProfileForEquipment(day.equipment ?? null),
+      barWeight: null,
     };
     const accessories = day.assistance.map((exercise, index) => ({
       sessionIndex,
@@ -300,10 +308,12 @@ export function buildWaveRoutineRows(draft: WaveSetupDraft): RoutineCopyRows {
       loadSource: 'absolute' as const,
       trainingMaxPct: null,
       trainingMaxWeight: null,
-      absoluteWeight: day.assistanceStartWeight,
+      absoluteWeight: usable(day.assistanceStartWeight),
       unitOverride: null,
       isAmrap: false,
       sortOrder: index + 2,
+      barProfile: defaultBarProfileForEquipment(exercise.equipment ?? null),
+      barWeight: null,
     }));
     return [main, ...accessories];
   });
@@ -320,6 +330,7 @@ export function buildWaveRoutineRows(draft: WaveSetupDraft): RoutineCopyRows {
       restAccessorySeconds: WAVE_REST_ACCESSORY_SECONDS,
       isActive: true,
       createdAt: Date.now(),
+      plannedJokers: draft.plannedJokers ?? 0,
     },
     sessions,
     exercises,
@@ -343,8 +354,8 @@ export async function writeWaveRoutine(
     await db.run(
       `INSERT INTO Routines
          (routine_key, name, origin, progression_rule, unit, rounding_increment,
-          rest_main_seconds, rest_accessory_seconds, is_active, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          rest_main_seconds, rest_accessory_seconds, is_active, created_at, planned_jokers)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         rows.routine.routineKey,
         rows.routine.name,
@@ -356,6 +367,7 @@ export async function writeWaveRoutine(
         rows.routine.restAccessorySeconds,
         rows.routine.isActive ? 1 : 0,
         rows.routine.createdAt,
+        rows.routine.plannedJokers,
       ],
     );
     const routineIdRow = await db.get('SELECT last_insert_rowid() AS id;', []);
@@ -386,8 +398,8 @@ export async function writeWaveRoutine(
         `INSERT INTO SessionExercises
            (session_id, catalog_exercise_id, exercise_name, role, target_sets, target_reps,
             load_source, training_max_pct, training_max_weight, absolute_weight,
-            unit_override, is_amrap, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+            unit_override, is_amrap, sort_order, bar_profile, bar_weight)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           sessionId,
           exercise.catalogExerciseId,
@@ -402,6 +414,8 @@ export async function writeWaveRoutine(
           exercise.unitOverride,
           exercise.isAmrap ? 1 : 0,
           exercise.sortOrder,
+          exercise.barProfile,
+          exercise.barWeight,
         ],
       );
     }

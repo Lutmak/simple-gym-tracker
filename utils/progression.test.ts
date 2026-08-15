@@ -130,6 +130,31 @@ describe('progression — linear rule', () => {
     });
   });
 
+  it('extra sets never move the proposal — only the first targetSets sets are read (§3.4)', () => {
+    const planned = proposeNextTargets(
+      routine(),
+      [cycle([set(5, 100), set(5, 100), set(5, 100)])],
+    );
+    const withExtras = proposeNextTargets(
+      routine(),
+      [cycle([set(5, 100), set(5, 100), set(5, 100), set(3, 110), set(1, 115)])],
+    );
+
+    expect(withExtras).toEqual(planned);
+  });
+
+  it('extra sets cannot rescue a short session — a missed planned set still holds', () => {
+    const proposals = proposeNextTargets(
+      routine(),
+      [cycle([set(5, 100), set(5, 100), set(3, 100), set(5, 110)])],
+    );
+
+    expect(proposals[0]).toMatchObject({
+      proposedTarget: 100,
+      reason: 'te faltaron 2 reps en la serie 3 (hiciste 3 de 5)',
+    });
+  });
+
   it('flags an advisory when the previous cycle also held, but never changes the target', () => {
     const proposals = proposeNextTargets(routine(), [
       cycle([set(5, 100), set(5, 100)], 'held'),

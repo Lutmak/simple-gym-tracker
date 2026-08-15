@@ -33,6 +33,7 @@ import {
   type RoutineRole,
   type RoutineUnit,
 } from '../utils/routineActions';
+import type { BarProfileKey } from '../utils/barProfiles';
 import type { RoutinesStackParamList } from '../App';
 
 type Props = NativeStackScreenProps<RoutinesStackParamList, 'EditRoutine'>;
@@ -51,6 +52,8 @@ type ScreenExercise = {
   absoluteWeight: string;
   unitOverride: RoutineUnit | null;
   isAmrap: boolean;
+  barProfile: BarProfileKey | null;
+  barWeight: number | null;
 };
 
 type ScreenSession = {
@@ -113,6 +116,8 @@ const toScreenExercise = (exercise: ExerciseSource): ScreenExercise => ({
   absoluteWeight: exercise.absoluteWeight === null ? '' : String(exercise.absoluteWeight),
   unitOverride: exercise.unitOverride,
   isAmrap: exercise.isAmrap,
+  barProfile: exercise.barProfile,
+  barWeight: exercise.barWeight,
 });
 
 const toEditRoutine = (draft: ScreenDraft): EditRoutine => ({
@@ -144,6 +149,8 @@ const toEditRoutine = (draft: ScreenDraft): EditRoutine => ({
           : null,
       unitOverride: exercise.unitOverride,
       isAmrap: exercise.isAmrap,
+      barProfile: exercise.barProfile,
+      barWeight: exercise.barWeight,
     })),
   })),
 });
@@ -383,6 +390,8 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
             absoluteWeight: '',
             unitOverride: null,
             isAmrap: false,
+            barProfile: null,
+            barWeight: null,
           },
         ],
       }));

@@ -4,6 +4,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTranslation } from 'react-i18next';
 import { useSQLiteContext } from 'expo-sqlite';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { useNavigation } from '@react-navigation/native';
 import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import { useQueueRevision } from '../context/QueueRevision';
@@ -111,10 +112,11 @@ function TabItem({
   );
 }
 
-export function TabBar({ state, insets, navigation }: BottomTabBarProps) {
+export function TabBar({ state, insets }: BottomTabBarProps) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
   const { revision } = useQueueRevision();
+  const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const db = useSQLiteContext();
   const [queue, setQueue] = useState<SessionQueueState | null>(null);
 
@@ -142,10 +144,7 @@ export function TabBar({ state, insets, navigation }: BottomTabBarProps) {
   }, [reload, state.index, revision]);
 
   useEffect(() => {
-    const unsubscribe = (navigation as unknown as NavigationProp<ParamListBase>).addListener(
-      'state',
-      reload,
-    );
+    const unsubscribe = navigation.addListener('state', reload);
     return unsubscribe;
   }, [navigation, reload]);
 

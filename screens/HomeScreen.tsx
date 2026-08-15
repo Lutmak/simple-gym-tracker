@@ -21,9 +21,9 @@ import {
 } from '../utils/today';
 import { loadReviewEntry, type ReviewEntry } from '../utils/cycleReview';
 import type { RoutineDatabase } from '../utils/routineActions';
-import type { TodayStackParamList } from '../App';
+import type { HomeStackParamList } from '../App';
 
-type Props = NativeStackScreenProps<TodayStackParamList, 'Today'>;
+type Props = NativeStackScreenProps<HomeStackParamList, 'Home'>;
 
 const WEEKDAY_FULL_KEYS = [
   'weekdayFullSun',
@@ -47,7 +47,7 @@ const WEEKDAY_SHORT_KEYS = [
 
 const formatWeight = (value: number): string => String(Number(value.toFixed(1)));
 
-export default function TodayScreen({ navigation }: Props) {
+export default function HomeScreen({ navigation }: Props) {
   const { theme } = useTheme();
   const { t } = useTranslation();
   const { dateFormat, firstWeekday } = useSettings();
@@ -254,7 +254,7 @@ export default function TodayScreen({ navigation }: Props) {
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <Text style={[styles.title, { color: theme.text }]}>{t('today')}</Text>
+        <Text style={[styles.title, { color: theme.text }]}>{t('home')}</Text>
 
         {reviewEntry !== null && (
           <View

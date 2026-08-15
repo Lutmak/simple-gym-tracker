@@ -10,13 +10,14 @@ import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 import { fontSize, radius, spacing } from '../utils/scale';
 import {
   dayStampOf,
-  loadTodayState,
+  loadSessionQueue,
   nextOccurrenceStamp,
-  resolveMissedSession,
-  type MissedSession,
-  type TodayExercise,
-  type TodaySessionInfo,
-  type TodayState,
+  resolveDiscardSession,
+  resolveDoTodaySession,
+  resolveMoveSession,
+  type QueuedExercise,
+  type QueuedSession,
+  type SessionQueueState,
 } from '../utils/today';
 import { loadReviewEntry, type ReviewEntry } from '../utils/cycleReview';
 import type { RoutineDatabase } from '../utils/routineActions';
@@ -52,7 +53,7 @@ export default function TodayScreen({ navigation }: Props) {
   const { dateFormat, firstWeekday } = useSettings();
   const db = useSQLiteContext();
 
-  const [state, setState] = useState<TodayState | null>(null);
+  const [state, setState] = useState<SessionQueueState | null>(null);
   const [reviewEntry, setReviewEntry] = useState<ReviewEntry | null>(null);
   const [expandedMove, setExpandedMove] = useState<number | null>(null);
 
@@ -68,7 +69,7 @@ export default function TodayScreen({ navigation }: Props) {
   };
 
   const reload = useCallback(() => {
-    loadTodayState(routineDb, dayStampOf(new Date()))
+    loadSessionQueue(routineDb, dayStampOf(new Date()))
       .then(setState)
       .catch((error) => console.error('Error loading today:', error));
     loadReviewEntry(routineDb)
@@ -83,14 +84,17 @@ export default function TodayScreen({ navigation }: Props) {
   );
 
   const resolve = (
-    missed: MissedSession,
+    head: QueuedSession,
     resolution: 'moved' | 'doToday' | 'discarded',
     targetStamp?: number,
   ) => {
-    resolveMissedSession(routineDb, missed.weekSessionId, resolution, {
-      todayStamp: dayStampOf(new Date()),
-      targetStamp,
-    })
+    const run =
+      resolution === 'doToday'
+        ? resolveDoTodaySession(routineDb, head.weekSessionId, dayStampOf(new Date()))
+        : resolution === 'moved'
+          ? resolveMoveSession(routineDb, head.weekSessionId, targetStamp as number)
+          : resolveDiscardSession(routineDb, head.weekSessionId);
+    run
       .then(() => {
         setExpandedMove(null);
         reload();
@@ -109,7 +113,7 @@ export default function TodayScreen({ navigation }: Props) {
   const weekdayAndDate = (weekday: number, stamp: number): string =>
     t('weekdayAndDate', { weekday: t(WEEKDAY_FULL_KEYS[weekday]), date: formatDate(stamp) });
 
-  const renderExercise = (exercise: TodayExercise) => (
+  const renderExercise = (exercise: QueuedExercise) => (
     <View key={exercise.name} style={styles.exerciseRow}>
       <Text style={[styles.exerciseName, { color: theme.text }]} numberOfLines={1}>
         {exercise.name}
@@ -126,7 +130,7 @@ export default function TodayScreen({ navigation }: Props) {
     </View>
   );
 
-  const renderSession = (session: TodaySessionInfo) => (
+  const renderSession = (session: QueuedSession) => (
     <View
       key={session.weekSessionId}
       style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
@@ -153,7 +157,7 @@ export default function TodayScreen({ navigation }: Props) {
     </View>
   );
 
-  const renderMissed = (missed: MissedSession) => {
+  const renderMissed = (missed: QueuedSession) => {
     const moveOpen = expandedMove === missed.weekSessionId;
     const start = firstWeekday === 'Monday' ? 1 : 0;
     const orderedWeekdays = Array.from({ length: 7 }, (_, index) => (start + index) % 7);
@@ -185,8 +189,10 @@ export default function TodayScreen({ navigation }: Props) {
               styles.primaryButton,
               styles.grow,
               { backgroundColor: theme.buttonBackground },
+              !missed.doTodayAvailable && styles.disabled,
               pressed && styles.pressed,
             ]}
+            disabled={!missed.doTodayAvailable}
             onPress={() => resolve(missed, 'doToday')}
           >
             <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
@@ -311,56 +317,51 @@ export default function TodayScreen({ navigation }: Props) {
           </View>
         ) : (
           <>
-            {state.missed.length > 0 && (
-              <>
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                  {t('missedSessionsTitle')}
-                </Text>
-                {state.missed.map(renderMissed)}
-              </>
-            )}
+            {state.head !== null && state.resolution === 'unresolved' && renderMissed(state.head)}
 
-            {state.dueToday.length > 0 ? (
+            {state.head !== null && state.resolution === 'due' ? (
               <>
                 <Text style={[styles.sectionTitle, { color: theme.text }]}>
                   {t('todaySession')}
                 </Text>
-                {state.dueToday.map(renderSession)}
+                {renderSession(state.head)}
               </>
             ) : (
-              <>
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                  {t('noSessionTodayTitle')}
-                </Text>
-                {state.nextSession !== null && (
-                  <View
-                    style={[
-                      styles.card,
-                      { backgroundColor: theme.card, borderColor: theme.border },
-                    ]}
-                  >
-                    <Text style={[styles.cardTitle, { color: theme.text }]}>
-                      {state.nextSession.name}
-                    </Text>
-                    <Text style={[styles.helper, { color: theme.text }]}>
-                      {weekdayAndDate(state.nextSession.weekday, state.nextSession.date)}
-                    </Text>
-                  </View>
-                )}
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.primaryButton,
-                    { backgroundColor: theme.buttonBackground },
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={() => navigation.navigate('FreeLogging')}
-                >
-                  <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-                    {t('freeLogging')}
+              state.head === null && (
+                <>
+                  <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                    {t('noSessionTodayTitle')}
                   </Text>
-                </Pressable>
-              </>
-            )}
+                  {state.upcoming !== null && (
+                    <View
+                      style={[
+                        styles.card,
+                        { backgroundColor: theme.card, borderColor: theme.border },
+                      ]}
+                    >
+                      <Text style={[styles.cardTitle, { color: theme.text }]}>
+                        {state.upcoming.name}
+                      </Text>
+                      <Text style={[styles.helper, { color: theme.text }]}>
+                        {weekdayAndDate(state.upcoming.weekday, state.upcoming.date)}
+                      </Text>
+                      </View>
+                    )}
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.primaryButton,
+                        { backgroundColor: theme.buttonBackground },
+                        pressed && styles.pressed,
+                      ]}
+                      onPress={() => navigation.navigate('FreeLogging')}
+                    >
+                      <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
+                        {t('freeLogging')}
+                      </Text>
+                    </Pressable>
+                  </>
+                )
+              )}
           </>
         )}
       </ScrollView>
@@ -451,6 +452,9 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.7,
+  },
+  disabled: {
+    opacity: 0.4,
   },
   primaryButtonText: {
     fontSize: fontSize.button,

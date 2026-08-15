@@ -2,58 +2,31 @@ import React, { createContext, useState, useEffect, useContext, ReactNode } from
 import { Appearance, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as NavigationBar from 'expo-navigation-bar';
+import {
+  getTokens,
+  lightTokens,
+  darkTokens,
+  toLegacyPalette,
+  type LegacyPalette,
+  type ThemeTokens,
+} from '../utils/theme';
 
-// Define the themes
-const LightTheme = {
-  type: 'light',
-  background: '#FFFFFF',
-  text: '#000000',
-  card: '#F7F7F7',
-  border: 'rgba(0, 0, 0, 0.2)',
-  buttonBackground: '#000000',
-  buttonText: '#FFFFFF',
-  homeCardColor1: '#000000',
-  homeCardColor2:'#D3D3D3',
-  homeCardColor3:'#808080',
-  homeButtonColor1:'#FFFFFF',
-  homeButtonColor2:'#505050',
-  homeButtonColor3:'#000000',
-  homeButtonText1: '#000000',
-  homeButtonText2:'#FFFFFF',
-  homeButtonText3:'#FFFFFF',
-  homeCardText1: 'white',
-  homeCardText2: 'white',
-  inactivetint: 'rgba(0, 0, 0, 0.2)',
-  logborder:'rgba(0, 0, 0, 0.2)',
+// The one colour source is utils/theme.ts. The legacy `theme` object is the pre-design-system
+// shape the old screens read; it resolves entirely through the token layer and is deleted
+// piece by piece as screens are rebuilt on the primitives (Phases H-S).
+const LightTheme: LegacyPalette = toLegacyPalette(lightTokens);
+const DarkTheme: LegacyPalette = toLegacyPalette(darkTokens);
+
+type ThemeContextValue = {
+  theme: LegacyPalette;
+  tokens: ThemeTokens;
+  toggleTheme: () => void;
 };
 
-const DarkTheme = {
-  type: 'dark',
-  background: '#121212',
-  text: 'white',
-  card: '#1E1E1E',
-  border: 'rgba(125, 125, 125, 0.1)',
-  buttonBackground: 'white',
-  buttonText: 'black',
-  homeCardColor1: '#1E1E1E',
-  homeCardColor2:'#1E1E1E',
-  homeCardColor3:'#1E1E1E',
-  homeButtonColor1:'#FFFFFF',
-  homeButtonColor2:'#FFFFFF',
-  homeButtonColor3:'#FFFFFF',
-  homeButtonText1: '#000000',
-  homeButtonText2:'#000000',
-  homeButtonText3:'#000000',
-  homeCardText1: 'white',
-  homeCardText2: 'white',
-  inactivetint: 'rgba(245, 245, 245, 0.1)',
-  logborder:'rgba(245, 245, 245, 0.1)'
-};
-
-// Context for theme management
-const ThemeContext = createContext({
-  theme: LightTheme, // Default theme
-  toggleTheme: () => {}, // Default placeholder function
+const ThemeContext = createContext<ThemeContextValue>({
+  theme: LightTheme,
+  tokens: lightTokens,
+  toggleTheme: () => {},
 });
 
 type ThemeProviderProps = {
@@ -61,7 +34,7 @@ type ThemeProviderProps = {
 };
 
 export const ThemeProvider = ({ children }: ThemeProviderProps) => {
-  const [theme, setTheme] = useState(LightTheme);
+  const [theme, setTheme] = useState<LegacyPalette>(LightTheme);
 
   const themeFilePath = `${FileSystem.documentDirectory}theme.json`;
 
@@ -90,8 +63,10 @@ export const ThemeProvider = ({ children }: ThemeProviderProps) => {
     await FileSystem.writeAsStringAsync(themeFilePath, theme === LightTheme ? 'dark' : 'light');
   };
 
+  const tokens = getTokens(theme.type);
+
   return (
-    <ThemeContext.Provider value={{ theme, toggleTheme }}>
+    <ThemeContext.Provider value={{ theme, tokens, toggleTheme }}>
       {children}
     </ThemeContext.Provider>
   );

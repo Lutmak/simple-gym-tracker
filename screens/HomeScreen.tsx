@@ -24,7 +24,7 @@ import { loadReviewEntry, type ReviewEntry } from '../utils/cycleReview';
 import type { RoutineDatabase } from '../utils/routineActions';
 import type { HomeStackParamList } from '../App';
 
-type Props = NativeStackScreenProps<HomeStackParamList, 'Home'>;
+type Props = NativeStackScreenProps<HomeStackParamList, 'HomeIndex'>;
 
 const WEEKDAY_FULL_KEYS = [
   'weekdayFullSun',

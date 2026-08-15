@@ -142,7 +142,7 @@
   };
 
   export type HomeStackParamList = {
-    Home: undefined;
+    HomeIndex: undefined;
     StartSession: { weekSessionId: number };
     FreeLogging: undefined;
   };
@@ -179,7 +179,7 @@ const HomeStack = () => {
       }}
     >
       <HomeStackNavigator.Screen
-        name="Home"
+        name="HomeIndex"
         component={HomeScreen}
         options={{ headerShown: false }}
       />

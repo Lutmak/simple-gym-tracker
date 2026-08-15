@@ -4,6 +4,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useTranslation } from 'react-i18next';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
 import { Button } from '../components/Button';
@@ -12,7 +13,7 @@ import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { Section } from '../components/Section';
 import { WeekOverview } from '../components/WeekOverview';
-import { fontSize, spacing } from '../utils/scale';
+import { fontSize, spacing, tabBar } from '../utils/scale';
 import { dayStampOf } from '../utils/today';
 import {
   datePartsOfStamp,
@@ -125,6 +126,9 @@ export default function InicioScreen({ navigation }: Props) {
   const openRoutines = () => navigation.getParent()?.navigate('Routines');
   const startSession = (weekSessionId: number) =>
     navigation.navigate('StartSession', { weekSessionId });
+  // H2 consumes this route request to mount the standard resolution Sheet.
+  const openSessionResolution = (weekSessionId: number) =>
+    navigation.navigate('InicioIndex', { resolutionWeekSessionId: weekSessionId });
 
   const renderAnswer = () => {
     if (data.queue.routine === null) {
@@ -139,17 +143,24 @@ export default function InicioScreen({ navigation }: Props) {
     }
 
     if (data.queue.head !== null && data.queue.resolution === 'unresolved') {
+      const session = data.queue.head;
+      const resolutionChoices = session.doTodayAvailable
+        ? t('inicioResolutionChoices')
+        : t('inicioResolutionChoicesWithoutToday');
       return (
         <View testID="inicio-unresolved">
           <Text style={[styles.overline, { color: tokens.textSecondary }]}>{t('inicioUnresolved')}</Text>
-          <Text style={[styles.sessionTitle, { color: tokens.textPrimary }]}>{data.queue.head.name}</Text>
+          <Text style={[styles.sessionTitle, { color: tokens.textPrimary }]}>{session.name}</Text>
           <Text style={[styles.helper, { color: tokens.textSecondary }]}>
-            {formatDate(data.queue.head.date)} · {t('inicioNotLogged')}
+            {formatDate(session.date)} · {t('inicioNotLogged')}
           </Text>
           <Row
             label={t('inicioResolveSession')}
-            detail={t('inicioResolutionChoices')}
+            detail={resolutionChoices}
+            right={<Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />}
+            onPress={() => openSessionResolution(session.weekSessionId)}
             divided
+            testID="inicio-resolve-session"
           />
         </View>
       );

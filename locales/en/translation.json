@@ -171,6 +171,7 @@
   "inicioNotLogged": "not logged",
   "inicioResolveSession": "Resolve session",
   "inicioResolutionChoices": "Do it today · Move it · Discard it",
+  "inicioResolutionChoicesWithoutToday": "Move it · Discard it",
   "inicioRestDay": "Rest day",
   "inicioNextSession": "Next session: {{weekday}} · {{name}}",
   "inicioFreeLogging": "Log something else",

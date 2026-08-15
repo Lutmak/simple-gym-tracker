@@ -155,6 +155,7 @@
   "inicioNotLogged": "no registrada",
   "inicioResolveSession": "Resolver sesión",
   "inicioResolutionChoices": "Hacerla hoy · Moverla · Descartarla",
+  "inicioResolutionChoicesWithoutToday": "Moverla · Descartarla",
   "inicioRestDay": "Día de descanso",
   "inicioNextSession": "Tu próxima sesión: {{weekday}} · {{name}}",
   "inicioFreeLogging": "Registrar algo suelto",

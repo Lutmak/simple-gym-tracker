@@ -142,7 +142,8 @@
   };
 
   export type InicioStackParamList = {
-    InicioIndex: undefined;
+    /** H2 consumes this request and presents its standard resolution Sheet. */
+    InicioIndex: { resolutionWeekSessionId?: number } | undefined;
     StartSession: { weekSessionId: number };
     FreeLogging: undefined;
   };

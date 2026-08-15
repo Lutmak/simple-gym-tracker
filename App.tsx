@@ -1,20 +1,20 @@
   // App.tsx
   import React, {useState, useEffect, useRef } from 'react';
-  import { View, ActivityIndicator, StatusBar, StyleSheet, Pressable, Text, Platform } from 'react-native'; // Import Platform
+  import { View, ActivityIndicator, StatusBar, StyleSheet } from 'react-native';
   import * as FileSystem from 'expo-file-system/legacy';
   import { SQLiteProvider, type SQLiteBindParams, type SQLiteDatabase } from 'expo-sqlite';
   import { Asset } from 'expo-asset';
   import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
   import { createNativeStackNavigator } from '@react-navigation/native-stack';
-  import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
-  import Ionicons from 'react-native-vector-icons/Ionicons';
+  import { DarkTheme, DefaultTheme, NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
+  import type { Theme } from '@react-navigation/native';
   import { GestureHandlerRootView } from 'react-native-gesture-handler';
   import './utils/i18n'; // Ensure this is present to initialize i18n
   import i18n from './utils/i18n'; // Import the i18n instance
   import { I18nextProvider, useTranslation } from 'react-i18next';
   import Settings from './screens/Settings';
   import ProgressScreen from './screens/ProgressScreen';
-  import TodayScreen from './screens/TodayScreen';
+  import HomeScreen from './screens/HomeScreen';
   import StartSessionScreen from './screens/StartSessionScreen';
   import FreeLoggingScreen from './screens/FreeLoggingScreen';
   import RoutinesListScreen from './screens/RoutinesListScreen';
@@ -25,14 +25,41 @@
   import CycleReviewScreen from './screens/CycleReviewScreen';
   import { SettingsProvider, useSettings } from './context/SettingsContext';
   import { ThemeProvider, useTheme } from './context/ThemeContext';
+  import { QueueRevisionProvider } from './context/QueueRevision';
   import * as Notifications from 'expo-notifications';
   import { runSchema } from './utils/schema';
   import { checkAndSyncPermissions } from './utils/notificationUtils';
   import { fontSize } from './utils/scale';
+  import { getTokens, type ThemeMode } from './utils/theme';
+  import { TabBar } from './components/TabBar';
 
 
 
   const Bottom = createBottomTabNavigator();
+
+  /**
+   * React Navigation's own palette, derived from the tokens (ENGINEERING.md §4:
+   * the container used to mount without a theme prop, so React Navigation kept
+   * its light DefaultTheme while the app ran dark). Every colour React
+   * Navigation paints — headers, tab-bar defaults, transitions — now resolves
+   * through the same tokens as everything else; a screen no longer survives
+   * only by overriding each surface by hand.
+   */
+  const navigationThemeFor = (mode: ThemeMode): Theme => {
+    const tokens = getTokens(mode);
+    return {
+      ...(mode === 'dark' ? DarkTheme : DefaultTheme),
+      dark: mode === 'dark',
+      colors: {
+        primary: tokens.accent,
+        background: tokens.surface,
+        card: tokens.surfaceRaised,
+        text: tokens.textPrimary,
+        border: tokens.divider,
+        notification: tokens.accent,
+      },
+    };
+  };
 
   
 
@@ -114,8 +141,8 @@
     CycleReview: { routineId: number; cycleId: number };
   };
 
-  export type TodayStackParamList = {
-    Today: undefined;
+  export type HomeStackParamList = {
+    HomeIndex: undefined;
     StartSession: { weekSessionId: number };
     FreeLogging: undefined;
   };
@@ -137,13 +164,13 @@ const initialiseSchema = async (db: SQLiteDatabase) => {
 };
 
 // Define AppContent here
-const TodayStackNavigator = createNativeStackNavigator<TodayStackParamList>();
+const HomeStackNavigator = createNativeStackNavigator<HomeStackParamList>();
 
-const TodayStack = () => {
+const HomeStack = () => {
   const { theme } = useTheme();
   const { t } = useTranslation();
   return (
-    <TodayStackNavigator.Navigator
+    <HomeStackNavigator.Navigator
       screenOptions={{
         headerStyle: { backgroundColor: theme.background },
         headerTintColor: theme.text,
@@ -151,22 +178,22 @@ const TodayStack = () => {
         contentStyle: { backgroundColor: theme.background },
       }}
     >
-      <TodayStackNavigator.Screen
-        name="Today"
-        component={TodayScreen}
+      <HomeStackNavigator.Screen
+        name="HomeIndex"
+        component={HomeScreen}
         options={{ headerShown: false }}
       />
-      <TodayStackNavigator.Screen
+      <HomeStackNavigator.Screen
         name="StartSession"
         component={StartSessionScreen}
         options={{ title: t('todayStartSession') }}
       />
-      <TodayStackNavigator.Screen
+      <HomeStackNavigator.Screen
         name="FreeLogging"
         component={FreeLoggingScreen}
         options={{ title: t('freeLogging') }}
       />
-    </TodayStackNavigator.Navigator>
+    </HomeStackNavigator.Navigator>
   );
 };
 
@@ -219,10 +246,10 @@ const RoutinesStack = () => {
 };
 
 const AppContent = () => {
-  const { theme } = useTheme();
-  const { t } = useTranslation();
+  const { theme, tokens } = useTheme();
   const { notificationPermissionGranted, setNotificationPermissionGranted } =
     useSettings();
+  const navigationRef = useRef<NavigationContainerRef<any>>(null);
 
   useEffect(() => {
     if (notificationPermissionGranted) {
@@ -245,62 +272,35 @@ const AppContent = () => {
         }
       />
   <SQLiteProvider databaseName="SimpleDB.db" useSuspense onInit={initialiseSchema}>
+    <QueueRevisionProvider>
+    <NavigationContainer ref={navigationRef} theme={navigationThemeFor(tokens.mode)}>
         <Bottom.Navigator
+          tabBar={(props) => <TabBar {...props} />}
           screenOptions={{
             headerShown: false,
-            tabBarStyle: {
-              backgroundColor: theme.background, // Dynamically set based on theme
-              borderTopWidth: 0, // Removes the top border of the tab bar
-              elevation: 0, // Removes shadow on Android
-              shadowOpacity: 0, // Removes shadow on iOS
-              height: 60,
-              paddingVertical: 10,
-            },
           }}
         >
           <Bottom.Screen
-            name="Today"
-            component={TodayStack}
-            options={{
-              tabBarLabel: t('today'),
-              tabBarButton: (props) => (
-                <TabButton {...props} iconName="today" />
-              ),
-            }}
-          />
-          <Bottom.Screen
-            name="Routines"
-            component={RoutinesStack}
-            options={{
-              tabBarLabel: t('routines'),
-              tabBarButton: (props) => (
-                <TabButton {...props} iconName="barbell" />
-              ),
-            }}
+            name="Home"
+            component={HomeStack}
           />
           <Bottom.Screen
             name="Progress"
             component={ProgressScreen}
-            options={{
-              tabBarLabel: t('progress'),
-              tabBarButton: (props) => (
-                <TabButton {...props} iconName="trending-up" />
-              ),
-            }}
           />
 
        <Bottom.Screen
+         name="Routines"
+         component={RoutinesStack}
+       />
+       <Bottom.Screen
          name="Settings"
          component={Settings}
-         options={{
-           tabBarLabel: t('settings'),
-           tabBarButton: (props) => (
-             <TabButton {...props} iconName="settings-sharp" />
-           ),
-         }}
        />
 
                  </Bottom.Navigator>
+    </NavigationContainer>
+    </QueueRevisionProvider>
                  </SQLiteProvider>
          </>
   );
@@ -310,7 +310,6 @@ const AppContent = () => {
 
   export default function App() {
     const [dbLoaded, setDbLoaded] = useState(false);
-    const navigationRef = useRef<NavigationContainerRef<any>>(null);
     
     useEffect(() => {
       loadDatabase().then(() => setDbLoaded(true));
@@ -360,61 +359,18 @@ const AppContent = () => {
     return (
       <ThemeProvider>
       <GestureHandlerRootView>
-        <NavigationContainer ref={navigationRef}>
           <SettingsProvider>
           <I18nextProvider i18n={i18n}>
           <AppContent/>
           </I18nextProvider>
           </SettingsProvider>
-         
-        </NavigationContainer>
         
       </GestureHandlerRootView>
     </ThemeProvider>
     );
   }
 
-  // Custom TabButton component to handle icon rendering
-  const TabButton = (props: any) => {
-    const { accessibilityState, onPress } = props;
-    const isSelected = accessibilityState?.selected; // Use optional chaining
-    const { theme } = useTheme(); // Retrieve the theme here
-
-
-    return (
-      <Pressable onPress={onPress} style={styles.tabButton}>
-        <Ionicons
-          name={props.iconName}
-          size={24}
-          color={theme.text} // Always theme.text
-        />
-        <View
-          style={{
-            height: 2,
-            width: '40%',
-            backgroundColor: isSelected ? theme.text : 'transparent',
-            marginTop: 5,
-            borderRadius: 100,
-          }}
-        />
-      </Pressable>
-    );
-  };
-
   const styles = StyleSheet.create({
-    tabBar: {
-      backgroundColor: '#ffffff',
-      borderTopWidth: 2,
-      elevation: 10,
-      height: 60, // Adjusted height for a larger tab bar
-      paddingVertical: 10, // Reduced padding to balance spacing
-    },
-    tabButton: {
-      flex: 1,
-      alignItems: 'center',
-      justifyContent: 'center',
-      padding: 1,
-    },
     permissionBanner: {
       backgroundColor: '#FFF9C4',
       padding: 12,

@@ -22,9 +22,9 @@ import ExerciseCatalogPicker from '../components/ExerciseCatalogPicker';
 import { saveFreeSession, type FreeLogExercise } from '../utils/freeLogging';
 import { dayStampOf } from '../utils/today';
 import type { RoutineDatabase, RoutineUnit } from '../utils/routineActions';
-import type { TodayStackParamList } from '../App';
+import type { HomeStackParamList } from '../App';
 
-type Props = NativeStackScreenProps<TodayStackParamList, 'FreeLogging'>;
+type Props = NativeStackScreenProps<HomeStackParamList, 'FreeLogging'>;
 
 interface FreeSetDraft {
   uid: number;

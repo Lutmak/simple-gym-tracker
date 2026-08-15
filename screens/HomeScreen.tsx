@@ -6,6 +6,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
+import { useQueueRevision } from '../context/QueueRevision';
 import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
 import { fontSize, radius, spacing } from '../utils/scale';
 import {
@@ -21,9 +22,9 @@ import {
 } from '../utils/today';
 import { loadReviewEntry, type ReviewEntry } from '../utils/cycleReview';
 import type { RoutineDatabase } from '../utils/routineActions';
-import type { TodayStackParamList } from '../App';
+import type { HomeStackParamList } from '../App';
 
-type Props = NativeStackScreenProps<TodayStackParamList, 'Today'>;
+type Props = NativeStackScreenProps<HomeStackParamList, 'HomeIndex'>;
 
 const WEEKDAY_FULL_KEYS = [
   'weekdayFullSun',
@@ -47,10 +48,11 @@ const WEEKDAY_SHORT_KEYS = [
 
 const formatWeight = (value: number): string => String(Number(value.toFixed(1)));
 
-export default function TodayScreen({ navigation }: Props) {
+export default function HomeScreen({ navigation }: Props) {
   const { theme } = useTheme();
   const { t } = useTranslation();
   const { dateFormat, firstWeekday } = useSettings();
+  const { bump } = useQueueRevision();
   const db = useSQLiteContext();
 
   const [state, setState] = useState<SessionQueueState | null>(null);
@@ -98,6 +100,7 @@ export default function TodayScreen({ navigation }: Props) {
       .then(() => {
         setExpandedMove(null);
         reload();
+        bump();
       })
       .catch((error) => console.error('Error resolving missed session:', error));
   };
@@ -254,7 +257,7 @@ export default function TodayScreen({ navigation }: Props) {
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <Text style={[styles.title, { color: theme.text }]}>{t('today')}</Text>
+        <Text style={[styles.title, { color: theme.text }]}>{t('home')}</Text>
 
         {reviewEntry !== null && (
           <View

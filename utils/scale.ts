@@ -85,3 +85,20 @@ export const radius = {
   control: 10,
   pill: 22,
 } as const;
+
+/**
+ * The bottom tab bar — bespoke chrome (V2) that owns the raised centre action.
+ * Sizes live here so the bar and its indicator never invent a number.
+ */
+export const tabBar = {
+  /** Bar height, excluding the bottom safe-area inset. */
+  height: 56,
+  /** Tab icon size. */
+  icon: 24,
+} as const;
+
+/** The active-tab indicator — the one accent element in the tab bar. */
+export const tabIndicator = {
+  width: 24,
+  height: 3,
+} as const;

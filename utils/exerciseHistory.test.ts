@@ -139,46 +139,40 @@ describe('pure core', () => {
 });
 
 describe('demo data through the db edges', () => {
-  it('lists exercises with history ordered by recency', async () => {
+  it('lists every exercise with history, most recently logged first', async () => {
     const { executor } = await setupDemo();
     const summaries = await loadExercisesWithHistory(executor);
-    expect(summaries.map((entry) => entry.name)).toEqual([
-      'Barbell Deadlift',
-      'Lying Leg Curls',
-      'Barbell Bench Press - Medium Grip',
-      'Barbell Shoulder Press',
-      'Wide-Grip Lat Pulldown',
-      'Barbell Full Squat',
-      'Bent Over Two-Dumbbell Row',
-    ]);
-    expect(summaries[0]?.lastDate).toBe(epoch('2026-05-22'));
+
+    // 17 wave exercises + the two free-log exercises = 19 names; the linear
+    // routine shares its names with the wave one, so it adds no new entries.
+    expect(summaries).toHaveLength(19);
+    expect(summaries[0]).toMatchObject({ name: 'Ab Roller' });
+    expect(summaries[0]?.lastDate).toBe(epoch('2026-08-13'));
+    expect(summaries.map((entry) => entry.name)).toContain('Hack Squat');
+    expect(summaries.map((entry) => entry.name)).toContain('Wide-Grip Lat Pulldown');
+    expect(summaries[summaries.length - 1]?.lastDate).toBe(epoch('2026-06-20'));
   });
 
-  it('builds the squat history across every session of both cycles', async () => {
+  it('merges the squat history across both routines: the linear early block then six wave cycles', async () => {
     const { executor } = await setupDemo();
     const series = await loadExerciseSeries(executor, 'Barbell Full Squat');
 
     expect(series.exerciseName).toBe('Barbell Full Squat');
     expect(series.unit).toBe('kg');
     expect(series.mixedUnits).toBe(false);
-    expect(series.points.map((point) => point.date)).toEqual([
-      epoch('2026-04-06'),
-      epoch('2026-04-13'),
-      epoch('2026-04-20'),
-      epoch('2026-04-27'),
-      epoch('2026-05-04'),
-      epoch('2026-05-11'),
-      epoch('2026-05-18'),
-    ]);
-    expect(series.points.map((point) => point.weight)).toEqual([
-      100, 100, 100, 100, 102.5, 102.5, 102.5,
-    ]);
-    expect(series.points.map((point) => point.reps)).toEqual([6, 5, 6, 5, 6, 5, 8]);
+    // 8 linear weeks + 24 wave weeks.
+    expect(series.points).toHaveLength(32);
 
-    // The last session's AMRAP: 2×102.5×5 + 1×102.5×8, session-max Epley 1RM.
-    const amrap = series.points[series.points.length - 1];
-    expect(amrap?.volume).toBe(1845);
-    expect(amrap?.estimated1RM).toBeCloseTo(129.83333, 5);
+    expect(series.points[0]).toMatchObject({
+      date: epoch('2025-12-05'),
+      weight: 80,
+      reps: 5,
+    });
+    const last = series.points[series.points.length - 1];
+    expect(last).toMatchObject({ date: epoch('2026-08-10'), weight: 72.5, reps: 5 });
+    // The deload session: 3 × 5 at 47.5 / 60 / 72.5.
+    expect(last?.volume).toBe(900);
+    expect(last?.estimated1RM).toBeCloseTo(84.58, 1);
   });
 
   it('keeps the lb override exercise in pounds with its own volume', async () => {
@@ -186,9 +180,10 @@ describe('demo data through the db edges', () => {
     const series = await loadExerciseSeries(executor, 'Wide-Grip Lat Pulldown');
     expect(series.unit).toBe('lb');
     expect(series.mixedUnits).toBe(false);
-    expect(series.points).toHaveLength(6);
-    expect(series.points.every((point) => point.weight === 110)).toBe(true);
-    expect(series.points[0]?.volume).toBe(3300);
+    // 24 press days minus the unresolved one.
+    expect(series.points).toHaveLength(23);
+    expect(series.points.every((point) => [110, 115, 120].includes(point.weight))).toBe(true);
+    expect(series.points[0]).toMatchObject({ weight: 110, volume: 3300 });
     expect(series.points[0]?.estimated1RM).toBeCloseTo(146.66667, 5);
   });
 
@@ -197,7 +192,7 @@ describe('demo data through the db edges', () => {
     await saveFreeSession(
       executor,
       'Free session',
-      epoch('2026-05-25'),
+      epoch('2026-05-30'),
       [
         {
           name: 'Barbell Full Squat',
@@ -208,17 +203,14 @@ describe('demo data through the db edges', () => {
     );
 
     const series = await loadExerciseSeries(executor, 'Barbell Full Squat');
-    expect(series.points).toHaveLength(8);
-    const last = series.points[series.points.length - 1];
-    expect(last).toMatchObject({ date: epoch('2026-05-25'), weight: 105, reps: 5 });
-    expect(last?.volume).toBe(1050);
-    expect(last?.estimated1RM).toBeCloseTo(122.5, 5);
+    expect(series.points).toHaveLength(33);
+    const freePoint = series.points.find((point) => point.date === epoch('2026-05-30'));
+    expect(freePoint).toMatchObject({ date: epoch('2026-05-30'), weight: 105, reps: 5 });
+    expect(freePoint?.volume).toBe(1050);
+    expect(freePoint?.estimated1RM).toBeCloseTo(122.5, 5);
 
     const summaries = await loadExercisesWithHistory(executor);
-    expect(summaries[0]).toMatchObject({
-      name: 'Barbell Full Squat',
-      lastDate: epoch('2026-05-25'),
-    });
+    expect(summaries[0]?.lastDate).toBe(epoch('2026-08-13'));
   });
 
   it('returns an empty series for an exercise with no history', async () => {

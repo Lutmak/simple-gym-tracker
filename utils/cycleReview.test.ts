@@ -52,7 +52,8 @@ const countWhere = (db: DatabaseSync, table: string, where: string, ...params: S
   (db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`).get(...params) as { n: number }).n;
 
 /** Resolves every session of a demo week as completed without a log. */
-const resolveDemoWeek = async (executor: TestExecutor, weekNumber: number): Promise<void> => {  await executor.run(
+const resolveDemoWeek = async (executor: TestExecutor, weekNumber: number): Promise<void> => {
+  await executor.run(
     `UPDATE WeekSessions SET status = 'completed', resolved_on_date = 1
      WHERE week_session_id IN (
        SELECT ws.week_session_id FROM WeekSessions ws
@@ -87,12 +88,14 @@ const proposalOf = async (
 
 const planWeight = async (
   executor: TestExecutor,
+  routineId: number,
   exerciseName: string,
 ): Promise<{ absolute: number | null; tm: number | null }> => {
   const row = await executor.get(
-    `SELECT absolute_weight, training_max_weight FROM SessionExercises
-     WHERE exercise_name = ?;`,
-    [exerciseName],
+    `SELECT e.absolute_weight, e.training_max_weight FROM SessionExercises e
+     JOIN Sessions s ON s.session_id = e.session_id
+     WHERE s.routine_id = ? AND e.exercise_name = ?;`,
+    [routineId, exerciseName],
   );
   if (!row) {
     throw new Error(`No plan row for ${exerciseName}`);
@@ -108,6 +111,19 @@ const setupDemo = async (): Promise<{ db: DatabaseSync; executor: TestExecutor }
   await runSchema(executor);
   await loadDemoData(demoDb(db));
   return { db, executor };
+};
+
+/** The cycle id of the inactive linear routine's cycle. */
+const linearCycleId = async (executor: TestExecutor, cycleNumber: number): Promise<number> => {
+  const row = await executor.get(
+    `SELECT c.cycle_id FROM Cycles c JOIN Routines r ON r.routine_id = c.routine_id
+     WHERE r.routine_key = 'demo-linear-3day' AND c.cycle_number = ?;`,
+    [cycleNumber],
+  );
+  if (!row) {
+    throw new Error('No linear cycle row');
+  }
+  return Number(row.cycle_id);
 };
 
 interface WaveFixture {
@@ -274,52 +290,56 @@ describe('plannedWorkSets — extra sets never reach a proposal or the AMRAP vie
 });
 
 describe('G1 — generation: a resolved week produces pending proposals', () => {
-  it('proposes the increment for met targets and a hold with a reason for misses', async () => {
+  it('proposes the increment for met targets and a hold with a reason for the linear bench', async () => {
     const { db, executor } = await setupDemo();
-    await resolveDemoWeek(executor, 4);
+    const linearCycle2 = await linearCycleId(executor, 2);
+    // Routine 2 is the inactive linear routine; its cycle 2 review regenerates
+    // from its own logs: the bench missed the first week of each cycle, the
+    // rest met their targets.
+    await generateReview(executor, 2, linearCycle2);
 
-    await generateReview(executor, 1, 2);
-
-    expect(countWhere(db, 'Progression_Proposal', 'cycle_id = 2')).toBe(7);
+    expect(countWhere(db, 'Progression_Proposal', 'cycle_id = ?', linearCycle2)).toBe(8);
     const statuses = db
-      .prepare('SELECT status FROM Progression_Proposal WHERE cycle_id = 2;')
-      .all() as { status: string }[];
+      .prepare('SELECT status FROM Progression_Proposal WHERE cycle_id = ?;')
+      .all(linearCycle2) as { status: string }[];
     expect(statuses.every((row) => row.status === 'pending')).toBe(true);
 
-    const squat = await proposalOf(executor, 2, 'Barbell Full Squat');
-    expect(squat).toMatchObject({ current_target: 102.5, proposed_target: 105, status: 'pending' });
-
-    const bench = await proposalOf(executor, 2, 'Barbell Bench Press - Medium Grip');
-    expect(bench).toMatchObject({ current_target: 70, proposed_target: 70 });
+    const bench = await proposalOf(executor, linearCycle2, 'Barbell Bench Press - Medium Grip');
+    expect(bench).toMatchObject({ current_target: 60, proposed_target: 60, status: 'pending' });
     const reason = (await executor.get(
-      'SELECT reason FROM Progression_Proposal WHERE cycle_id = 2 AND exercise_name = ?;',
-      ['Barbell Bench Press - Medium Grip'],
+      'SELECT reason FROM Progression_Proposal WHERE cycle_id = ? AND exercise_name = ?;',
+      [linearCycle2, 'Barbell Bench Press - Medium Grip'],
     )) as { reason: string };
     expect(reason.reason.length).toBeGreaterThan(0);
-    expect(reason.reason).toMatch(/faltaron/);
+    expect(reason.reason).toMatch(/falt/);
 
-    const deadlift = await proposalOf(executor, 2, 'Barbell Deadlift');
-    expect(deadlift.proposed_target).toBe(145);
+    const squat = await proposalOf(executor, linearCycle2, 'Barbell Full Squat');
+    expect(squat).toMatchObject({ current_target: 82.5, proposed_target: 85 });
   });
 
-  it('leaves the demo cycle-1 proposals untouched and feeds consecutive-hold detection', async () => {
+  it('leaves the wave stored reviews untouched and derives the linear consecutive-hold advisory', async () => {
     const { db, executor } = await setupDemo();
+    const linearCycle2 = await linearCycleId(executor, 2);
     await resolveDemoWeek(executor, 4);
+    await generateReview(executor, 1, 6);
 
-    await generateReview(executor, 1, 2);
-    const review = await loadCycleReview(executor, 1, 2);
-
-    expect(count(db, 'Progression_Proposal')).toBe(11);
+    expect(count(db, 'Progression_Proposal')).toBe(40);
     const cycle1 = db
       .prepare('SELECT status FROM Progression_Proposal WHERE cycle_id = 1;')
       .all() as { status: string }[];
-    expect(new Set(cycle1.map((row) => row.status))).toEqual(
-      new Set(['accepted', 'held', 'edited', 'declined']),
-    );
-    const deadlift = await proposalOf(executor, 1, 'Barbell Deadlift');
-    expect(deadlift).toMatchObject({ proposed_target: 142.5, status: 'edited' });
+    expect(new Set(cycle1.map((row) => row.status))).toEqual(new Set(['accepted']));
+    const cycle6 = db
+      .prepare('SELECT status FROM Progression_Proposal WHERE cycle_id = 6;')
+      .all() as { status: string }[];
+    expect(cycle6.every((row) => row.status === 'pending')).toBe(true);
 
-    const bench = review.proposals.find((p) => p.exerciseName === 'Barbell Bench Press - Medium Grip');
+    // The linear routine's stored cycle-2 review derives the advisory from the
+    // consecutive holds: bench was held in cycle 1 and held again in cycle 2.
+    const review = await loadCycleReview(executor, 2, linearCycle2);
+    expect(review.proposals).toHaveLength(8);
+    const bench = review.proposals.find(
+      (p) => p.exerciseName === 'Barbell Bench Press - Medium Grip',
+    );
     expect(bench?.advisory).toBe(true);
     const squat = review.proposals.find((p) => p.exerciseName === 'Barbell Full Squat');
     expect(squat?.advisory).toBe(false);
@@ -327,83 +347,85 @@ describe('G1 — generation: a resolved week produces pending proposals', () => 
 
   it('regenerating after a generation stores nothing new', async () => {
     const { db, executor } = await setupDemo();
-    await resolveDemoWeek(executor, 4);
+    const linearCycle2 = await linearCycleId(executor, 2);
 
-    await generateReview(executor, 1, 2);
-    await generateReview(executor, 1, 2);
+    await generateReview(executor, 2, linearCycle2);
+    await generateReview(executor, 2, linearCycle2);
 
-    expect(countWhere(db, 'Progression_Proposal', 'cycle_id = 2')).toBe(7);
+    expect(countWhere(db, 'Progression_Proposal', 'cycle_id = ?', linearCycle2)).toBe(8);
   });
 });
 
 describe('G1 — resolve and apply: nothing changes without confirmation', () => {
-  it('accept writes the plan and advances the week; hold writes nothing; edit rounds the value', async () => {
+  it('accept writes the plan, hold writes nothing, edit rounds the value, and the cycle completes', async () => {
     const { db, executor } = await setupDemo();
-    await executor.run('UPDATE Cycles SET current_week = 3 WHERE cycle_id = 2;', []);
-    await generateReview(executor, 1, 2);
+    await resolveDemoWeek(executor, 4);
+    await generateReview(executor, 1, 6);
 
-    const squat = await proposalOf(executor, 2, 'Barbell Full Squat');
-    const bench = await proposalOf(executor, 2, 'Barbell Bench Press - Medium Grip');
-    const deadlift = await proposalOf(executor, 2, 'Barbell Deadlift');
+    const squat = await proposalOf(executor, 6, 'Barbell Full Squat');
+    const bench = await proposalOf(executor, 6, 'Barbell Bench Press - Medium Grip');
+    const deadlift = await proposalOf(executor, 6, 'Barbell Deadlift');
+    const ohp = await proposalOf(executor, 6, 'Barbell Shoulder Press');
     await resolveProposal(executor, squat.proposal_id, 'accepted');
     await resolveProposal(executor, bench.proposal_id, 'held');
     await editProposalValue(executor, deadlift.proposal_id, 148, 2.5);
-    const others = db
-      .prepare(
-        `SELECT proposal_id FROM Progression_Proposal
-         WHERE cycle_id = 2 AND proposal_id NOT IN (?, ?, ?);`,
-      )
-      .all(squat.proposal_id, bench.proposal_id, deadlift.proposal_id) as { proposal_id: number }[];
-    for (const row of others) {
-      await resolveProposal(executor, row.proposal_id, 'accepted');
-    }
+    await resolveProposal(executor, ohp.proposal_id, 'accepted');
 
-    const edited = await proposalOf(executor, 2, 'Barbell Deadlift');
+    const edited = await proposalOf(executor, 6, 'Barbell Deadlift');
     expect(edited).toMatchObject({ proposed_target: 147.5, status: 'edited' });
 
-    const before = await planWeight(executor, 'Barbell Full Squat');
-    expect(before.absolute).toBe(102.5);
+    const before = await planWeight(executor, 1, 'Barbell Full Squat');
+    expect(before.tm).toBe(120);
 
-    const result = await applyReview(executor, 1, 2);
-    expect(result.completed).toBe(false);
+    const result = await applyReview(executor, 1, 6);
+    expect(result.completed).toBe(true);
 
     const cycle = db
-      .prepare('SELECT current_week, status FROM Cycles WHERE cycle_id = 2;')
+      .prepare('SELECT current_week, status FROM Cycles WHERE cycle_id = 6;')
       .get() as { current_week: number; status: string };
-    expect(cycle).toEqual({ current_week: 4, status: 'active' });
+    expect(cycle).toEqual({ current_week: 4, status: 'complete' });
 
-    expect(await planWeight(executor, 'Barbell Full Squat')).toEqual({ absolute: 105, tm: null });
-    expect(await planWeight(executor, 'Barbell Bench Press - Medium Grip')).toEqual({
-      absolute: 70,
-      tm: null,
+    expect(await planWeight(executor, 1, 'Barbell Full Squat')).toEqual({
+      absolute: null,
+      tm: 125,
     });
-    expect(await planWeight(executor, 'Barbell Deadlift')).toEqual({ absolute: 147.5, tm: null });
-    expect(await planWeight(executor, 'Barbell Shoulder Press')).toEqual({ absolute: 47.5, tm: null });
+    expect(await planWeight(executor, 1, 'Barbell Bench Press - Medium Grip')).toEqual({
+      absolute: null,
+      tm: 82.5,
+    });
+    expect(await planWeight(executor, 1, 'Barbell Deadlift')).toEqual({
+      absolute: null,
+      tm: 147.5,
+    });
+    expect(await planWeight(executor, 1, 'Barbell Shoulder Press')).toEqual({
+      absolute: null,
+      tm: 65,
+    });
   });
 
   it('completes the cycle at its last week and refuses while any proposal is pending', async () => {
     const { db, executor } = await setupDemo();
     await resolveDemoWeek(executor, 4);
-    await generateReview(executor, 1, 2);
+    await generateReview(executor, 1, 6);
 
-    await expect(applyReview(executor, 1, 2)).rejects.toThrow(/unresolved/);
+    await expect(applyReview(executor, 1, 6)).rejects.toThrow(/unresolved/);
 
     const rows = db
-      .prepare('SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = 2;')
+      .prepare('SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = 6;')
       .all() as { proposal_id: number }[];
     for (const row of rows.slice(0, 3)) {
       await resolveProposal(executor, row.proposal_id, 'accepted');
     }
-    await expect(applyReview(executor, 1, 2)).rejects.toThrow(/unresolved/);
+    await expect(applyReview(executor, 1, 6)).rejects.toThrow(/unresolved/);
 
     for (const row of rows.slice(3)) {
       await resolveProposal(executor, row.proposal_id, 'accepted');
     }
-    const result = await applyReview(executor, 1, 2);
+    const result = await applyReview(executor, 1, 6);
     expect(result.completed).toBe(true);
 
     const cycle = db
-      .prepare('SELECT status, completed_at FROM Cycles WHERE cycle_id = 2;')
+      .prepare('SELECT status, completed_at FROM Cycles WHERE cycle_id = 6;')
       .get() as { status: string; completed_at: number };
     expect(cycle.status).toBe('complete');
     expect(cycle.completed_at).toBeGreaterThan(0);
@@ -445,7 +467,7 @@ describe('G1 — wave TM flow', () => {
     const result = await applyReview(executor, routineId, cycleId);
     expect(result.completed).toBe(true);
 
-    expect(await planWeight(executor, 'Bench Press')).toEqual({ absolute: null, tm: 82.5 });
+    expect(await planWeight(executor, routineId, 'Bench Press')).toEqual({ absolute: null, tm: 82.5 });
     const status = db
       .prepare('SELECT status FROM Cycles WHERE cycle_id = ?;')
       .get(cycleId) as { status: string };
@@ -469,7 +491,7 @@ describe('G1 — wave TM flow', () => {
 
     await resolveProposal(executor, review.proposals[0].proposalId, 'accepted');
     await applyReview(executor, routineId, cycleId);
-    expect(await planWeight(executor, 'Bench Press')).toEqual({ absolute: null, tm: 80 });
+    expect(await planWeight(executor, routineId, 'Bench Press')).toEqual({ absolute: null, tm: 80 });
   });
 });
 
@@ -498,28 +520,28 @@ describe('G1 — the review is stored state and survives a restart', () => {
       await loadDemoData(demoDb(db));
       await resolveDemoWeek(executor, 4);
 
-      const generated = await loadCycleReview(executor, 1, 2);
-      expect(generated.proposals).toHaveLength(7);
+      const generated = await loadCycleReview(executor, 1, 6);
+      expect(generated.proposals).toHaveLength(4);
 
-      const squat = await proposalOf(executor, 2, 'Barbell Full Squat');
-      const bench = await proposalOf(executor, 2, 'Barbell Bench Press - Medium Grip');
-      const deadlift = await proposalOf(executor, 2, 'Barbell Deadlift');
+      const squat = await proposalOf(executor, 6, 'Barbell Full Squat');
+      const bench = await proposalOf(executor, 6, 'Barbell Bench Press - Medium Grip');
+      const deadlift = await proposalOf(executor, 6, 'Barbell Deadlift');
       await resolveProposal(executor, squat.proposal_id, 'accepted');
       await resolveProposal(executor, bench.proposal_id, 'held');
       await editProposalValue(executor, deadlift.proposal_id, 148, 2.5);
       db.close();
 
       ({ db, executor } = open());
-      const resumed = await loadCycleReview(executor, 1, 2);
-      expect(resumed.proposals).toHaveLength(7);
-      expect(countWhere(db, 'Progression_Proposal', 'cycle_id = 2 AND status = \'pending\'')).toBe(4);
+      const resumed = await loadCycleReview(executor, 1, 6);
+      expect(resumed.proposals).toHaveLength(4);
+      expect(countWhere(db, 'Progression_Proposal', 'cycle_id = 6 AND status = \'pending\'')).toBe(1);
 
       const squatView = resumed.proposals.find((p) => p.exerciseName === 'Barbell Full Squat');
-      expect(squatView).toMatchObject({ status: 'accepted', proposedTarget: 105 });
+      expect(squatView).toMatchObject({ status: 'accepted', proposedTarget: 125 });
       const benchView = resumed.proposals.find(
         (p) => p.exerciseName === 'Barbell Bench Press - Medium Grip',
       );
-      expect(benchView).toMatchObject({ status: 'held', advisory: true });
+      expect(benchView).toMatchObject({ status: 'held', advisory: false });
       const deadliftView = resumed.proposals.find((p) => p.exerciseName === 'Barbell Deadlift');
       expect(deadliftView).toMatchObject({ status: 'edited', proposedTarget: 147.5 });
       db.close();
@@ -533,37 +555,38 @@ describe('G1 — the next cycle is generated only on explicit action', () => {
   it('startNextCycle inserts the new cycle, its weeks and pending sessions', async () => {
     const { db, executor } = await setupDemo();
     await resolveDemoWeek(executor, 4);
-    await generateReview(executor, 1, 2);
+    await generateReview(executor, 1, 6);
     const rows = db
-      .prepare('SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = 2;')
+      .prepare('SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = 6;')
       .all() as { proposal_id: number }[];
     for (const row of rows) {
       await resolveProposal(executor, row.proposal_id, 'accepted');
     }
-    await applyReview(executor, 1, 2);
+    await applyReview(executor, 1, 6);
 
-    const newCycleId = await startNextCycle(executor, 1, 2);
+    const newCycleId = await startNextCycle(executor, 1, 6);
 
-    expect(count(db, 'Cycles')).toBe(3);
+    // 6 wave cycles + 2 linear cycles + the new one.
+    expect(count(db, 'Cycles')).toBe(9);
     const cycle = db
       .prepare('SELECT * FROM Cycles WHERE cycle_id = ?;')
       .get(newCycleId) as Record<string, unknown>;
     expect(cycle).toMatchObject({
       routine_id: 1,
-      cycle_number: 3,
+      cycle_number: 7,
       weeks: 4,
       status: 'active',
       current_week: 1,
     });
     expect(countWhere(db, 'CycleWeeks', 'cycle_id = ?', newCycleId)).toBe(4);
-    expect(countWhere(db, 'WeekSessions', 'cycle_week_id IN (SELECT cycle_week_id FROM CycleWeeks WHERE cycle_id = ?) AND status = \'pending\'', newCycleId)).toBe(12);
+    expect(countWhere(db, 'WeekSessions', 'cycle_week_id IN (SELECT cycle_week_id FROM CycleWeeks WHERE cycle_id = ?) AND status = \'pending\'', newCycleId)).toBe(16);
 
-    expect(await planWeight(executor, 'Barbell Full Squat')).toEqual({ absolute: 105, tm: null });
+    expect(await planWeight(executor, 1, 'Barbell Full Squat')).toEqual({ absolute: null, tm: 125 });
   });
 
   it('refuses to start a next cycle before the current one is complete', async () => {
     const { executor } = await setupDemo();
-    await expect(startNextCycle(executor, 1, 2)).rejects.toThrow(/not complete/);
+    await expect(startNextCycle(executor, 1, 6)).rejects.toThrow(/not complete/);
   });
 });
 
@@ -576,14 +599,14 @@ describe('G1 — the Today entry point', () => {
     const entry = await loadReviewEntry(executor);
     expect(entry).toEqual({
       routineId: 1,
-      cycleId: 2,
-      cycleNumber: 2,
+      cycleId: 6,
+      cycleNumber: 6,
       currentWeek: 4,
       routineName: 'Demo Routine',
     });
 
-    await generateReview(executor, 1, 2);
+    await generateReview(executor, 1, 6);
     const resumed = await loadReviewEntry(executor);
-    expect(resumed?.cycleId).toBe(2);
+    expect(resumed?.cycleId).toBe(6);
   });
 });

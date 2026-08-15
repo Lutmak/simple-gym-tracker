@@ -9,6 +9,7 @@ const head = (overrides: Partial<QueuedSession>): QueuedSession => ({
   date: 100,
   originDate: 100,
   doTodayAvailable: true,
+  todayOccupiedBy: null,
   exercises: [],
   ...overrides,
 });

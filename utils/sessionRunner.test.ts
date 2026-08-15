@@ -50,15 +50,20 @@ const fixture = async (executor: TestExecutor): Promise<RunnerSession> => {
   const row = await executor.get(
     `SELECT ws.week_session_id FROM WeekSessions ws
      JOIN Sessions s ON s.session_id = ws.session_id
-     JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
-     JOIN Cycles c ON c.cycle_id = cw.cycle_id
-     WHERE s.name = 'Squat Day' AND ws.status = 'pending'
-     ORDER BY ws.week_session_id LIMIT 1;`,
+     WHERE s.name = 'Squat Day' AND ws.status = 'completed'
+     ORDER BY ws.week_session_id DESC LIMIT 1;`,
     [],
   );
   if (!row) {
-    throw new Error('Fixture has no pending Squat Day week session');
+    throw new Error('Fixture has no completed Squat Day week session');
   }
+  // The demo leaves exactly one pending session (Friday's press); the runner
+  // fixture re-opens the latest squat day as pending.
+  await executor.run(
+    `UPDATE WeekSessions SET status = 'pending', resolved_on_date = NULL, completed_log_id = NULL
+     WHERE week_session_id = ?;`,
+    [Number(row.week_session_id)],
+  );
   return loadRunnerSession(executor, Number(row.week_session_id), TODAY);
 };
 
@@ -94,9 +99,9 @@ describe('warmupSetsFor — the ramp is a UI affordance, never a work set', () =
     const session = await fixture(executor);
     const warmups = warmupSetsFor(squat(session), session);
     expect(warmups).toEqual([
-      { weight: 40, reps: 5 },
-      { weight: 52.5, reps: 5 },
-      { weight: 62.5, reps: 3 },
+      { weight: 42.5, reps: 5 },
+      { weight: 55, reps: 5 },
+      { weight: 65, reps: 3 },
     ]);
   });
 
@@ -121,13 +126,13 @@ describe('belowTarget — the soft inline note', () => {
     const exercise = squat(session);
     expect(belowTarget(exercise, { reps: 3, weight: 100 }, session.roundingIncrement)).toEqual({
       repsShort: 2,
-      weightShort: 2.5,
+      weightShort: 7.5,
     });
-    expect(belowTarget(exercise, { reps: 5, weight: 102.5 }, session.roundingIncrement)).toEqual({
+    expect(belowTarget(exercise, { reps: 5, weight: 107.5 }, session.roundingIncrement)).toEqual({
       repsShort: 0,
       weightShort: null,
     });
-    expect(belowTarget(exercise, { reps: 6, weight: 102.5 }, session.roundingIncrement)).toEqual({
+    expect(belowTarget(exercise, { reps: 6, weight: 107.5 }, session.roundingIncrement)).toEqual({
       repsShort: 0,
       weightShort: null,
     });
@@ -166,11 +171,13 @@ describe('buildLogRows — the §3.2 history rows', () => {
     expect(rows.loggedExercises).toEqual([
       { exerciseName: 'Barbell Full Squat', sets: 3, reps: 5 },
       { exerciseName: 'Bent Over Two-Dumbbell Row', sets: 3, reps: 10 },
+      { exerciseName: 'Lying Leg Curls', sets: 3, reps: 10 },
+      { exerciseName: 'Standing Calf Raises', sets: 3, reps: 12 },
     ]);
-    expect(rows.weightLog).toHaveLength(6);
+    expect(rows.weightLog).toHaveLength(12);
     const squatSets = rows.weightLog.filter((s) => s.loggedExerciseIndex === 0);
     expect(squatSets.map((s) => s.setNumber)).toEqual([1, 2, 3]);
-    expect(squatSets.map((s) => s.weight)).toEqual([102.5, 102.5, 102.5]);
+    expect(squatSets.map((s) => s.weight)).toEqual([107.5, 107.5, 107.5]);
     expect(squatSets.every((s) => s.unit === 'kg')).toBe(true);
     const rowSets = rows.weightLog.filter((s) => s.loggedExerciseIndex === 1);
     expect(rowSets.map((s) => s.setNumber)).toEqual([1, 2, 3]);
@@ -184,10 +191,11 @@ describe('buildLogRows — the §3.2 history rows', () => {
 
     const rows = buildLogRows(session, draft);
 
-    expect(rows.loggedExercises).toHaveLength(1);
+    expect(rows.loggedExercises).toHaveLength(3);
     expect(rows.loggedExercises[0].exerciseName).toBe('Barbell Full Squat');
-    expect(rows.weightLog.every((s) => s.loggedExerciseIndex === 0)).toBe(true);
-    expect(rows.weightLog).toHaveLength(3);
+    const squatSets = rows.weightLog.filter((s) => s.loggedExerciseIndex === 0);
+    expect(squatSets).toHaveLength(3);
+    expect(rows.weightLog).toHaveLength(9);
   });
 
   it('sequences only completed work sets, so a skipped middle set leaves a gapless 1..N', async () => {
@@ -215,7 +223,7 @@ describe('buildLogRows — the §3.2 history rows', () => {
     expect(weights).not.toContain(warmups[0].weight);
     expect(weights).not.toContain(warmups[1].weight);
     expect(weights).not.toContain(warmups[2].weight);
-    expect(rows.weightLog).toHaveLength(6);
+    expect(rows.weightLog).toHaveLength(12);
   });
 
   it('records the AMRAP reps the user entered while Logged_Exercises keeps the plan copy', async () => {
@@ -327,8 +335,8 @@ describe('buildLogRows — the §3.2 history rows', () => {
       unit: s.unit,
     }));
     const series = buildExerciseSeries(historyRows);
-    expect(series.points[0].volume).toBe(102.5 * 5 * 3 + 105 * 3 + 107.5 * 1);
-    expect(series.points[0].volume).toBeGreaterThan(102.5 * 5 * 3);
+    expect(series.points[0].volume).toBe(107.5 * 5 * 3 + 105 * 3 + 107.5 * 1);
+    expect(series.points[0].volume).toBeGreaterThan(107.5 * 5 * 3);
   });
 
   it('writes the per-set timing columns from the draft (§3.9)', async () => {
@@ -365,7 +373,7 @@ describe('sessionTotals', () => {
 
     expect(sessionTotals(session, draft)).toEqual({
       loggedSets: 3,
-      totalSets: 6,
+      totalSets: 12,
       loggedExercises: 2,
     });
   });
@@ -374,41 +382,29 @@ describe('sessionTotals', () => {
 describe('loadRunnerSession', () => {
   it('loads the plan, routine context and resolved log date in exercise order', async () => {
     const { db, executor } = connect();
-    await runSchema(executor);
-    await loadDemoData(executor);
-    const moved = await executor.get(
-      `SELECT ws.week_session_id FROM WeekSessions ws
-       JOIN Sessions s ON s.session_id = ws.session_id
-       JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
-       JOIN Cycles c ON c.cycle_id = cw.cycle_id
-       WHERE s.name = 'Squat Day' AND ws.status = 'pending'
-       ORDER BY ws.week_session_id LIMIT 1;`,
-      [],
-    );
-    if (!moved) {
-      throw new Error('Fixture has no pending Squat Day week session');
-    }
-    const weekSessionId = Number(moved.week_session_id);
+    const session = await fixture(executor);
     const resolved = Math.floor(Date.UTC(2026, 7, 10, 12, 0, 0) / 1000);
     db.prepare('UPDATE WeekSessions SET resolved_on_date = ? WHERE week_session_id = ?;')
-      .run(resolved, weekSessionId);
+      .run(resolved, session.weekSessionId);
 
-    const session = await loadRunnerSession(executor, weekSessionId, TODAY);
+    const loaded = await loadRunnerSession(executor, session.weekSessionId, TODAY);
 
-    expect(session.workoutName).toBe('Demo Routine');
-    expect(session.sessionName).toBe('Squat Day');
-    expect(session.workoutDate).toBe(resolved);
-    expect(session.unit).toBe('kg');
-    expect(session.roundingIncrement).toBe(2.5);
-    expect(session.restMainSeconds).toBe(180);
-    expect(session.restAccessorySeconds).toBe(90);
-    expect(session.exercises.map((e) => e.name)).toEqual([
+    expect(loaded.workoutName).toBe('Demo Routine');
+    expect(loaded.sessionName).toBe('Squat Day');
+    expect(loaded.workoutDate).toBe(resolved);
+    expect(loaded.unit).toBe('kg');
+    expect(loaded.roundingIncrement).toBe(2.5);
+    expect(loaded.restMainSeconds).toBe(180);
+    expect(loaded.restAccessorySeconds).toBe(90);
+    expect(loaded.exercises.map((e) => e.name)).toEqual([
       'Barbell Full Squat',
       'Bent Over Two-Dumbbell Row',
+      'Lying Leg Curls',
+      'Standing Calf Raises',
     ]);
-    expect(session.exercises[0].isAmrap).toBe(true);
-    expect(session.exercises[0].role).toBe('main');
-    expect(session.exercises[1].role).toBe('accessory');
+    expect(loaded.exercises[0].isAmrap).toBe(true);
+    expect(loaded.exercises[0].role).toBe('main');
+    expect(loaded.exercises[1].role).toBe('accessory');
   });
 
   it('refuses a session that is not pending', async () => {
@@ -443,10 +439,10 @@ describe('saveSessionLog — one atomic transaction', () => {
 
     const saved = await saveSessionLog(executor, session.weekSessionId, session, planned(session));
 
-    expect(saved).toEqual({ workoutLogId: expect.any(Number), loggedSets: 6, loggedExercises: 2 });
+    expect(saved).toEqual({ workoutLogId: expect.any(Number), loggedSets: 12, loggedExercises: 4 });
     expect(count(db, 'Workout_Log')).toBe(historyBefore.workoutLog + 1);
-    expect(count(db, 'Logged_Exercises')).toBe(historyBefore.logged + 2);
-    expect(count(db, 'Weight_Log')).toBe(historyBefore.weight + 6);
+    expect(count(db, 'Logged_Exercises')).toBe(historyBefore.logged + 4);
+    expect(count(db, 'Weight_Log')).toBe(historyBefore.weight + 12);
 
     const weekSession = db
       .prepare(
@@ -636,14 +632,14 @@ describe('saveSessionLog — learned baselines (§3.2)', () => {
     const { db, executor } = connect();
     const session = await fixture(executor);
     db.prepare('UPDATE SessionExercises SET absolute_weight = NULL WHERE session_exercise_id = ?;')
-      .run(squat(session).sessionExerciseId);
+      .run(row(session).sessionExerciseId);
 
     await saveSessionLog(executor, session.weekSessionId, session, withSquatWeight(session, 100));
 
-    const row = db
+    const loaded = db
       .prepare('SELECT absolute_weight FROM SessionExercises WHERE session_exercise_id = ?;')
-      .get(squat(session).sessionExerciseId) as { absolute_weight: number | null };
-    expect(row.absolute_weight).toBe(100);
+      .get(row(session).sessionExerciseId) as { absolute_weight: number | null };
+    expect(loaded.absolute_weight).toBe(22.5);
   });
 
   it('derives the wave training max from the first logged set (Epley x TM pct)', async () => {
@@ -674,29 +670,29 @@ describe('saveSessionLog — learned baselines (§3.2)', () => {
     const { db, executor } = connect();
     const session = await fixture(executor);
     db.prepare('UPDATE SessionExercises SET absolute_weight = 50 WHERE session_exercise_id = ?;')
-      .run(squat(session).sessionExerciseId);
+      .run(row(session).sessionExerciseId);
 
     await saveSessionLog(executor, session.weekSessionId, session, withSquatWeight(session, 120));
 
-    const row = db
+    const loaded = db
       .prepare('SELECT absolute_weight FROM SessionExercises WHERE session_exercise_id = ?;')
-      .get(squat(session).sessionExerciseId) as { absolute_weight: number | null };
-    expect(row.absolute_weight).toBe(50);
+      .get(row(session).sessionExerciseId) as { absolute_weight: number | null };
+    expect(loaded.absolute_weight).toBe(50);
   });
 
   it('converts a set logged in the other unit once, for the plan — the log row keeps its unit', async () => {
     const { db, executor } = connect();
     const session = await fixture(executor);
     db.prepare('UPDATE SessionExercises SET absolute_weight = NULL WHERE session_exercise_id = ?;')
-      .run(squat(session).sessionExerciseId);
+      .run(row(session).sessionExerciseId);
 
     const draft = withSquatWeight(session, 100);
-    draft[0][0] = { reps: 5, weight: 100, unit: 'lb' };
+    draft[1][0] = { reps: 10, weight: 100, unit: 'lb' };
     await saveSessionLog(executor, session.weekSessionId, session, draft);
 
     const plan = db
       .prepare('SELECT absolute_weight FROM SessionExercises WHERE session_exercise_id = ?;')
-      .get(squat(session).sessionExerciseId) as { absolute_weight: number | null };
+      .get(row(session).sessionExerciseId) as { absolute_weight: number | null };
     expect(plan.absolute_weight).toBeCloseTo(45.36, 1);
 
     // The history row keeps the lb value and unit — nothing was converted there.
@@ -704,7 +700,7 @@ describe('saveSessionLog — learned baselines (§3.2)', () => {
       .prepare(
         `SELECT wl.weight_logged, wl.unit FROM Weight_Log wl
          JOIN Logged_Exercises le ON le.logged_exercise_id = wl.logged_exercise_id
-         WHERE le.exercise_name = 'Barbell Full Squat' AND wl.set_number = 1
+         WHERE le.exercise_name = 'Bent Over Two-Dumbbell Row' AND wl.set_number = 1
          ORDER BY wl.weight_log_id DESC LIMIT 1;`,
       )
       .get() as { weight_logged: number; unit: string };

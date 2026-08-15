@@ -121,79 +121,82 @@ describe('computeSessionQueue against the demo data', () => {
     expect(state.upcoming).toBeNull();
   });
 
-  test('three unresolved past sessions: only the oldest is offered', async () => {
+  test('the single unresolved past session — Friday\'s press — is the head', async () => {
     const executor = await demoDb();
-    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-08-14'));
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-08-15'));
     expect(state.routine?.name).toBe('Demo Routine');
     expect(state.resolution).toBe('unresolved');
     expect(state.head).toMatchObject({
-      name: 'Squat Day',
-      weekday: 1,
-      originDate: dayStampFromYmd('2026-05-25'),
-      date: dayStampFromYmd('2026-05-25'),
+      name: 'Press Day',
+      weekday: 5,
+      originDate: dayStampFromYmd('2026-08-14'),
+      date: dayStampFromYmd('2026-08-14'),
       doTodayAvailable: true,
     });
-    expect(state.upcoming).toMatchObject({
-      name: 'Bench Day',
-      weekday: 3,
-      date: dayStampFromYmd('2026-05-27'),
-      weekSessionId: expect.any(Number) as number,
-    });
+    expect(state.upcoming).toBeNull();
   });
 
   test('a session whose nominal date is today is due with concrete targets', async () => {
     const executor = await demoDb();
-    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-05-25'));
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-08-14'));
     expect(state.resolution).toBe('due');
-    expect(state.head?.name).toBe('Squat Day');
-    expect(state.head?.date).toBe(dayStampFromYmd('2026-05-25'));
+    expect(state.head?.name).toBe('Press Day');
+    expect(state.head?.date).toBe(dayStampFromYmd('2026-08-14'));
     expect(state.head?.exercises.map((exercise) => exercise.name)).toEqual([
-      'Barbell Full Squat',
-      'Bent Over Two-Dumbbell Row',
+      'Barbell Shoulder Press',
+      'Wide-Grip Lat Pulldown',
+      'Barbell Curl',
+      'Cable Crunch',
     ]);
     expect(state.head?.exercises[0]).toMatchObject({
       targetSets: 3,
       targetReps: 5,
       isAmrap: true,
-      targetWeight: 102.5,
+      targetWeight: 57.5,
       unit: 'kg',
     });
-    expect(state.head?.exercises[1]).toMatchObject({ targetWeight: 22.5, unit: 'kg' });
-    expect(state.upcoming).toMatchObject({
-      name: 'Bench Day',
-      date: dayStampFromYmd('2026-05-27'),
-    });
+    expect(state.head?.exercises[1]).toMatchObject({ targetWeight: 120, unit: 'lb' });
+    expect(state.upcoming).toBeNull();
   });
 
-  test('mid-week: the passed session is the head, the next one is upcoming', async () => {
+  test('mid-week, before the session passes, nothing is due and it is upcoming', async () => {
     const executor = await demoDb();
-    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-05-26'));
-    expect(state.resolution).toBe('unresolved');
-    expect(state.head?.name).toBe('Squat Day');
-    expect(state.upcoming?.name).toBe('Bench Day');
-    expect(state.upcoming?.date).toBe(dayStampFromYmd('2026-05-27'));
-  });
-
-  test('a rest day with nothing due shows the next pending session as upcoming', async () => {
-    const executor = await demoDb();
-    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-05-16'));
-    expect(state.head).toBeNull();
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-08-12'));
     expect(state.resolution).toBeNull();
+    expect(state.head).toBeNull();
     expect(state.upcoming).toMatchObject({
-      name: 'Squat Day',
-      date: dayStampFromYmd('2026-05-25'),
+      name: 'Press Day',
+      date: dayStampFromYmd('2026-08-14'),
       weekSessionId: expect.any(Number) as number,
     });
   });
 
-  test('a resolved week shows the next session as upcoming', async () => {
+  test('a rest day with nothing due shows the next pending session as upcoming', async () => {
     const executor = await demoDb();
-    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-05-18'));
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-08-09'));
     expect(state.head).toBeNull();
+    expect(state.resolution).toBeNull();
     expect(state.upcoming).toMatchObject({
+      name: 'Press Day',
+      date: dayStampFromYmd('2026-08-14'),
+      weekSessionId: expect.any(Number) as number,
+    });
+  });
+
+  test('resolving the last pending session leaves the plan preview as upcoming', async () => {
+    const executor = await demoDb();
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-08-15'));
+    const head = state.head as QueuedSession;
+    await resolveDiscardSession(executor, head.weekSessionId);
+
+    const after = await loadSessionQueue(executor, dayStampFromYmd('2026-08-15'));
+    expect(after.head).toBeNull();
+    expect(after.upcoming).toEqual({
       name: 'Squat Day',
       weekday: 1,
-      date: dayStampFromYmd('2026-05-25'),
+      date: dayStampFromYmd('2026-08-17'),
+      weekSessionId: null,
+      sessionId: null,
     });
   });
 });
@@ -208,106 +211,85 @@ describe('resolution writers against the demo data', () => {
 
   test('do it today makes the session due and keeps it the only head', async () => {
     const executor = await demoDb();
-    const today = dayStampFromYmd('2026-08-14');
+    const today = dayStampFromYmd('2026-08-15');
     const before = await loadSessionQueue(executor, today);
-    const squat = before.head as QueuedSession;
-    expect(squat.name).toBe('Squat Day');
-    await resolveDoTodaySession(executor, squat.weekSessionId, today);
+    const press = before.head as QueuedSession;
+    expect(press.name).toBe('Press Day');
+    await resolveDoTodaySession(executor, press.weekSessionId, today);
 
-    const row = await weekSessionRow(executor, squat.weekSessionId);
+    const row = await weekSessionRow(executor, press.weekSessionId);
     expect(row?.status).toBe('pending');
     expect(row?.resolved_on_date).toBe(today);
 
     const after = await loadSessionQueue(executor, today);
     expect(after.resolution).toBe('due');
-    expect(after.head?.name).toBe('Squat Day');
+    expect(after.head?.name).toBe('Press Day');
     expect(after.head?.date).toBe(today);
-    expect(after.head?.originDate).toBe(dayStampFromYmd('2026-05-25'));
-    expect(after.upcoming?.name).toBe('Bench Day');
+    expect(after.head?.originDate).toBe(dayStampFromYmd('2026-08-14'));
+    expect(after.upcoming).toBeNull();
   });
 
-  test('do it today is rejected while another session occupies today', async () => {
+  test('moving a session records the target day and leaves the plan preview', async () => {
     const executor = await demoDb();
-    const today = dayStampFromYmd('2026-08-14');
+    const today = dayStampFromYmd('2026-08-15');
     const before = await loadSessionQueue(executor, today);
-    const squat = before.head as QueuedSession;
-    await resolveDoTodaySession(executor, squat.weekSessionId, today);
+    const press = before.head as QueuedSession;
+    const target = dayStampFromYmd('2026-08-16');
+    await resolveMoveSession(executor, press.weekSessionId, target);
 
-    const after = await loadSessionQueue(executor, today);
-    const bench = after.upcoming as { weekSessionId: number };
-    await expect(
-      resolveDoTodaySession(executor, bench.weekSessionId, today),
-    ).rejects.toThrow('dayOccupied');
-  });
-
-  test('moving a session records the target day and reveals the next head', async () => {
-    const executor = await demoDb();
-    const today = dayStampFromYmd('2026-08-14');
-    const before = await loadSessionQueue(executor, today);
-    const squat = before.head as QueuedSession;
-    const target = dayStampFromYmd('2026-08-17');
-    await resolveMoveSession(executor, squat.weekSessionId, target);
-
-    const row = await weekSessionRow(executor, squat.weekSessionId);
+    const row = await weekSessionRow(executor, press.weekSessionId);
     expect(row?.status).toBe('moved');
     expect(row?.resolved_on_date).toBe(target);
 
     const after = await loadSessionQueue(executor, today);
-    expect(after.resolution).toBe('unresolved');
-    expect(after.head?.name).toBe('Bench Day');
-    expect(after.upcoming?.name).toBe('Deadlift Day');
+    expect(after.head).toBeNull();
+    expect(after.upcoming).toMatchObject({
+      name: 'Squat Day',
+      date: dayStampFromYmd('2026-08-17'),
+      weekSessionId: null,
+    });
   });
 
   test('moving onto a day that already has a session is rejected', async () => {
     const executor = await demoDb();
-    const today = dayStampFromYmd('2026-08-14');
+    const today = dayStampFromYmd('2026-08-15');
     const before = await loadSessionQueue(executor, today);
-    const squat = before.head as QueuedSession;
+    const press = before.head as QueuedSession;
     await expect(
-      resolveMoveSession(executor, squat.weekSessionId, dayStampFromYmd('2026-05-27')),
+      resolveMoveSession(executor, press.weekSessionId, dayStampFromYmd('2026-08-10')),
     ).rejects.toThrow('dayOccupied');
-    const unchanged = await weekSessionRow(executor, squat.weekSessionId);
+    const unchanged = await weekSessionRow(executor, press.weekSessionId);
     expect(unchanged?.status).toBe('pending');
     expect(unchanged?.resolved_on_date).toBeNull();
   });
 
-  test('discarding a session records it on its nominal day and reveals the next', async () => {
+  test('discarding a session records it on its nominal day and reveals the plan preview', async () => {
     const executor = await demoDb();
-    const today = dayStampFromYmd('2026-08-14');
+    const today = dayStampFromYmd('2026-08-15');
     const before = await loadSessionQueue(executor, today);
-    const squat = before.head as QueuedSession;
-    await resolveDiscardSession(executor, squat.weekSessionId);
+    const press = before.head as QueuedSession;
+    await resolveDiscardSession(executor, press.weekSessionId);
 
-    const row = await weekSessionRow(executor, squat.weekSessionId);
+    const row = await weekSessionRow(executor, press.weekSessionId);
     expect(row?.status).toBe('discarded');
-    expect(row?.resolved_on_date).toBe(dayStampFromYmd('2026-05-25'));
+    expect(row?.resolved_on_date).toBe(dayStampFromYmd('2026-08-14'));
 
     const after = await loadSessionQueue(executor, today);
-    expect(after.resolution).toBe('unresolved');
-    expect(after.head?.name).toBe('Bench Day');
+    expect(after.head).toBeNull();
+    expect(after.upcoming?.name).toBe('Squat Day');
   });
 
   test('a second resolution of the same session is a no-op, not a delete', async () => {
     const executor = await demoDb();
-    const today = dayStampFromYmd('2026-08-14');
+    const today = dayStampFromYmd('2026-08-15');
     const before = await loadSessionQueue(executor, today);
-    const squat = before.head as QueuedSession;
-    await resolveDiscardSession(executor, squat.weekSessionId);
+    const press = before.head as QueuedSession;
+    await resolveDiscardSession(executor, press.weekSessionId);
     await expect(
-      resolveDiscardSession(executor, squat.weekSessionId),
+      resolveDiscardSession(executor, press.weekSessionId),
     ).rejects.toThrow('notPending');
-    const row = await weekSessionRow(executor, squat.weekSessionId);
+    const row = await weekSessionRow(executor, press.weekSessionId);
     expect(row?.status).toBe('discarded');
-  });
-
-  test('discarding a missed head leaves do it today available for the next', async () => {
-    const executor = await demoDb();
-    const today = dayStampFromYmd('2026-08-14');
-    const before = await loadSessionQueue(executor, today);
-    await resolveDiscardSession(executor, (before.head as QueuedSession).weekSessionId);
-    const after = await loadSessionQueue(executor, today);
-    expect(after.head?.name).toBe('Bench Day');
-    expect(after.head?.doTodayAvailable).toBe(true);
   });
 });
 

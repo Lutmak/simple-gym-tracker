@@ -162,74 +162,79 @@ describe('pure core', () => {
 });
 
 describe('demo data through the db edges', () => {
-  it('lists routines with the active one first', async () => {
+  it('lists routines with the active wave one first and the linear one behind', async () => {
     const { executor } = await setupDemo();
     const routines = await loadProgressRoutines(executor);
-    expect(routines).toHaveLength(1);
+    expect(routines).toHaveLength(2);
     expect(routines[0]).toMatchObject({
       name: 'Demo Routine',
       isActive: true,
       unit: 'kg',
       roundingIncrement: 2.5,
     });
+    expect(routines[1]).toMatchObject({ name: 'Demo Linear', isActive: false });
   });
 
-  it('returns cycles in ascending order with the current week marked', async () => {
+  it('returns six cycles in ascending order with the current week marked', async () => {
     const { executor } = await setupDemo();
     const { routine, cycles } = await loadRoutineProgress(executor, 1);
 
     expect(routine.name).toBe('Demo Routine');
-    expect(cycles.map((view) => view.cycle.cycleNumber)).toEqual([1, 2]);
+    expect(cycles).toHaveLength(6);
+    expect(cycles.map((view) => view.cycle.cycleNumber)).toEqual([1, 2, 3, 4, 5, 6]);
 
-    const cycle1 = cycles[0];
-    expect(cycle1?.cycle).toMatchObject({ status: 'complete', weeks: 4 });
-    expect(cycle1?.weeks).toHaveLength(4);
-    expect(cycle1?.weeks.every((week) => week.resolved && !week.isCurrent)).toBe(true);
-    for (const week of cycle1?.weeks ?? []) {
-      expect(week.adherence).toEqual({
-        planned: 3,
-        completed: 3,
-        moved: 0,
-        discarded: 0,
-        pending: 0,
-      });
+    for (const view of [cycles[0], cycles[2], cycles[3], cycles[4]]) {
+      expect(view?.cycle.status).toBe('complete');
+      expect(view?.weeks).toHaveLength(4);
+      expect(view?.weeks.every((week) => week.resolved && !week.isCurrent)).toBe(true);
+      for (const week of view?.weeks ?? []) {
+        expect(week.adherence).toEqual({
+          planned: 4,
+          completed: 4,
+          moved: 0,
+          discarded: 0,
+          pending: 0,
+        });
+      }
     }
 
     const cycle2 = cycles[1];
-    expect(cycle2?.cycle).toMatchObject({
-      status: 'active',
-      weeks: 4,
-      currentWeek: 4,
-    });
     expect(cycle2?.weeks[0]?.adherence).toEqual({
-      planned: 3,
-      completed: 2,
+      planned: 4,
+      completed: 3,
       moved: 1,
       discarded: 0,
       pending: 0,
     });
     expect(cycle2?.weeks[1]?.adherence).toEqual({
-      planned: 3,
-      completed: 2,
+      planned: 4,
+      completed: 3,
       moved: 0,
       discarded: 1,
       pending: 0,
     });
     expect(cycle2?.weeks[2]?.adherence).toEqual({
-      planned: 3,
-      completed: 3,
+      planned: 4,
+      completed: 4,
       moved: 0,
       discarded: 0,
       pending: 0,
     });
-    expect(cycle2?.weeks[3]?.adherence).toEqual({
-      planned: 3,
-      completed: 0,
+
+    const cycle6 = cycles[5];
+    expect(cycle6?.cycle).toMatchObject({
+      status: 'active',
+      weeks: 4,
+      currentWeek: 4,
+    });
+    expect(cycle6?.weeks[3]?.adherence).toEqual({
+      planned: 4,
+      completed: 3,
       moved: 0,
       discarded: 0,
-      pending: 3,
+      pending: 1,
     });
-    expect(cycle2?.weeks[3]).toMatchObject({ resolved: false, isCurrent: true });
+    expect(cycle6?.weeks[3]).toMatchObject({ resolved: false, isCurrent: true });
   });
 
   it('builds one series per main-role exercise with top weight per session', async () => {
@@ -239,40 +244,24 @@ describe('demo data through the db edges', () => {
     expect(series.map((entry) => entry.exerciseName)).toEqual([
       'Barbell Full Squat',
       'Barbell Bench Press - Medium Grip',
-      'Barbell Shoulder Press',
       'Barbell Deadlift',
+      'Barbell Shoulder Press',
     ]);
     expect(series.every((entry) => entry.unit === 'kg')).toBe(true);
 
+    // One point per logged session: 24 weeks per lift, minus the discarded
+    // bench day and the unresolved press day.
+    expect(series.map((entry) => entry.points.length)).toEqual([24, 23, 24, 23]);
+    expect(series.every((entry) => hasChartableSeries(entry.points))).toBe(true);
+
     const squat = series[0];
-    expect(squat?.points.map((point) => point.weight)).toEqual([
-      100, 100, 100, 100, 102.5, 102.5, 102.5,
-    ]);
-    expect(squat?.points.map((point) => point.reps)).toEqual([6, 5, 6, 5, 6, 5, 8]);
-    expect(squat?.points.map((point) => point.date)).toEqual([
-      epoch('2026-04-06'),
-      epoch('2026-04-13'),
-      epoch('2026-04-20'),
-      epoch('2026-04-27'),
-      epoch('2026-05-04'),
-      epoch('2026-05-11'),
-      epoch('2026-05-18'),
-    ]);
-
-    const bench = series[1];
-    expect(bench?.points).toHaveLength(6);
-    expect(bench?.points.map((point) => point.weight)).toEqual([
-      70, 70, 70, 70, 70, 70,
-    ]);
-    // All bench sets sit at 70 kg; the missed 4-rep set never changes the top
-    // weight, so the tie-break keeps the 5-rep set of each day.
-    expect(bench?.points.map((point) => point.reps)).toEqual([5, 5, 5, 5, 5, 5]);
-
-    const deadlift = series[3];
-    expect(deadlift?.points).toHaveLength(7);
-    expect(deadlift?.points.map((point) => point.weight)).toEqual([
-      140, 140, 140, 140, 142.5, 142.5, 142.5,
-    ]);
+    expect(squat?.points[0]).toMatchObject({
+      date: epoch('2026-03-02'),
+      weight: 85,
+      reps: 5,
+    });
+    const last = squat?.points[squat.points.length - 1];
+    expect(last?.date).toBe(epoch('2026-08-10'));
 
     // The lb accessory stays out of the main-lift view; its unit lives in the logs.
     expect(series.some((entry) => entry.exerciseName.includes('Lat'))).toBe(false);
@@ -281,14 +270,15 @@ describe('demo data through the db edges', () => {
   it('returns every demo log date as a calendar marker', async () => {
     const { executor } = await setupDemo();
     const rows = await loadCalendarLogs(executor);
-    expect(rows).toHaveLength(20);
+    expect(rows).toHaveLength(119);
     const markers = buildCalendarMarkers(rows);
-    expect(markers.size).toBe(20);
+    expect(markers.size).toBe(119);
     for (const count of markers.values()) {
       expect(count).toBe(1);
     }
-    expect(markers.get(epoch('2026-05-09'))).toBe(1);
-    expect(logsOnDate(rows, epoch('2026-05-09'))).toHaveLength(1);
+    expect(markers.get(epoch('2026-04-04'))).toBe(1);
+    expect(markers.get(epoch('2026-06-20'))).toBe(1);
+    expect(logsOnDate(rows, epoch('2026-04-04'))).toHaveLength(1);
   });
 
   it('opens a resolved week with planned targets and logged sets side by side', async () => {
@@ -304,32 +294,34 @@ describe('demo data through the db edges', () => {
       'completed',
       'completed',
       'moved',
+      'completed',
     ]);
 
-    expect(week.planned).toHaveLength(3);
+    expect(week.planned).toHaveLength(4);
     const squatDay = week.planned[0];
     expect(squatDay?.name).toBe('Squat Day');
     expect(squatDay?.exercises[0]).toMatchObject({
       name: 'Barbell Full Squat',
       targetSets: 3,
       targetReps: 5,
-      targetWeight: 102.5,
+      targetWeight: 107.5,
       unit: 'kg',
       isAmrap: true,
     });
     expect(squatDay?.exercises[1]?.name).toBe('Bent Over Two-Dumbbell Row');
 
     // The logged side covers the moved session too — it was performed.
-    expect(week.logged).toHaveLength(3);
-    expect(week.logged.map((session) => session.exercises.length)).toEqual([2, 3, 2]);
+    expect(week.logged).toHaveLength(4);
+    expect(week.logged.map((session) => session.exercises.length)).toEqual([4, 5, 4, 4]);
 
-    const benchLogged = week.logged[1];
-    expect(benchLogged?.exercises.map((exercise) => exercise.exerciseName)).toEqual([
-      'Barbell Bench Press - Medium Grip',
+    const pressLogged = week.logged[3];
+    expect(pressLogged?.exercises.map((exercise) => exercise.exerciseName)).toEqual([
+      'Barbell Curl',
       'Barbell Shoulder Press',
+      'Cable Crunch',
       'Wide-Grip Lat Pulldown',
     ]);
-    const latPulldown = benchLogged?.exercises[2];
+    const latPulldown = pressLogged?.exercises[3];
     expect(latPulldown?.sets).toEqual([
       { setNumber: 1, weight: 110, reps: 10, unit: 'lb' },
       { setNumber: 2, weight: 110, reps: 10, unit: 'lb' },
@@ -345,14 +337,19 @@ describe('demo data through the db edges', () => {
     expect(week.logged.some((session) => session.sessionId === statuses[1]?.sessionId)).toBe(
       false,
     );
-    expect(week.logged).toHaveLength(2);
+    expect(week.logged).toHaveLength(3);
   });
 
-  it('leaves a pending week without logged rows', async () => {
+  it('leaves the current week partially resolved: three logged sessions, one pending', async () => {
     const { executor } = await setupDemo();
-    const week = await loadWeekDetail(executor, 1, 2, 4);
-    expect(week.sessionStatuses.every((status) => status.status === 'pending')).toBe(true);
-    expect(week.logged).toHaveLength(0);
-    expect(week.planned).toHaveLength(3);
+    const week = await loadWeekDetail(executor, 1, 6, 4);
+    expect(week.sessionStatuses.map((status) => status.status)).toEqual([
+      'completed',
+      'completed',
+      'completed',
+      'pending',
+    ]);
+    expect(week.logged).toHaveLength(3);
+    expect(week.planned).toHaveLength(4);
   });
 });

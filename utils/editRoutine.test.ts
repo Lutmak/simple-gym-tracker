@@ -97,8 +97,9 @@ const demoRoutineDraft = async (
     restAccessorySeconds: source.routine.restAccessorySeconds,
     sessions: [
       sessionFrom(source, 'Squat Day', 1),
-      sessionFrom(source, 'Bench Day', 3),
-      sessionFrom(source, 'Deadlift Day', 5),
+      sessionFrom(source, 'Bench Day', 2),
+      sessionFrom(source, 'Deadlift Day', 4),
+      sessionFrom(source, 'Press Day', 5),
     ],
   };
 };
@@ -353,9 +354,9 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
     restMainSeconds: 150,
     restAccessorySeconds: 75,
     sessions: base.sessions
-      .filter((session) => session.name !== 'Deadlift Day')
+      .filter((session) => session.name !== 'Deadlift Day' && session.name !== 'Press Day')
       .map((session) =>
-        session.name === 'Squat Day' ? { ...session, weekday: 2 } : session,
+        session.name === 'Squat Day' ? { ...session, weekday: 3 } : session,
       ),
   });
 
@@ -384,7 +385,7 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
     expect(routine.rounding_increment).toBe(5);
     expect(routine.rest_main_seconds).toBe(150);
     expect(routine.rest_accessory_seconds).toBe(75);
-    expect(routine.progression_rule).toBe('linear');
+    expect(routine.progression_rule).toBe('wave');
     expect(routine.origin).toBe('user');
     expect(routine.is_active).toBe(1);
 
@@ -392,8 +393,8 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
       .prepare('SELECT weekday, name FROM Sessions WHERE routine_id = 1 ORDER BY sort_order;')
       .all() as { weekday: number; name: string }[];
     expect(sessions).toEqual([
-      { weekday: 2, name: 'Squat Day' },
-      { weekday: 3, name: 'Bench Day' },
+      { weekday: 3, name: 'Squat Day' },
+      { weekday: 2, name: 'Bench Day' },
     ]);
   });
 
@@ -410,7 +411,7 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
     await saveRoutineEdit(executor, 1, {
       ...base,
       sessions: base.sessions.map((s) =>
-        s.name === 'Squat Day' ? { ...s, weekday: 2 } : s,
+        s.name === 'Squat Day' ? { ...s, weekday: 3 } : s,
       ),
     });
 
@@ -419,7 +420,7 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
         'SELECT weekday FROM Sessions WHERE routine_id = 1 AND name = ?;',
       )
       .get('Squat Day') as { weekday: number };
-    expect(moved.weekday).toBe(2);
+    expect(moved.weekday).toBe(3);
 
     const movedExercises = db
       .prepare(
@@ -443,11 +444,11 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
     if (bench === undefined) {
       throw new Error('Fixture missing bench press');
     }
-    const latPulldown = base.sessions
-      .find((s) => s.name === 'Bench Day')
-      ?.exercises.find((e) => e.name === 'Wide-Grip Lat Pulldown');
-    if (latPulldown === undefined) {
-      throw new Error('Fixture missing lat pulldown');
+    const pulldownSession = base.sessions.find((s) =>
+      s.exercises.some((e) => e.name === 'Wide-Grip Lat Pulldown'),
+    );
+    if (pulldownSession === undefined) {
+      throw new Error('Fixture missing the lat pulldown session');
     }
 
     await saveRoutineEdit(executor, 1, {
@@ -457,9 +458,14 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
           ? {
               ...s,
               exercises: s.exercises.map((e) =>
-                e.name === bench.name
-                  ? { ...e, loadSource: 'bodyweight' }
-                  : e.name === latPulldown.name
+                e.name === bench.name ? { ...e, loadSource: 'bodyweight' } : e,
+              ),
+            }
+          : s.name === pulldownSession.name
+            ? {
+                ...s,
+                exercises: s.exercises.map((e) =>
+                  e.name === 'Wide-Grip Lat Pulldown'
                     ? {
                         ...e,
                         loadSource: 'training_max_pct',
@@ -468,9 +474,9 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
                         absoluteWeight: null,
                       }
                     : e,
-              ),
-            }
-          : s,
+                ),
+              }
+            : s,
       ),
     });
 
@@ -481,7 +487,7 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
          FROM SessionExercises e JOIN Sessions s ON s.session_id = e.session_id
          WHERE s.routine_id = 1 AND e.exercise_name IN (?, ?);`,
       )
-      .all(bench.name, latPulldown.name) as {
+      .all(bench.name, 'Wide-Grip Lat Pulldown') as {
       exercise_name: string;
       load_source: string;
       training_max_pct: number | null;
@@ -496,7 +502,7 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
       training_max_weight: null,
       absolute_weight: null,
     });
-    const trainingMax = rows.find((row) => row.exercise_name === latPulldown.name);
+    const trainingMax = rows.find((row) => row.exercise_name === 'Wide-Grip Lat Pulldown');
     expect(trainingMax).toMatchObject({
       load_source: 'training_max_pct',
       training_max_pct: 0.9,
@@ -580,7 +586,7 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
         s.name === 'Squat Day'
           ? {
               ...s,
-              weekday: 2,
+              weekday: 3,
               exercises: s.exercises.map((e) =>
                 e.name === squat.name ? { ...e, targetReps: 6 } : e,
               ),
@@ -616,7 +622,7 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
         `SELECT weekday FROM Sessions WHERE routine_id = 1 AND name = 'Squat Day';`,
       )
       .get() as { weekday: number };
-    expect(moved.weekday).toBe(2);
+    expect(moved.weekday).toBe(3);
 
     const squatReps = db
       .prepare(
@@ -719,7 +725,8 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
     expect(weekSessionIdsAfter).toEqual(
       weekSessionIdsBefore.filter((id) => !deadliftWeekSessionIds.includes(id)),
     );
-    expect(count(db, 'Progression_Proposal')).toBe(proposalsBefore - 1);
+    // The deadlift carries one resolved TM review row per complete cycle.
+    expect(count(db, 'Progression_Proposal')).toBe(proposalsBefore - 5);
     const deadliftProposal = (db
       .prepare(
         `SELECT COUNT(*) AS n FROM Progression_Proposal p

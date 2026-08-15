@@ -97,7 +97,6 @@ export default function InicioScreen({ navigation, route }: Props) {
   const { bump } = useQueueRevision();
   const db = useSQLiteContext();
   const [data, setData] = useState<InicioData | null>(null);
-  const [resolutionSessionId, setResolutionSessionId] = useState<number | null>(null);
   const [resolutionSession, setResolutionSession] = useState<QueuedSession | null>(null);
   const [resolutionSheetVisible, setResolutionSheetVisible] = useState(false);
   const [resolutionStep, setResolutionStep] = useState<ResolutionStep>('outcomes');
@@ -138,7 +137,6 @@ export default function InicioScreen({ navigation, route }: Props) {
       setUndoDiscard(null);
       setPendingReopenId(null);
       setPendingReopenSession(null);
-      setResolutionSessionId(null);
       setResolutionSession(null);
       setResolutionSheetVisible(false);
     });
@@ -161,7 +159,6 @@ export default function InicioScreen({ navigation, route }: Props) {
       return;
     }
 
-    setResolutionSessionId(resolutionRequestId);
     setResolutionSession(data.queue.head);
     setResolutionStep('outcomes');
     setMoveDayPlan(null);
@@ -178,7 +175,6 @@ export default function InicioScreen({ navigation, route }: Props) {
     }
     setPendingReopenId(null);
     setPendingReopenSession(null);
-    setResolutionSessionId(pendingReopenId);
     setResolutionSession(pendingReopenSession);
     setResolutionStep('outcomes');
     setMoveDayPlan(null);
@@ -222,7 +218,6 @@ export default function InicioScreen({ navigation, route }: Props) {
   const closeResolution = () => {
     setPendingReopenId(null);
     setPendingReopenSession(null);
-    setResolutionSessionId(null);
     setResolutionSession(null);
     setResolutionSheetVisible(false);
     setResolutionStep('outcomes');
@@ -235,7 +230,6 @@ export default function InicioScreen({ navigation, route }: Props) {
     if (!navigation.isFocused()) {
       setPendingReopenId(null);
       setPendingReopenSession(null);
-      setResolutionSessionId(null);
       setResolutionSession(null);
       setResolutionSheetVisible(false);
       return;
@@ -250,7 +244,6 @@ export default function InicioScreen({ navigation, route }: Props) {
         : null;
     setPendingReopenId(nextId);
     setPendingReopenSession(nextSession);
-    setResolutionSessionId(null);
     setResolutionSheetVisible(false);
     setResolutionStep('outcomes');
     setMoveDayPlan(null);

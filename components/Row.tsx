@@ -14,6 +14,8 @@ export type RowProps = {
   label: string;
   /** Secondary text on the right side, before any `right` control. */
   detail?: string;
+  /** Place the secondary text below the label, for explanatory decision rows. */
+  detailBelow?: boolean;
   /** A trailing control — a Switch, a chevron, a value chip. */
   right?: ReactNode;
   onPress?: () => void;
@@ -23,10 +25,10 @@ export type RowProps = {
   testID?: string;
 };
 
-export function Row({ label, detail, right, onPress, disabled, divided, testID }: RowProps) {
+export function Row({ label, detail, detailBelow, right, onPress, disabled, divided, testID }: RowProps) {
   const { tokens } = useTheme();
 
-  const content = (
+  const text = (
     <>
       <Text
         style={[
@@ -43,9 +45,9 @@ export function Row({ label, detail, right, onPress, disabled, divided, testID }
           {detail}
         </Text>
       )}
-      {right !== undefined && <View style={styles.right}>{right}</View>}
     </>
   );
+  const content = detailBelow ? <View style={styles.textColumn}>{text}</View> : text;
 
   return (
     <Pressable
@@ -61,6 +63,7 @@ export function Row({ label, detail, right, onPress, disabled, divided, testID }
       ]}
     >
       {content}
+      {right !== undefined && <View style={styles.right}>{right}</View>}
     </Pressable>
   );
 }
@@ -79,6 +82,11 @@ const styles = StyleSheet.create({
   },
   detail: {
     fontSize: fontSize.body,
+  },
+  textColumn: {
+    flexGrow: 1,
+    flexShrink: 1,
+    gap: spacing.label,
   },
   right: {
     marginLeft: spacing.inline,

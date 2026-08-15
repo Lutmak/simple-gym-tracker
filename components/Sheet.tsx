@@ -9,8 +9,9 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
-import { fontSize, radius, spacing } from '../utils/scale';
+import { fontSize, radius, spacing, tabBar, touchTarget } from '../utils/scale';
 
 /**
  * A bottom sheet — the app's one "decision about the thing you touched" surface (§3.5). It slides
@@ -29,11 +30,23 @@ export type SheetProps = {
   visible: boolean;
   onClose: () => void;
   title?: string;
+  onBack?: () => void;
+  backAccessibilityLabel?: string;
+  onClosed?: () => void;
   children: ReactNode;
   testID?: string;
 };
 
-export function Sheet({ visible, onClose, title, children, testID }: SheetProps) {
+export function Sheet({
+  visible,
+  onClose,
+  title,
+  onBack,
+  backAccessibilityLabel,
+  onClosed,
+  children,
+  testID,
+}: SheetProps) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -43,6 +56,7 @@ export function Sheet({ visible, onClose, title, children, testID }: SheetProps)
   useEffect(() => {
     if (visible) {
       setMounted(true);
+      scrimOpacity.stopAnimation();
       scrimOpacity.setValue(0);
       Animated.timing(scrimOpacity, {
         toValue: 1,
@@ -50,13 +64,19 @@ export function Sheet({ visible, onClose, title, children, testID }: SheetProps)
         useNativeDriver: true,
       }).start();
     } else if (mounted) {
+      scrimOpacity.stopAnimation();
       Animated.timing(scrimOpacity, {
         toValue: 0,
         duration: CLOSE_ANIMATION_MS,
         useNativeDriver: true,
-      }).start(() => setMounted(false));
+      }).start(({ finished }) => {
+        if (finished) {
+          setMounted(false);
+          onClosed?.();
+        }
+      });
     }
-  }, [visible, mounted, scrimOpacity]);
+  }, [visible, mounted, onClosed, scrimOpacity]);
 
   if (!mounted) {
     return null;
@@ -81,10 +101,26 @@ export function Sheet({ visible, onClose, title, children, testID }: SheetProps)
         </Animated.View>
         <View style={[styles.panel, { backgroundColor: tokens.surfaceRaised, paddingBottom: Math.max(insets.bottom, spacing.gutter) }]}>
           <View style={[styles.handle, { backgroundColor: tokens.divider }]} />
-          {title !== undefined && (
+          {title !== undefined && onBack === undefined && (
             <Text style={[styles.title, { color: tokens.textPrimary }]} maxFontSizeMultiplier={1.5}>
               {title}
             </Text>
+          )}
+          {title !== undefined && onBack !== undefined && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.backHeader,
+                pressed && { backgroundColor: tokens.inputFill },
+              ]}
+              onPress={onBack}
+              accessibilityRole="button"
+              accessibilityLabel={backAccessibilityLabel ?? t('sheetBack')}
+            >
+              <Ionicons name="chevron-back" size={tabBar.icon} color={tokens.textPrimary} />
+              <Text style={[styles.title, styles.backTitle, { color: tokens.textPrimary }]} maxFontSizeMultiplier={1.5}>
+                {title}
+              </Text>
+            </Pressable>
           )}
           {children}
         </View>
@@ -122,5 +158,16 @@ const styles = StyleSheet.create({
     fontSize: fontSize.cardTitle,
     fontWeight: '600',
     marginBottom: spacing.cardGap,
+  },
+  backHeader: {
+    minHeight: touchTarget.control,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.inline,
+    marginBottom: spacing.cardGap,
+  },
+  backTitle: {
+    flex: 1,
+    marginBottom: 0,
   },
 });

@@ -6,6 +6,8 @@ import {
   applyDiscard,
   applyDoToday,
   applyMove,
+  applyUndoDiscard,
+  buildMoveDayPlan,
   computeSessionQueue,
   dayStampOf,
   loadSessionQueue,
@@ -14,6 +16,7 @@ import {
   resolveDiscardSession,
   resolveDoTodaySession,
   resolveMoveSession,
+  undoDiscardSession,
   targetWeightFor,
   weekdayOfStamp,
   type QueuedSession,
@@ -291,6 +294,27 @@ describe('resolution writers against the demo data', () => {
     const row = await weekSessionRow(executor, press.weekSessionId);
     expect(row?.status).toBe('discarded');
   });
+
+  test('undoing a discard restores the row and preserves the queue record', async () => {
+    const executor = await demoDb();
+    const today = dayStampFromYmd('2026-08-15');
+    const before = await loadSessionQueue(executor, today);
+    const press = before.head as QueuedSession;
+    await resolveDiscardSession(executor, press.weekSessionId);
+    const countBeforeUndo = await executor.get(
+      'SELECT COUNT(*) AS count FROM WeekSessions;',
+    );
+
+    await undoDiscardSession(executor, press.weekSessionId);
+
+    const row = await weekSessionRow(executor, press.weekSessionId);
+    const countAfterUndo = await executor.get(
+      'SELECT COUNT(*) AS count FROM WeekSessions;',
+    );
+    expect(row?.status).toBe('pending');
+    expect(row?.resolved_on_date).toBeNull();
+    expect(countAfterUndo?.count).toBe(countBeforeUndo?.count);
+  });
 });
 
 describe('computeSessionQueue pure, without a cycle', () => {
@@ -455,6 +479,7 @@ describe('computeSessionQueue with a cycle, pure', () => {
     );
     expect(state.resolution).toBe('unresolved');
     expect(state.head?.doTodayAvailable).toBe(false);
+    expect(state.head?.todayOccupiedBy).toBe('Bench Day');
   });
 
   test('week sessions without a session or cycle row are ignored', () => {
@@ -587,6 +612,42 @@ describe('resolution transformations, pure', () => {
       { ...baseRows[1] },
     ];
     expect(applyDiscard(input(rows), 1)).toEqual({ ok: false, reason: 'undatable' });
+  });
+
+  test('move day choices start tomorrow and identify an occupied day', () => {
+    const today = dayStampFromYmd('2026-05-05');
+    const plan = buildMoveDayPlan(input(baseRows), 1, today);
+
+    expect(plan.choices.map((choice) => choice.stamp)).toEqual([
+      dayStampFromYmd('2026-05-06'),
+      dayStampFromYmd('2026-05-07'),
+      dayStampFromYmd('2026-05-08'),
+    ]);
+    expect(plan.choices[0]?.occupiedBy).toBe('Bench Day');
+    expect(plan.choices[1]?.occupiedBy).toBeNull();
+    expect(plan.minStamp).toBe(dayStampFromYmd('2026-05-06'));
+    expect(plan.maxStamp).toBe(dayStampFromYmd('2026-06-02'));
+  });
+
+  test('undo discard restores the pending row without removing it', () => {
+    const discarded = applyDiscard(input(baseRows), 1);
+    expect(discarded.ok).toBe(true);
+    if (!discarded.ok) {
+      return;
+    }
+
+    const undone = applyUndoDiscard(input(discarded.weekSessions), 1);
+    expect(undone).toEqual({
+      ok: true,
+      weekSessions: [
+        { ...baseRows[0], status: 'pending', resolvedOnDate: null },
+        baseRows[1],
+      ],
+    });
+    expect(applyUndoDiscard(input(baseRows), 1)).toEqual({
+      ok: false,
+      reason: 'notDiscarded',
+    });
   });
 });
 

@@ -5,8 +5,9 @@
  * offered. Pure core: `computeSessionQueue` derives the single head — the
  * oldest unresolved past session ahead of today's, or today's session — and
  * what becomes visible once the head is resolved. The resolution actions
- * (`applyDoToday`, `applyMove`, `applyDiscard`) are pure transformations over
- * the week-session rows, each with one thin writer below. A day has exactly
+ * (`applyDoToday`, `applyMove`, `applyDiscard`) and guarded discard undo are
+ * pure transformations over the week-session rows, each with one thin writer
+ * below. A day has exactly
  * one session slot by construction: do-today and move reject a target day
  * that any other session already occupies, so sessions can never stack onto
  * one day, and "do it today" cannot be answered twice for the same day.
@@ -22,6 +23,11 @@ import { roundTo } from './progression';
 import type { RoutineDatabase, RoutineLoadSource, RoutineUnit } from './routineActions';
 
 export const DAY_SECONDS = 86400;
+
+/** Named move choices keep the usual answer within the next few days. */
+export const MOVE_NAMED_DAY_COUNT = 3;
+/** The calendar remains useful without allowing a move into an arbitrary future. */
+export const MOVE_CALENDAR_HORIZON_DAYS = 28;
 
 /** Whole UTC day (noon) in epoch seconds for a local Date. */
 export const dayStampOf = (date: Date): number => {
@@ -158,6 +164,8 @@ export interface QueuedSession {
    * exactly the stacking the queue exists to forbid.
    */
   doTodayAvailable: boolean;
+  /** The session occupying today when `doTodayAvailable` is false. */
+  todayOccupiedBy: string | null;
   exercises: QueuedExercise[];
 }
 
@@ -227,6 +235,11 @@ function buildHead(
   todayStamp: number,
 ): QueuedSession {
   const exercises = exercisesBySession.get(headRow.session.sessionId) ?? [];
+  const todayOccupant = rows.find(
+    (row) =>
+      row.weekSession.weekSessionId !== headRow.weekSession.weekSessionId &&
+      effectiveDay(row) === todayStamp,
+  );
   return {
     weekSessionId: headRow.weekSession.weekSessionId,
     sessionId: headRow.session.sessionId,
@@ -234,11 +247,8 @@ function buildHead(
     weekday: headRow.session.weekday,
     date: effectiveDay(headRow),
     originDate: headRow.nominal,
-    doTodayAvailable: !rows.some(
-      (row) =>
-        row.weekSession.weekSessionId !== headRow.weekSession.weekSessionId &&
-        effectiveDay(row) === todayStamp,
-    ),
+    doTodayAvailable: todayOccupant === undefined,
+    todayOccupiedBy: todayOccupant?.session.name ?? null,
     exercises: exercises.map((exercise) => ({
       name: exercise.name,
       targetSets: exercise.targetSets,
@@ -368,7 +378,57 @@ function nextPlanSession(
   };
 }
 
-export type QueueApplyRejection = 'notPending' | 'dayOccupied' | 'undatable';
+export interface MoveDayChoice {
+  stamp: number;
+  occupiedBy: string | null;
+}
+
+export interface MoveDayPlan {
+  choices: MoveDayChoice[];
+  minStamp: number;
+  maxStamp: number;
+  occupiedBy: ReadonlyMap<number, string>;
+}
+
+const occupiedSessionsByDay = (
+  rows: readonly QueueRow[],
+  weekSessionId: number,
+): Map<number, string> => {
+  const occupiedBy = new Map<number, string>();
+  for (const row of rows) {
+    if (row.weekSession.weekSessionId === weekSessionId) {
+      continue;
+    }
+    const day = effectiveDay(row);
+    if (!occupiedBy.has(day)) {
+      occupiedBy.set(day, row.session.name);
+    }
+  }
+  return occupiedBy;
+};
+
+/** The named choices and bounded calendar range for one move decision. */
+export function buildMoveDayPlan(
+  input: SessionQueueInput,
+  weekSessionId: number,
+  todayStamp: number,
+): MoveDayPlan {
+  const occupiedBy = occupiedSessionsByDay(buildQueueRows(input), weekSessionId);
+  const minStamp = todayStamp + DAY_SECONDS;
+  const maxStamp = todayStamp + MOVE_CALENDAR_HORIZON_DAYS * DAY_SECONDS;
+  const choices = Array.from({ length: MOVE_NAMED_DAY_COUNT }, (_, index) => {
+    const stamp = minStamp + index * DAY_SECONDS;
+    return { stamp, occupiedBy: occupiedBy.get(stamp) ?? null };
+  });
+
+  return { choices, minStamp, maxStamp, occupiedBy };
+}
+
+export type QueueApplyRejection =
+  | 'notPending'
+  | 'dayOccupied'
+  | 'undatable'
+  | 'notDiscarded';
 
 export interface QueueApplySuccess {
   ok: true;
@@ -497,6 +557,26 @@ export function applyDiscard(
   };
 }
 
+/** Undo a recorded discard by restoring the unresolved queue row in place. */
+export function applyUndoDiscard(
+  input: SessionQueueInput,
+  weekSessionId: number,
+): QueueApplyOutcome {
+  const weekSession = input.weekSessions.find(
+    (row) => row.weekSessionId === weekSessionId,
+  );
+  if (weekSession === undefined || weekSession.status !== 'discarded') {
+    return { ok: false, reason: 'notDiscarded' };
+  }
+  return {
+    ok: true,
+    weekSessions: replaceWeekSession(input, weekSessionId, {
+      status: 'pending',
+      resolvedOnDate: null,
+    }),
+  };
+}
+
 const num = (value: unknown): number => Number(value);
 const str = (value: unknown): string => String(value);
 const nullableNum = (value: unknown): number | null =>
@@ -602,8 +682,17 @@ export async function loadSessionQueue(
   return computeSessionQueue(await loadSessionQueueInput(db), todayStamp);
 }
 
+/** The move choices for a session, loaded from the same queue rows as its writer. */
+export async function loadMoveDayPlan(
+  db: RoutineDatabase,
+  weekSessionId: number,
+  todayStamp: number,
+): Promise<MoveDayPlan> {
+  return buildMoveDayPlan(await loadSessionQueueInput(db), weekSessionId, todayStamp);
+}
+
 /**
- * The three resolution writers. Each validates through the pure layer against
+ * The resolution writers. Each validates through the pure layer against
  * the same rows the queue computes from, then writes one row; a rejected
  * resolution throws rather than being applied. The `status = 'pending'` guard
  * makes a second resolution a no-op.
@@ -661,5 +750,21 @@ export async function resolveDiscardSession(
     `UPDATE WeekSessions SET status = 'discarded', resolved_on_date = ?
      WHERE week_session_id = ? AND status = 'pending';`,
     [discarded.resolvedOnDate, weekSessionId],
+  );
+}
+
+export async function undoDiscardSession(
+  db: RoutineDatabase,
+  weekSessionId: number,
+): Promise<void> {
+  const input = await loadSessionQueueInput(db);
+  const outcome = applyUndoDiscard(input, weekSessionId);
+  if (!outcome.ok) {
+    throw new Error(`undoDiscardSession: ${outcome.reason}`);
+  }
+  await db.run(
+    `UPDATE WeekSessions SET status = 'pending', resolved_on_date = NULL
+     WHERE week_session_id = ? AND status = 'discarded';`,
+    [weekSessionId],
   );
 }

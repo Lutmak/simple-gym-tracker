@@ -47,8 +47,9 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
 
   // The history tables keep their Iteration 2 shape (§3.2 of SPECS.md): rows copy
   // exercise_name, sets and reps at log time and never reference the plan for display.
-  // Weight_Log gains the per-row unit from §3.7; legacy databases get it from
-  // ensureWeightLogUnitColumn because the bundled database predates the column.
+  // Weight_Log gains the per-row unit from §3.7 and the per-set timing columns from
+  // §3.9; legacy databases get them from ensureWeightLogUnitColumn /
+  // ensureWeightLogTimingColumns because the bundled database predates the columns.
   `CREATE TABLE IF NOT EXISTS Workouts (
     workout_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     workout_name TEXT NOT NULL UNIQUE
@@ -97,6 +98,8 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     weight_logged REAL NOT NULL,
     reps_logged INTEGER NOT NULL,
     unit TEXT NOT NULL DEFAULT 'kg' CHECK (unit IN ('kg', 'lb')),
+    started_at INTEGER,
+    completed_at INTEGER,
     FOREIGN KEY (workout_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE CASCADE,
     FOREIGN KEY (logged_exercise_id) REFERENCES Logged_Exercises(logged_exercise_id),
     UNIQUE (workout_log_id, logged_exercise_id, set_number)
@@ -135,7 +138,8 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     rest_main_seconds INTEGER NOT NULL CHECK (rest_main_seconds >= 0),
     rest_accessory_seconds INTEGER NOT NULL CHECK (rest_accessory_seconds >= 0),
     is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0, 1)),
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    planned_jokers INTEGER NOT NULL DEFAULT 0 CHECK (planned_jokers >= 0)
   );`,
 
   `CREATE UNIQUE INDEX IF NOT EXISTS Routines_single_active
@@ -166,15 +170,16 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     unit_override TEXT CHECK (unit_override IS NULL OR unit_override IN ('kg', 'lb')),
     is_amrap INTEGER NOT NULL DEFAULT 0 CHECK (is_amrap IN (0, 1)),
     sort_order INTEGER NOT NULL CHECK (sort_order > 0),
+    bar_profile TEXT CHECK (bar_profile IS NULL OR bar_profile IN ('olympic', 'semi-olympic', 'smith', 'ez', 'custom')),
+    bar_weight REAL,
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
     UNIQUE (session_id, sort_order),
     CHECK (
       (load_source = 'training_max_pct'
-        AND training_max_pct IS NOT NULL AND training_max_weight IS NOT NULL
+        AND training_max_pct IS NOT NULL
         AND absolute_weight IS NULL)
       OR (load_source = 'absolute'
-        AND absolute_weight IS NOT NULL
         AND training_max_pct IS NULL AND training_max_weight IS NULL)
       OR (load_source = 'bodyweight'
         AND absolute_weight IS NULL AND training_max_pct IS NULL AND training_max_weight IS NULL)
@@ -317,6 +322,54 @@ export async function ensureWeightLogUnitColumn(
   }
 }
 
+/** The §3.9 per-set timing columns on Weight_Log, for databases created before M2. */
+export async function ensureWeightLogTimingColumns(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(Weight_Log);',
+  );
+  if (!columns.some((column) => column.name === 'started_at')) {
+    await executor.exec('ALTER TABLE Weight_Log ADD COLUMN started_at INTEGER;');
+  }
+  if (!columns.some((column) => column.name === 'completed_at')) {
+    await executor.exec('ALTER TABLE Weight_Log ADD COLUMN completed_at INTEGER;');
+  }
+}
+
+/** The M2 SessionExercises columns (bar profile + custom bar weight). */
+export async function ensureSessionExercisesColumns(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(SessionExercises);',
+  );
+  if (!columns.some((column) => column.name === 'bar_profile')) {
+    await executor.exec(
+      `ALTER TABLE SessionExercises ADD COLUMN bar_profile TEXT
+       CHECK (bar_profile IS NULL OR bar_profile IN ('olympic', 'semi-olympic', 'smith', 'ez', 'custom'));`,
+    );
+  }
+  if (!columns.some((column) => column.name === 'bar_weight')) {
+    await executor.exec('ALTER TABLE SessionExercises ADD COLUMN bar_weight REAL;');
+  }
+}
+
+/** The M2 planned-jokers column on Routines. */
+export async function ensureRoutinesPlannedJokers(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(Routines);',
+  );
+  if (!columns.some((column) => column.name === 'planned_jokers')) {
+    await executor.exec(
+      `ALTER TABLE Routines ADD COLUMN planned_jokers INTEGER NOT NULL DEFAULT 0
+       CHECK (planned_jokers >= 0);`,
+    );
+  }
+}
+
 /** Idempotent catalog seed: stable exercise keys, INSERT OR IGNORE. */
 export async function seedCatalog(executor: SchemaExecutor): Promise<void> {
   await executor.exec(CATALOG_EXERCISE_SEED_SQL);
@@ -413,6 +466,9 @@ export async function runSchema(executor: SchemaExecutor): Promise<void> {
     await executor.exec(statement);
   }
   await ensureWeightLogUnitColumn(executor);
+  await ensureWeightLogTimingColumns(executor);
+  await ensureSessionExercisesColumns(executor);
+  await ensureRoutinesPlannedJokers(executor);
   await seedCatalog(executor);
   await seedPresetRoutines(executor);
 }

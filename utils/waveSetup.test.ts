@@ -226,14 +226,50 @@ describe('buildWaveRoutineRows — valid input to CHECK-valid rows', () => {
     }
   });
 
-  it('rejects a missing training max', () => {
-    try {
-      buildWaveRoutineRows(
-        draft({ days: [day({ key: 'd1', trainingMax: null })] }),
-      );
-    } catch (error) {
-      expectThrows(error, 'trainingMaxMissing');
+  it('builds with a missing training max — weights are learned, never demanded (§3.2)', () => {
+    const rows = buildWaveRoutineRows(
+      draft({ days: [day({ key: 'd1', trainingMax: null })] }),
+    );
+    const main = rows.exercises.find((exercise) => exercise.role === 'main');
+    expect(main?.trainingMaxWeight).toBeNull();
+    expect(main?.trainingMaxPct).toBe(0.9);
+    expect(rows.routine.plannedJokers).toBe(0);
+  });
+
+  it('builds with assistance but no start weight', () => {
+    const rows = buildWaveRoutineRows(
+      draft({
+        days: [
+          day({
+            assistanceStartWeight: null,
+            assistance: [assistance('Chin-Up', 4, 8)],
+          }),
+        ],
+      }),
+    );
+    for (const exercise of rows.exercises.filter((e) => e.role === 'accessory')) {
+      expect(exercise.absoluteWeight).toBeNull();
     }
+  });
+
+  it('defaults the bar profile from the day equipment, planned jokers from the draft', () => {
+    const rows = buildWaveRoutineRows(
+      draft({
+        plannedJokers: 2,
+        days: [
+          day({
+            key: 'd1',
+            equipment: 'barbell',
+            assistance: [assistance('Chin-Up', 4, 8)],
+          }),
+        ],
+      }),
+    );
+    expect(rows.routine.plannedJokers).toBe(2);
+    const main = rows.exercises.find((exercise) => exercise.role === 'main');
+    expect(main?.barProfile).toBe('olympic');
+    const accessory = rows.exercises.find((exercise) => exercise.role === 'accessory');
+    expect(accessory?.barProfile).toBeNull();
   });
 
   it('rejects duplicate weekdays', () => {
@@ -281,23 +317,6 @@ describe('buildWaveRoutineRows — valid input to CHECK-valid rows', () => {
     expect(() =>
       buildWaveRoutineRows(draft({ days: [day({ liftName: ' ' })] })),
     ).toThrowError(WaveSetupValidationError);
-  });
-
-  it('rejects a day with assistance but no start weight', () => {
-    try {
-      buildWaveRoutineRows(
-        draft({
-          days: [
-            day({
-              assistanceStartWeight: null,
-              assistance: [assistance('Chin-Up', 4, 8)],
-            }),
-          ],
-        }),
-      );
-    } catch (error) {
-      expectThrows(error, 'assistanceStartWeightMissing');
-    }
   });
 
   it('rejects unnamed assistance and non-positive sets/reps', () => {

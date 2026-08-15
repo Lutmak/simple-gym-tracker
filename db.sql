@@ -1,4 +1,4 @@
--- db.sql — Iteration 3 schema reference.
+-- db.sql — Iteration 3 + M2 schema reference.
 
 -- This file is DOCUMENTATION ONLY and is never executed. The executable DDL lives in
 -- utils/schema.ts (SCHEMA_STATEMENTS / DROP_STATEMENTS) and runs from initialiseSchema
@@ -21,9 +21,11 @@
 -- ============================================================================
 -- History rows copy exercise_name, sets and reps at log time and never reference
 -- the plan by ID for display. Workout_Log → Logged_Exercises → Weight_Log keep
--- their columns; Weight_Log gains the per-row unit from §3.7. Legacy databases
--- (the bundled assets/SimpleDB.db) get the column via ensureWeightLogUnitColumn,
--- a guarded ALTER that runs inside runSchema.
+-- their columns; Weight_Log gains the per-row unit from §3.7 and the per-set
+-- timing columns from §3.9 (started_at / completed_at, epoch milliseconds).
+-- Legacy databases (the bundled assets/SimpleDB.db) get the columns via
+-- ensureWeightLogUnitColumn / ensureWeightLogTimingColumns, guarded ALTERs that
+-- run inside runSchema.
 
 CREATE TABLE IF NOT EXISTS Workouts (
     workout_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -73,6 +75,8 @@ CREATE TABLE IF NOT EXISTS Weight_Log (
     weight_logged REAL NOT NULL,
     reps_logged INTEGER NOT NULL,
     unit TEXT NOT NULL DEFAULT 'kg' CHECK (unit IN ('kg', 'lb')),
+    started_at INTEGER,
+    completed_at INTEGER,
     FOREIGN KEY (workout_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE CASCADE,
     FOREIGN KEY (logged_exercise_id) REFERENCES Logged_Exercises(logged_exercise_id),
     UNIQUE (workout_log_id, logged_exercise_id, set_number)
@@ -115,6 +119,8 @@ CREATE INDEX IF NOT EXISTS Catalog_Exercise_Muscles_muscle
 -- Exactly one routine is active (partial unique index). routine_key is the
 -- stable key for seeded rows (INSERT OR IGNORE); user routines leave it NULL.
 -- weekday uses Date.getDay(): 0 = Sunday … 6 = Saturday.
+-- planned_jokers (SPECS.md §3.4): how many jokers a wave routine plans ahead,
+-- 0 = off. Only meaningful for progression_rule 'wave'; other rules ignore it.
 
 CREATE TABLE IF NOT EXISTS Routines (
     routine_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -127,7 +133,8 @@ CREATE TABLE IF NOT EXISTS Routines (
     rest_main_seconds INTEGER NOT NULL CHECK (rest_main_seconds >= 0),
     rest_accessory_seconds INTEGER NOT NULL CHECK (rest_accessory_seconds >= 0),
     is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0, 1)),
-    created_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    planned_jokers INTEGER NOT NULL DEFAULT 0 CHECK (planned_jokers >= 0)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS Routines_single_active
@@ -145,12 +152,19 @@ CREATE TABLE IF NOT EXISTS Sessions (
 
 -- Load derivation: load_source decides which columns are meaningful.
 --   training_max_pct → training_max_pct (fraction 0..1 of the training max) +
---                      training_max_weight (the exercise's current training max)
---   absolute         → absolute_weight
+--                      training_max_weight (the exercise's current training max;
+--                      NULL until the first session is logged — targets are
+--                      learned, never demanded, SPECS.md §3.2)
+--   absolute         → absolute_weight (also NULL until the first log)
 --   bodyweight       → neither
 -- unit_override is the per-exercise unit from §3.7 (NULL = routine unit).
 -- is_amrap marks the final set as AMRAP: target_reps is the minimum, the actual
 -- reps are recorded in Weight_Log.
+-- bar_profile / bar_weight (SPECS.md §3.5): which bar the exercise is
+-- performed with and, for the 'custom' profile, its weight in the exercise's
+-- unit. Defaulted from the catalog's equipment field at copy time
+-- (utils/barProfiles.ts — only 'barbell' maps to the olympic profile);
+-- NULL means no bar. The stored number is always the TOTAL load, bar included.
 CREATE TABLE IF NOT EXISTS SessionExercises (
     session_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     session_id INTEGER NOT NULL,
@@ -166,15 +180,16 @@ CREATE TABLE IF NOT EXISTS SessionExercises (
     unit_override TEXT CHECK (unit_override IS NULL OR unit_override IN ('kg', 'lb')),
     is_amrap INTEGER NOT NULL DEFAULT 0 CHECK (is_amrap IN (0, 1)),
     sort_order INTEGER NOT NULL CHECK (sort_order > 0),
+    bar_profile TEXT CHECK (bar_profile IS NULL OR bar_profile IN ('olympic', 'semi-olympic', 'smith', 'ez', 'custom')),
+    bar_weight REAL,
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
     UNIQUE (session_id, sort_order),
     CHECK (
       (load_source = 'training_max_pct'
-        AND training_max_pct IS NOT NULL AND training_max_weight IS NOT NULL
+        AND training_max_pct IS NOT NULL
         AND absolute_weight IS NULL)
       OR (load_source = 'absolute'
-        AND absolute_weight IS NOT NULL
         AND training_max_pct IS NULL AND training_max_weight IS NULL)
       OR (load_source = 'bodyweight'
         AND absolute_weight IS NULL AND training_max_pct IS NULL AND training_max_weight IS NULL)

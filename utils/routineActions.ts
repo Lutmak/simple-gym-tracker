@@ -5,13 +5,19 @@
  * rows into Routines/Sessions/SessionExercises, and everything the user does
  * afterwards acts on the copy. Preset_* tables are never written.
  *
- * `buildRoutineCopyRows` is the pure core — preset rows carry no weights, so the
- * caller supplies a training max per `training_max_pct` exercise and a starting
- * weight per `absolute` exercise; duplicates reuse the source rows' own values.
- * The thin edges load source rows, build the copy, and write it in one
- * transaction. The same transaction clears any other active routine, which is
- * what the partial unique index `Routines_single_active` enforces.
+ * `buildRoutineCopyRows` is the pure core. A routine is valid with no loads
+ * (§3.2 — weights are learned, never demanded): weight fields the caller does
+ * not supply stay NULL on the copy, and the first logged session fills them
+ * in (utils/learnedWeights.ts). Bar profiles come from the catalog's
+ * equipment at copy time (utils/barProfiles.ts), or from the source row when
+ * one is already stored. The thin edges load source rows, build the copy, and
+ * write it in one transaction. The same transaction clears any other active
+ * routine, which is what the partial unique index `Routines_single_active`
+ * enforces.
  */
+
+import { defaultBarProfileForEquipment, type BarProfileKey } from './barProfiles';
+import { usableWeight } from './learnedWeights';
 
 export type RoutineUnit = 'kg' | 'lb';
 export type RoutineLoadSource = 'training_max_pct' | 'absolute' | 'bodyweight';
@@ -34,6 +40,8 @@ export interface RoutineSource {
   description: string | null;
   philosophy: string | null;
   recommendedDays: number | null;
+  /** How many jokers a wave routine plans ahead (§3.4); 0 = off. */
+  plannedJokers: number;
 }
 
 export interface SessionSource {
@@ -59,6 +67,11 @@ export interface ExerciseSource {
   unitOverride: RoutineUnit | null;
   isAmrap: boolean;
   sortOrder: number;
+  /** The catalog equipment, when the source is a preset — the bar-profile default. */
+  equipment: string | null;
+  /** A bar profile already stored on the row (user routines). */
+  barProfile: BarProfileKey | null;
+  barWeight: number | null;
 }
 
 export interface RoutineSourceBundle {
@@ -84,6 +97,7 @@ export interface RoutineCopyRows {
     restAccessorySeconds: number;
     isActive: boolean;
     createdAt: number;
+    plannedJokers: number;
   };
   sessions: { weekday: number; name: string; sortOrder: number }[];
   exercises: {
@@ -100,14 +114,19 @@ export interface RoutineCopyRows {
     unitOverride: RoutineUnit | null;
     isAmrap: boolean;
     sortOrder: number;
+    barProfile: BarProfileKey | null;
+    barWeight: number | null;
   }[];
 }
 
 /**
  * The rows an activation or duplicate inserts. Weight resolution per load
- * source matches the SessionExercises CHECK constraint exactly: a training-max
- * exercise carries both percentage and weight, an absolute exercise carries
- * only its weight, bodyweight carries none.
+ * source matches the SessionExercises CHECK constraint exactly — and a weight
+ * the caller does not supply stays NULL: a routine is valid with no loads,
+ * and the first logged session learns the baseline (§3.2). A training-max
+ * exercise carries its percentage (0.9 by convention) and whatever training
+ * max it has; an absolute exercise carries only its weight; bodyweight
+ * carries none.
  */
 export function buildRoutineCopyRows(
   source: RoutineSourceBundle,
@@ -131,21 +150,17 @@ export function buildRoutineCopyRows(
     let absoluteWeight: number | null = null;
 
     if (exercise.loadSource === 'training_max_pct') {
+      const inputWeight = weightInputs.get(exercise.exerciseId)?.trainingMaxWeight ?? null;
+      // A non-positive input (an emptied field) is not a load — it stays NULL
+      // until the first logged session learns it (§3.2).
       trainingMaxWeight =
-        weightInputs.get(exercise.exerciseId)?.trainingMaxWeight ??
-        exercise.trainingMaxWeight;
-      if (trainingMaxWeight === null || trainingMaxWeight <= 0) {
-        throw new Error(`Training max missing for ${exercise.name}`);
-      }
+        usableWeight(inputWeight) ?? exercise.trainingMaxWeight;
       if (trainingMaxPct === null) {
         trainingMaxPct = 0.9;
       }
     } else if (exercise.loadSource === 'absolute') {
-      absoluteWeight =
-        weightInputs.get(exercise.exerciseId)?.absoluteWeight ?? exercise.absoluteWeight;
-      if (absoluteWeight === null || absoluteWeight <= 0) {
-        throw new Error(`Starting weight missing for ${exercise.name}`);
-      }
+      const inputWeight = weightInputs.get(exercise.exerciseId)?.absoluteWeight ?? null;
+      absoluteWeight = usableWeight(inputWeight) ?? exercise.absoluteWeight;
     }
 
     return {
@@ -162,6 +177,9 @@ export function buildRoutineCopyRows(
       unitOverride: exercise.unitOverride,
       isAmrap: exercise.isAmrap,
       sortOrder: exercise.sortOrder,
+      barProfile:
+        exercise.barProfile ?? defaultBarProfileForEquipment(exercise.equipment),
+      barWeight: exercise.barWeight,
     };
   });
 
@@ -182,6 +200,7 @@ export function buildRoutineCopyRows(
       restAccessorySeconds: source.routine.restAccessorySeconds,
       isActive: copy.isActive,
       createdAt: Date.now(),
+      plannedJokers: source.routine.plannedJokers,
     },
     sessions: source.sessions.map((session) => ({
       weekday: session.weekday,
@@ -237,6 +256,9 @@ const toExerciseSource = (row: Record<string, unknown>): ExerciseSource => ({
   unitOverride: nullableStr(row.unit_override) as RoutineUnit | null,
   isAmrap: num(row.is_amrap) === 1,
   sortOrder: num(row.sort_order),
+  equipment: nullableStr(row.equipment),
+  barProfile: nullableStr(row.bar_profile) as BarProfileKey | null,
+  barWeight: nullableNum(row.bar_weight),
 });
 
 export async function loadPresetRoutineSource(
@@ -261,9 +283,11 @@ export async function loadPresetRoutineSource(
   const exerciseRows = await db.getAll(
     `SELECT e.preset_session_exercise_id AS exercise_id, e.preset_session_id AS session_id,
             e.catalog_exercise_id, e.exercise_name AS name, e.role, e.target_sets,
-            e.target_reps, e.load_source, e.training_max_pct, e.is_amrap, e.sort_order
+            e.target_reps, e.load_source, e.training_max_pct, e.is_amrap, e.sort_order,
+            c.equipment
      FROM Preset_SessionExercises e
      JOIN Preset_Sessions s ON s.preset_session_id = e.preset_session_id
+     LEFT JOIN Catalog_Exercises c ON c.exercise_key = e.catalog_exercise_id
      WHERE s.routine_key = ? ORDER BY s.sort_order, e.sort_order;`,
     [presetKey],
   );
@@ -282,6 +306,7 @@ export async function loadPresetRoutineSource(
       description: nullableStr(routineRow.description),
       philosophy: nullableStr(routineRow.philosophy),
       recommendedDays: nullableNum(routineRow.recommended_days),
+      plannedJokers: 0,
     },
     sessions: sessionRows.map(toSessionSource),
     exercises: exerciseRows.map(toExerciseSource),
@@ -294,7 +319,8 @@ export async function loadRoutineSourceById(
 ): Promise<RoutineSourceBundle> {
   const routineRow = await db.get(
     `SELECT routine_id, routine_key, name, origin, progression_rule, unit,
-            rounding_increment, rest_main_seconds, rest_accessory_seconds, is_active
+            rounding_increment, rest_main_seconds, rest_accessory_seconds, is_active,
+            planned_jokers
      FROM Routines WHERE routine_id = ?;`,
     [routineId],
   );
@@ -311,7 +337,7 @@ export async function loadRoutineSourceById(
     `SELECT e.session_exercise_id AS exercise_id, e.session_id, e.catalog_exercise_id,
             e.exercise_name AS name, e.role, e.target_sets, e.target_reps, e.load_source,
             e.training_max_pct, e.training_max_weight, e.absolute_weight, e.unit_override,
-            e.is_amrap, e.sort_order
+            e.is_amrap, e.sort_order, e.bar_profile, e.bar_weight, NULL AS equipment
      FROM SessionExercises e
      JOIN Sessions s ON s.session_id = e.session_id
      WHERE s.routine_id = ? ORDER BY s.sort_order, e.sort_order;`,
@@ -332,6 +358,7 @@ export async function loadRoutineSourceById(
       description: null,
       philosophy: null,
       recommendedDays: null,
+      plannedJokers: nullableNum(routineRow.planned_jokers) ?? 0,
     },
     sessions: sessionRows.map(toSessionSource),
     exercises: exerciseRows.map(toExerciseSource),
@@ -347,8 +374,8 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
     await db.run(
       `INSERT INTO Routines
          (routine_key, name, origin, progression_rule, unit, rounding_increment,
-          rest_main_seconds, rest_accessory_seconds, is_active, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          rest_main_seconds, rest_accessory_seconds, is_active, created_at, planned_jokers)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         rows.routine.routineKey,
         rows.routine.name,
@@ -360,6 +387,7 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
         rows.routine.restAccessorySeconds,
         rows.routine.isActive ? 1 : 0,
         rows.routine.createdAt,
+        rows.routine.plannedJokers,
       ],
     );
     const routineIdRow = await db.get('SELECT last_insert_rowid() AS id;', []);
@@ -390,8 +418,8 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
         `INSERT INTO SessionExercises
            (session_id, catalog_exercise_id, exercise_name, role, target_sets, target_reps,
             load_source, training_max_pct, training_max_weight, absolute_weight,
-            unit_override, is_amrap, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+            unit_override, is_amrap, sort_order, bar_profile, bar_weight)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           sessionId,
           exercise.catalogExerciseId,
@@ -406,6 +434,8 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
           exercise.unitOverride,
           exercise.isAmrap ? 1 : 0,
           exercise.sortOrder,
+          exercise.barProfile,
+          exercise.barWeight,
         ],
       );
     }

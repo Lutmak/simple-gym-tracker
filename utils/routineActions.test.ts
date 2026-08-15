@@ -14,6 +14,7 @@ import {
   type RoutineSourceBundle,
   type RoutineWeightInputs,
 } from './routineActions';
+import { defaultBarProfileForEquipment } from './barProfiles';
 
 type TestExecutor = SchemaExecutor & {
   get: RoutineDatabase['get'];
@@ -64,6 +65,7 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
       description: 'A simple two-day upper/lower split.',
       philosophy: 'Fewer days, more focus.',
       recommendedDays: 2,
+      plannedJokers: 0,
     },
     sessions: [
       { sessionId: 11, weekday: 1, name: 'Upper', sortOrder: 1 },
@@ -85,6 +87,9 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         unitOverride: null,
         isAmrap: false,
         sortOrder: 1,
+        equipment: 'dumbbell',
+        barProfile: null,
+        barWeight: null,
       },
       {
         exerciseId: 102,
@@ -101,6 +106,9 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         unitOverride: null,
         isAmrap: false,
         sortOrder: 2,
+        equipment: 'dumbbell',
+        barProfile: null,
+        barWeight: null,
       },
       {
         exerciseId: 103,
@@ -117,6 +125,9 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         unitOverride: null,
         isAmrap: false,
         sortOrder: 1,
+        equipment: 'body only',
+        barProfile: null,
+        barWeight: null,
       },
     ],
   });
@@ -182,26 +193,84 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
     expect(rows.routine.roundingIncrement).toBe(5);
   });
 
-  it('throws when a training-max exercise has no training max', () => {
-    expect(() =>
-      buildRoutineCopyRows(
-        bundle(),
-        'kg',
-        new Map(),
-        { routineKey: 'split-it', origin: 'catalog', isActive: true },
-      ),
-    ).toThrow(/training max/i);
+  it('passes a missing training max and starting weight through as NULL — no blocking', () => {
+    const rows = buildRoutineCopyRows(
+      bundle(),
+      'kg',
+      new Map(),
+      { routineKey: 'split-it', origin: 'catalog', isActive: true },
+    );
+    const [press, curl] = rows.exercises;
+    expect(press.trainingMaxWeight).toBeNull();
+    expect(curl.absoluteWeight).toBeNull();
+    expect(press.trainingMaxPct).toBe(0.9);
   });
 
-  it('throws when an absolute exercise has no starting weight', () => {
-    expect(() =>
-      buildRoutineCopyRows(
-        bundle(),
-        'kg',
-        new Map([[101, { trainingMaxWeight: 100, absoluteWeight: null }]]),
-        { routineKey: 'split-it', origin: 'catalog', isActive: true },
-      ),
-    ).toThrow(/weight/i);
+  it('treats a zero input (an emptied field) as no load, not a 0 weight', () => {
+    const rows = buildRoutineCopyRows(
+      bundle(),
+      'kg',
+      new Map([
+        [101, { trainingMaxWeight: 0, absoluteWeight: null }],
+        [102, { trainingMaxWeight: null, absoluteWeight: 0 }],
+      ]),
+      { routineKey: 'split-it', origin: 'catalog', isActive: true },
+    );
+    const [press, curl] = rows.exercises;
+    expect(press.trainingMaxWeight).toBeNull();
+    expect(curl.absoluteWeight).toBeNull();
+  });
+
+  it('defaults the bar profile from the catalog equipment at copy time', () => {
+    const barbell = { ...bundle() };
+    barbell.exercises = [
+      {
+        ...barbell.exercises[0],
+        catalogExerciseId: 'Barbell_Full_Squat',
+        name: 'Barbell Full Squat',
+        equipment: 'barbell',
+      },
+    ];
+    const rows = buildRoutineCopyRows(
+      barbell,
+      'kg',
+      new Map(),
+      { routineKey: 'split-it', origin: 'catalog', isActive: true },
+    );
+    expect(rows.exercises[0].barProfile).toBe('olympic');
+    expect(rows.exercises[0].barWeight).toBeNull();
+  });
+
+  it('keeps a stored bar profile and custom weight from a user routine', () => {
+    const source = { ...bundle() };
+    source.exercises = [
+      {
+        ...source.exercises[0],
+        barProfile: 'custom',
+        barWeight: 27.5,
+        equipment: 'barbell',
+      },
+    ];
+    const rows = buildRoutineCopyRows(
+      source,
+      'kg',
+      new Map(),
+      { routineKey: null, origin: 'user', isActive: false },
+    );
+    expect(rows.exercises[0].barProfile).toBe('custom');
+    expect(rows.exercises[0].barWeight).toBe(27.5);
+  });
+
+  it('carries planned jokers from the source routine', () => {
+    const source = { ...bundle() };
+    source.routine = { ...source.routine, plannedJokers: 2 };
+    const rows = buildRoutineCopyRows(
+      source,
+      'kg',
+      new Map(),
+      { routineKey: null, origin: 'user', isActive: false },
+    );
+    expect(rows.routine.plannedJokers).toBe(2);
   });
 });
 
@@ -267,6 +336,72 @@ describe("activation — copying a preset into the user's routines", () => {
       } else {
         expect(row.absolute_weight).toBeNull();
       }
+    }
+  });
+
+  it('activates a preset with ZERO weight input — weights start NULL (§3.2)', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    const source = await loadPresetRoutineSource(executor, '531');
+    const { routineId, copied } = await activatePresetRoutine(executor, '531', 'kg', new Map());
+    expect(copied).toBe(true);
+
+    const rows = db
+      .prepare(
+        `SELECT e.load_source, e.training_max_pct, e.training_max_weight, e.absolute_weight,
+                e.bar_profile
+         FROM SessionExercises e JOIN Sessions s ON s.session_id = e.session_id
+         WHERE s.routine_id = ? ORDER BY s.sort_order, e.sort_order;`,
+      )
+      .all(routineId) as {
+      load_source: string;
+      training_max_pct: number | null;
+      training_max_weight: number | null;
+      absolute_weight: number | null;
+      bar_profile: string | null;
+    }[];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.training_max_weight).toBeNull();
+      expect(row.absolute_weight).toBeNull();
+    }
+    const mains = rows.filter((row) => row.load_source === 'training_max_pct');
+    expect(mains.length).toBeGreaterThan(0);
+    for (const main of mains) {
+      expect(main.training_max_pct).toBe(0.9);
+    }
+    // The bar profile defaults from each exercise's catalog equipment.
+    const expectedBySource = source.exercises.map(
+      (exercise) => defaultBarProfileForEquipment(exercise.equipment),
+    );
+    expect(rows.map((row) => row.bar_profile)).toEqual(expectedBySource);
+    expect(rows.some((row) => row.bar_profile === 'olympic')).toBe(true);
+    expect(rows.some((row) => row.bar_profile === null)).toBe(true);
+  });
+
+  it('activates a linear preset with absolute loads at ZERO weight input too', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    const source = await loadPresetRoutineSource(executor, 'bro-split');
+    const { routineId } = await activatePresetRoutine(executor, 'bro-split', 'kg', new Map());
+
+    const rows = db
+      .prepare(
+        `SELECT e.load_source, e.absolute_weight, e.training_max_weight
+         FROM SessionExercises e JOIN Sessions s ON s.session_id = e.session_id
+         WHERE s.routine_id = ? AND e.load_source = 'absolute';`,
+      )
+      .all(routineId) as {
+      load_source: string;
+      absolute_weight: number | null;
+      training_max_weight: number | null;
+    }[];
+    expect(rows.length).toBe(source.exercises.filter((e) => e.loadSource === 'absolute').length);
+    for (const row of rows) {
+      expect(row.absolute_weight).toBeNull();
+      expect(row.training_max_weight).toBeNull();
     }
   });
 

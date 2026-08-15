@@ -6,12 +6,16 @@ import { runSchema, type SchemaExecutor } from './schema';
 import { loadDemoData, type DemoDatabase } from './demoData';
 import {
   applyReview,
+  buildCycleHistory,
   editProposalValue,
   generateReview,
   loadCycleReview,
   loadReviewEntry,
+  plannedWorkSets,
   resolveProposal,
   startNextCycle,
+  type PerformedSetGroup,
+  type ReviewExercise,
 } from './cycleReview';
 import type { RoutineDatabase } from './routineActions';
 
@@ -48,8 +52,7 @@ const countWhere = (db: DatabaseSync, table: string, where: string, ...params: S
   (db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${where}`).get(...params) as { n: number }).n;
 
 /** Resolves every session of a demo week as completed without a log. */
-const resolveDemoWeek = async (executor: TestExecutor, weekNumber: number): Promise<void> => {
-  await executor.run(
+const resolveDemoWeek = async (executor: TestExecutor, weekNumber: number): Promise<void> => {  await executor.run(
     `UPDATE WeekSessions SET status = 'completed', resolved_on_date = 1
      WHERE week_session_id IN (
        SELECT ws.week_session_id FROM WeekSessions ws
@@ -207,6 +210,68 @@ const setupWaveFixture = async (
 
   return { db, executor, routineId, cycleId, exerciseId };
 };
+
+describe('plannedWorkSets — extra sets never reach a proposal or the AMRAP view (§3.4)', () => {
+  const group = (overrides: Partial<PerformedSetGroup> = {}): PerformedSetGroup => ({
+    cycleNumber: 1,
+    weekNumber: 1,
+    exerciseName: 'Barbell Full Squat',
+    sets: [
+      { weight: 100, reps: 5, unit: 'kg' },
+      { weight: 100, reps: 5, unit: 'kg' },
+      { weight: 100, reps: 5, unit: 'kg' },
+      { weight: 110, reps: 3, unit: 'kg' },
+      { weight: 115, reps: 1, unit: 'kg' },
+    ],
+    ...overrides,
+  });
+
+  const exercise = (overrides: Partial<ReviewExercise> = {}): ReviewExercise => ({
+    sessionExerciseId: 1,
+    catalogExerciseId: 'Barbell_Full_Squat',
+    name: 'Barbell Full Squat',
+    role: 'main',
+    targetSets: 3,
+    targetReps: 5,
+    loadSource: 'absolute',
+    absoluteWeight: 100,
+    trainingMaxWeight: null,
+    trainingMaxPct: null,
+    unitOverride: null,
+    isAmrap: true,
+    ...overrides,
+  });
+
+  it('cuts every group to the exercise planned set count', () => {
+    const groups = plannedWorkSets([group()], [exercise()]);
+    expect(groups[0].sets).toEqual([
+      { weight: 100, reps: 5, unit: 'kg' },
+      { weight: 100, reps: 5, unit: 'kg' },
+      { weight: 100, reps: 5, unit: 'kg' },
+    ]);
+  });
+
+  it('leaves a group untouched when no exercise matches its name', () => {
+    const groups = plannedWorkSets(
+      [group({ exerciseName: 'Mystery Exercise' })],
+      [exercise({ name: 'Other Exercise' })],
+    );
+    expect(groups[0].sets).toHaveLength(5);
+  });
+
+  it('the truncated history feeds buildCycleHistory, so the AMRAP set is the last PLANNED set', () => {
+    const history = buildCycleHistory(
+      'wave',
+      [{ cycleId: 1, cycleNumber: 1, weeks: 4, status: 'active', currentWeek: 1 }],
+      [exercise()],
+      plannedWorkSets([group()], [exercise()]),
+      [],
+    );
+    const sets = history[0].exercises[1].sets;
+    expect(sets).toHaveLength(3);
+    expect(sets[2]).toEqual({ weight: 100, reps: 5, unit: 'kg' });
+  });
+});
 
 describe('G1 — generation: a resolved week produces pending proposals', () => {
   it('proposes the increment for met targets and a hold with a reason for misses', async () => {

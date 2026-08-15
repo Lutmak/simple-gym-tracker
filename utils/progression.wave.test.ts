@@ -252,6 +252,71 @@ describe('progression — wave rule', () => {
     });
   });
 
+  it('an extra set does not become the AMRAP set — the proposal reads the planned sets (§3.4)', () => {
+    const weekWithJoker: CycleHistory = {
+      cycleNumber: 1,
+      exercises: {
+        [bench.identifier]: {
+          sets: [
+            { reps: 5, weight: 60, unit: 'kg' },
+            { reps: 5, weight: 60, unit: 'kg' },
+            { reps: 5, weight: 85, unit: 'kg' },
+            { reps: 3, weight: 90, unit: 'kg' },
+          ],
+          proposalStatus: null,
+        },
+      },
+    };
+
+    const withoutExtra = proposeNextTargets(routine(), [entry({ reps: 5, weight: 85 })]);
+    const withExtra = proposeNextTargets(routine(), [weekWithJoker]);
+
+    expect(withExtra).toEqual(withoutExtra);
+  });
+
+  it('extra sets in every week leave the cycle-end TM proposal unchanged', () => {
+    const weekWithJoker = (weekNumber: number, amrap: { reps: number; weight: number }): CycleHistory => {
+      const weights = [60, 60, amrap.weight, amrap.weight + 5];
+      const reps = [5, 5, amrap.reps, 3];
+      return {
+        cycleNumber: weekNumber,
+        exercises: {
+          [bench.identifier]: {
+            sets: weights.map((weight, index) => ({
+              reps: reps[index],
+              weight,
+              unit: 'kg' as const,
+            })),
+            proposalStatus: null,
+          },
+        },
+      };
+    };
+
+    const plain = [
+      entry({ reps: 5, weight: 85 }),
+      entry({ reps: 3, weight: 90 }),
+      entry({ reps: 5, weight: 95 }),
+      entry({ reps: 5, weight: 60 }),
+    ];
+    const withJokers = [
+      weekWithJoker(1, { reps: 5, weight: 85 }),
+      weekWithJoker(2, { reps: 3, weight: 90 }),
+      weekWithJoker(3, { reps: 5, weight: 95 }),
+      weekWithJoker(4, { reps: 5, weight: 60 }),
+    ];
+
+    const plainProposals = proposeNextTargets(routine(), plain);
+    const jokerProposals = proposeNextTargets(routine(), withJokers);
+
+    expect(jokerProposals[1]).toMatchObject({
+      currentTarget: 100,
+      proposedTarget: 102.5,
+      reason: 'hiciste 5, 3, 5 con 85 kg, 90 kg, 95 kg',
+    });
+    expect(jokerProposals).toEqual(plainProposals);
+  });
+
   it('uses the lower-body increment for a lower exercise', () => {
     const proposals = proposeNextTargets(
       routine({}, [{ ...bench, category: 'lower' }]),

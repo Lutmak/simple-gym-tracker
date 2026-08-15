@@ -7,17 +7,27 @@
  * time), and one Weight_Log row per logged WORK set, sequenced 1..N with no
  * gaps (the B0.3 renumbering argument: work sets only, so the
  * UNIQUE(workout_log_id, logged_exercise_id, set_number) constraint always
- * holds). Warm-ups never reach the draft — they are a UI affordance derived
- * from the first work set's target via `warmupSetsFor` and live only in
- * component state — so they can never enter Weight_Log by construction.
+ * holds). A draft may carry MORE sets than the plan (§3.4 extra sets): they
+ * append after the planned ones, enter history like any other set and count
+ * toward volume, and never move a progression proposal — the engine reads
+ * only the first `targetSets` sets (utils/progression.ts). Warm-ups never
+ * reach the draft — they are a UI affordance derived from the first work
+ * set's target via `warmupSetsFor` and live only in component state — so
+ * they can never enter Weight_Log by construction.
  *
- * The thin edges: `loadRunnerSession` (the WeekSessions row, its exercises and
- * the routine context) and `saveSessionLog` (writes everything in ONE
- * transaction and marks the WeekSessions row completed with its log id, so an
- * abandoned session writes nothing).
+ * Per-set unit (§3.5): a set logged in the other unit keeps it — the row
+ * stores `set.unit ?? exerciseUnit`, and nothing converts it. Per-set timing
+ * (§3.9): `started_at` / `completed_at` are written from the set's
+ * timestamps, epoch milliseconds.
+ *
+ * The write path is `saveSessionLog` (writes everything in ONE transaction,
+ * marks the WeekSessions row completed with its log id, and learns the §3.2
+ * baseline for every exercise whose plan weight is still NULL — never
+ * overwriting a value the user set by hand; utils/learnedWeights.ts).
  */
 
 import { warmupSets } from './fiveThreeOne';
+import { inferBaselineWeight, baselineColumn } from './learnedWeights';
 import { targetWeightFor } from './today';
 import type {
   RoutineDatabase,
@@ -58,11 +68,17 @@ export interface LoggedSet {
   reps: number;
   /** Actual weight lifted; null for bodyweight exercises. */
   weight: number | null;
+  /** The unit this set was logged in; defaults to the exercise's unit. */
+  unit?: RoutineUnit;
+  /** Epoch milliseconds when the set started / was completed (§3.9). */
+  startedAt?: number;
+  completedAt?: number;
 }
 
 /**
  * The user's session in progress: per exercise, per target set, the actual
- * result or null (not yet logged). Warm-ups have no slot here.
+ * result or null (not yet logged). Extra sets (§3.4) are additional entries
+ * appended after the planned ones. Warm-ups have no slot here.
  */
 export type RunnerDraft = (LoggedSet | null)[][];
 
@@ -76,6 +92,8 @@ export interface RunnerLogRows {
     weight: number;
     reps: number;
     unit: RoutineUnit;
+    startedAt: number | null;
+    completedAt: number | null;
   }[];
 }
 
@@ -179,7 +197,9 @@ export function buildLogRows(session: RunnerSession, draft: RunnerDraft): Runner
         setNumber: index + 1,
         weight: set.weight ?? 0,
         reps: set.reps,
-        unit: exerciseUnit(exercise, session),
+        unit: set.unit ?? exerciseUnit(exercise, session),
+        startedAt: set.startedAt ?? null,
+        completedAt: set.completedAt ?? null,
       });
     });
   });
@@ -199,6 +219,53 @@ export interface SavedSession {
   workoutLogId: number;
   loggedSets: number;
   loggedExercises: number;
+}
+
+/**
+ * The §3.2 baseline write, inside the session transaction: for every exercise
+ * whose plan weight is still NULL, the first set the user actually logged
+ * becomes the baseline (training max for `training_max_pct`, starting load
+ * otherwise). The `IS NULL` guard is what makes it "learned, never demanded"
+ * — a value the user entered by hand is never overwritten, and an exercise
+ * that already has a baseline is never touched again.
+ */
+async function applyLearnedBaselines(
+  db: RoutineDatabase,
+  session: RunnerSession,
+  draft: RunnerDraft,
+): Promise<void> {
+  for (const [exerciseIndex, exercise] of session.exercises.entries()) {
+    const column = baselineColumn(exercise.loadSource);
+    if (column === null) {
+      continue;
+    }
+    const sets = draft[exerciseIndex] ?? [];
+    const first = sets.find((set): set is LoggedSet => set !== null);
+    if (first === undefined) {
+      continue;
+    }
+    const planUnit = exerciseUnit(exercise, session);
+    const baseline = inferBaselineWeight({
+      loadSource: exercise.loadSource,
+      trainingMaxPct: exercise.trainingMaxPct,
+      roundingIncrement: session.roundingIncrement,
+      planUnit,
+      set: {
+        weight: first.weight ?? 0,
+        reps: first.reps,
+        unit: first.unit ?? planUnit,
+      },
+    });
+    if (baseline === null) {
+      continue;
+    }
+    await db.run(
+      `UPDATE SessionExercises
+         SET ${column} = ?
+       WHERE session_exercise_id = ? AND ${column} IS NULL;`,
+      [baseline, exercise.sessionExerciseId],
+    );
+  }
 }
 
 /**
@@ -256,8 +323,8 @@ export async function saveSessionLog(
         await db.run(
           `INSERT INTO Weight_Log
              (workout_log_id, logged_exercise_id, exercise_name, set_number,
-              weight_logged, reps_logged, unit)
-           VALUES (?, ?, ?, ?, ?, ?, ?);`,
+              weight_logged, reps_logged, unit, started_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
           [
             workoutLogId,
             loggedExerciseId,
@@ -266,10 +333,14 @@ export async function saveSessionLog(
             set.weight,
             set.reps,
             set.unit,
+            set.startedAt,
+            set.completedAt,
           ],
         );
       }
     }
+
+    await applyLearnedBaselines(db, session, draft);
 
     const update = await db.run(
       `UPDATE WeekSessions

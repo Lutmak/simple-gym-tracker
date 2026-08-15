@@ -1,18 +1,21 @@
 /**
- * D5 — Today's session (SPECS.md D5, §3.3, §3.6).
+ * M1 — The session queue (SPECS.md §3.1).
  *
- * Pure core: `computeTodayState` classifies the active cycle's week-session rows
- * into "due today", "missed" and "next session" from the cycle's start date and
- * the caller's today stamp. Day stamps are whole UTC days (noon) in epoch
- * seconds — the same convention the demo data writes. The thin edges load the
- * rows (`loadTodayState`) and write a missed-session resolution
- * (`resolveMissedSession`).
+ * The active routine's sessions form an ordered queue; exactly one is ever
+ * offered. Pure core: `computeSessionQueue` derives the single head — the
+ * oldest unresolved past session ahead of today's, or today's session — and
+ * what becomes visible once the head is resolved. The resolution actions
+ * (`applyDoToday`, `applyMove`, `applyDiscard`) are pure transformations over
+ * the week-session rows, each with one thin writer below. A day has exactly
+ * one session slot by construction: do-today and move reject a target day
+ * that any other session already occupies, so sessions can never stack onto
+ * one day, and "do it today" cannot be answered twice for the same day.
  *
- * Missed-session rules: a pending session is missed when its nominal date
- * (derived from the cycle start, its week number and its weekday) is before
- * today and it carries no intent marker. "Do it today" records the intent by
- * setting `resolved_on_date` while leaving the status `pending`, so the prompt
- * never reappears and the session is surfaced as due today.
+ * Date convention is unchanged from Iteration 3: whole UTC days (noon) in
+ * epoch seconds. A session's nominal date derives from its cycle start, week
+ * number and weekday; a resolved session records the day it lands on in
+ * `resolved_on_date` (a discarded session records its nominal day — the day
+ * that counts as not done).
  */
 
 import { roundTo } from './progression';
@@ -78,14 +81,14 @@ export function targetWeightFor(
   }
 }
 
-export interface TodaySessionRow {
+export interface QueueSessionRow {
   sessionId: number;
   weekday: number;
   name: string;
   sortOrder: number;
 }
 
-export interface TodayExerciseRow {
+export interface QueueExerciseRow {
   sessionId: number;
   name: string;
   targetSets: number;
@@ -99,28 +102,37 @@ export interface TodayExerciseRow {
   sortOrder: number;
 }
 
-export interface TodayWeekSessionRow {
+export interface QueueCycleRow {
+  cycleId: number;
+  cycleNumber: number;
+  startedAt: number | null;
+}
+
+export interface QueueWeekSessionRow {
   weekSessionId: number;
+  cycleId: number;
   weekNumber: number;
   sessionId: number;
   status: 'pending' | 'completed' | 'moved' | 'discarded';
   resolvedOnDate: number | null;
 }
 
-export interface TodayStateInput {
+export interface SessionQueueInput {
   routine: {
     routineId: number;
     name: string;
     unit: RoutineUnit;
     roundingIncrement: number;
   } | null;
-  cycle: { startedAt: number | null; currentWeek: number; weeks: number } | null;
-  sessions: readonly TodaySessionRow[];
-  exercises: readonly TodayExerciseRow[];
-  weekSessions: readonly TodayWeekSessionRow[];
+  /** Every cycle of the routine — the queue spans cycles, not just the active one. */
+  cycles: readonly QueueCycleRow[];
+  sessions: readonly QueueSessionRow[];
+  exercises: readonly QueueExerciseRow[];
+  /** Every week session of the routine, all statuses (resolved rows occupy their day). */
+  weekSessions: readonly QueueWeekSessionRow[];
 }
 
-export interface TodayExercise {
+export interface QueuedExercise {
   name: string;
   targetSets: number;
   targetReps: number;
@@ -131,49 +143,144 @@ export interface TodayExercise {
   sortOrder: number;
 }
 
-export interface TodaySessionInfo {
+export interface QueuedSession {
   weekSessionId: number;
   sessionId: number;
   name: string;
   weekday: number;
-  /** The calendar date the session is due, in epoch day stamps. */
+  /** The day the session sits on now: the resolved day when due, the nominal day while unresolved. */
   date: number;
-  exercises: TodayExercise[];
+  /** The session's planned day — its cycle position, unchanged by do-today or move. */
+  originDate: number;
+  /**
+   * Whether "do it today" is available for this head (meaningful only while
+   * unresolved): false when another session already occupies today, which is
+   * exactly the stacking the queue exists to forbid.
+   */
+  doTodayAvailable: boolean;
+  exercises: QueuedExercise[];
 }
 
-export interface MissedSession {
-  weekSessionId: number;
-  sessionId: number;
-  name: string;
-  weekday: number;
-  /** The calendar date the session was originally scheduled for. */
-  date: number;
-}
-
-export interface NextSession {
-  name: string;
-  weekday: number;
-  date: number;
-  /** Null when derived from the plan alone, because no cycle exists yet. */
+export interface UpcomingSession {
+  /** Null when derived from the plan alone, because no cycle session exists. */
   weekSessionId: number | null;
+  sessionId: number | null;
+  name: string;
+  weekday: number;
+  date: number;
 }
 
-export interface TodayState {
-  routine: TodayStateInput['routine'];
-  dueToday: TodaySessionInfo[];
-  missed: MissedSession[];
-  nextSession: NextSession | null;
+export interface SessionQueueState {
+  routine: SessionQueueInput['routine'];
+  /**
+   * The one session ever offered. 'unresolved' — a missed session the user
+   * must resolve (do today / move / discard) before anything behind it shows;
+   * 'due' — start it. Null when nothing is pending today.
+   */
+  head: QueuedSession | null;
+  resolution: 'due' | 'unresolved' | null;
+  /** The next session after the head — what resolving the head reveals. */
+  upcoming: UpcomingSession | null;
 }
 
-export function computeTodayState(input: TodayStateInput, todayStamp: number): TodayState {
+interface QueueRow {
+  weekSession: QueueWeekSessionRow;
+  session: QueueSessionRow;
+  cycle: QueueCycleRow;
+  nominal: number;
+}
+
+/** Every week session with a datable cycle start, carrying its nominal date. */
+function buildQueueRows(input: SessionQueueInput): QueueRow[] {
+  const sessionById = new Map(input.sessions.map((session) => [session.sessionId, session]));
+  const cycleById = new Map(input.cycles.map((cycle) => [cycle.cycleId, cycle]));
+  const rows: QueueRow[] = [];
+  for (const weekSession of input.weekSessions) {
+    const session = sessionById.get(weekSession.sessionId);
+    const cycle = cycleById.get(weekSession.cycleId);
+    if (session === undefined || cycle === undefined || cycle.startedAt === null) {
+      continue;
+    }
+    rows.push({
+      weekSession,
+      session,
+      cycle,
+      nominal: nominalSessionStamp(cycle.startedAt, weekSession.weekNumber, session.weekday),
+    });
+  }
+  return rows;
+}
+
+const effectiveDay = (row: QueueRow): number => row.weekSession.resolvedOnDate ?? row.nominal;
+
+const byQueueOrder = (a: QueueRow, b: QueueRow): number =>
+  a.nominal - b.nominal ||
+  a.cycle.cycleNumber - b.cycle.cycleNumber ||
+  a.weekSession.weekSessionId - b.weekSession.weekSessionId;
+
+function buildHead(
+  headRow: QueueRow,
+  rows: readonly QueueRow[],
+  exercisesBySession: ReadonlyMap<number, QueueExerciseRow[]>,
+  routineUnit: RoutineUnit,
+  roundingIncrement: number,
+  todayStamp: number,
+): QueuedSession {
+  const exercises = exercisesBySession.get(headRow.session.sessionId) ?? [];
+  return {
+    weekSessionId: headRow.weekSession.weekSessionId,
+    sessionId: headRow.session.sessionId,
+    name: headRow.session.name,
+    weekday: headRow.session.weekday,
+    date: effectiveDay(headRow),
+    originDate: headRow.nominal,
+    doTodayAvailable: !rows.some(
+      (row) =>
+        row.weekSession.weekSessionId !== headRow.weekSession.weekSessionId &&
+        effectiveDay(row) === todayStamp,
+    ),
+    exercises: exercises.map((exercise) => ({
+      name: exercise.name,
+      targetSets: exercise.targetSets,
+      targetReps: exercise.targetReps,
+      targetWeight: targetWeightFor(exercise, roundingIncrement),
+      unit: exercise.unitOverride ?? routineUnit,
+      isAmrap: exercise.isAmrap,
+      sortOrder: exercise.sortOrder,
+    })),
+  };
+}
+
+/**
+ * The queue as an ordered list of pending sessions: a session resolved onto
+ * today ("do it today") is in progress and stays first — exactly one session
+ * is ever in progress; everything else follows its nominal date.
+ */
+function queueOrder(rows: readonly QueueRow[], todayStamp: number): QueueRow[] {
+  const pending = rows.filter((row) => row.weekSession.status === 'pending').sort(byQueueOrder);
+  const inProgress = pending.filter(
+    (row) => row.weekSession.resolvedOnDate === todayStamp,
+  );
+  if (inProgress.length === 0) {
+    return pending;
+  }
+  const inProgressIds = new Set(inProgress.map((row) => row.weekSession.weekSessionId));
+  return [...inProgress, ...pending.filter((row) => !inProgressIds.has(row.weekSession.weekSessionId))];
+}
+
+export function computeSessionQueue(
+  input: SessionQueueInput,
+  todayStamp: number,
+): SessionQueueState {
   const routine = input.routine;
-  const cycle = input.cycle;
   if (routine === null) {
-    return { routine: null, dueToday: [], missed: [], nextSession: null };
+    return { routine: null, head: null, resolution: null, upcoming: null };
   }
 
-  const sessionById = new Map(input.sessions.map((session) => [session.sessionId, session]));
-  const exercisesBySession = new Map<number, TodayExerciseRow[]>();
+  const rows = buildQueueRows(input);
+  const queue = queueOrder(rows, todayStamp);
+
+  const exercisesBySession = new Map<number, QueueExerciseRow[]>();
   for (const exercise of input.exercises) {
     const list = exercisesBySession.get(exercise.sessionId);
     if (list === undefined) {
@@ -186,105 +293,60 @@ export function computeTodayState(input: TodayStateInput, todayStamp: number): T
     list.sort((a, b) => a.sortOrder - b.sortOrder);
   }
 
-  if (cycle === null || cycle.startedAt === null) {
-    return {
-      routine,
-      dueToday: [],
-      missed: [],
-      nextSession: nextPlanSession(input.sessions, todayStamp),
-    };
+  let headRow: QueueRow | undefined;
+  let resolution: SessionQueueState['resolution'] = null;
+  const first = queue[0];
+  if (first !== undefined) {
+    if (first.weekSession.resolvedOnDate === todayStamp) {
+      headRow = first;
+      resolution = 'due';
+    } else if (first.weekSession.resolvedOnDate === null && first.nominal < todayStamp) {
+      headRow = first;
+      resolution = 'unresolved';
+    } else if (first.nominal === todayStamp) {
+      headRow = first;
+      resolution = 'due';
+    }
   }
 
-  const startedAt = cycle.startedAt;
-  const rows = input.weekSessions.flatMap((weekSession) => {
-    const session = sessionById.get(weekSession.sessionId);
-    if (session === undefined) {
-      return [];
-    }
-    return [
-      {
-        weekSession,
-        session,
-        nominal: nominalSessionStamp(startedAt, weekSession.weekNumber, session.weekday),
-      },
-    ];
-  });
-
-  const missed = rows
-    .filter(
-      ({ weekSession, nominal }) =>
-        weekSession.status === 'pending' &&
-        weekSession.resolvedOnDate === null &&
-        nominal < todayStamp,
-    )
-    .sort((a, b) => a.nominal - b.nominal)
-    .map(({ weekSession, session, nominal }) => ({
-      weekSessionId: weekSession.weekSessionId,
-      sessionId: session.sessionId,
-      name: session.name,
-      weekday: session.weekday,
-      date: nominal,
-    }));
-
-  const dueRows = rows
-    .filter(
-      ({ weekSession, nominal }) =>
-        weekSession.status === 'pending' &&
-        (nominal === todayStamp || weekSession.resolvedOnDate === todayStamp),
-    )
-    .sort((a, b) => a.nominal - b.nominal);
-
-  const dueToday = dueRows.map(({ weekSession, session, nominal }) => ({
-    weekSessionId: weekSession.weekSessionId,
-    sessionId: session.sessionId,
-    name: session.name,
-    weekday: session.weekday,
-    date: weekSession.resolvedOnDate ?? nominal,
-    exercises: (exercisesBySession.get(session.sessionId) ?? []).map((exercise) => ({
-      name: exercise.name,
-      targetSets: exercise.targetSets,
-      targetReps: exercise.targetReps,
-      targetWeight: targetWeightFor(exercise, routine.roundingIncrement),
-      unit: exercise.unitOverride ?? routine.unit,
-      isAmrap: exercise.isAmrap,
-      sortOrder: exercise.sortOrder,
-    })),
-  }));
-
-  const lastWeek = Math.min(cycle.currentWeek + 1, cycle.weeks);
-  const nextRow = rows
-    .filter(
-      ({ weekSession, nominal }) =>
-        weekSession.status === 'pending' &&
-        weekSession.resolvedOnDate === null &&
-        weekSession.weekNumber >= cycle.currentWeek &&
-        weekSession.weekNumber <= lastWeek &&
-        nominal > todayStamp,
-    )
-    .sort((a, b) => a.nominal - b.nominal)[0];
-
-  const nextSession: NextSession | null =
-    nextRow === undefined
+  const head: QueuedSession | null =
+    headRow === undefined
       ? null
+      : buildHead(
+          headRow,
+          rows,
+          exercisesBySession,
+          routine.unit,
+          routine.roundingIncrement,
+          todayStamp,
+        );
+
+  const upcomingRow = headRow === undefined ? queue[0] : queue[1];
+  const upcoming: UpcomingSession | null =
+    upcomingRow === undefined
+      ? headRow === undefined
+        ? nextPlanSession(input.sessions, todayStamp)
+        : null
       : {
-          name: nextRow.session.name,
-          weekday: nextRow.session.weekday,
-          date: nextRow.nominal,
-          weekSessionId: nextRow.weekSession.weekSessionId,
+          weekSessionId: upcomingRow.weekSession.weekSessionId,
+          sessionId: upcomingRow.session.sessionId,
+          name: upcomingRow.session.name,
+          weekday: upcomingRow.session.weekday,
+          date: effectiveDay(upcomingRow),
         };
 
-  return { routine, dueToday, missed, nextSession };
+  return { routine, head, resolution, upcoming };
 }
 
 /**
- * Plan-based fallback for a routine with no cycle (or one without a start
- * date): the next session by weekday order, never today itself — the session
- * is only actionable once a week row exists for it.
+ * Plan-based fallback when nothing is pending anywhere: the next session by
+ * weekday order, never today itself — a session is only actionable once a
+ * week row exists for it.
  */
 function nextPlanSession(
-  sessions: readonly TodaySessionRow[],
+  sessions: readonly QueueSessionRow[],
   todayStamp: number,
-): NextSession | null {
+): UpcomingSession | null {
   if (sessions.length === 0) {
     return null;
   }
@@ -302,6 +364,136 @@ function nextPlanSession(
     weekday: next.weekday,
     date: todayStamp + offset(next.weekday) * DAY_SECONDS,
     weekSessionId: null,
+    sessionId: null,
+  };
+}
+
+export type QueueApplyRejection = 'notPending' | 'dayOccupied' | 'undatable';
+
+export interface QueueApplySuccess {
+  ok: true;
+  /** The week-session rows with the resolution applied — the new queue state. */
+  weekSessions: QueueWeekSessionRow[];
+}
+
+export interface QueueApplyFailure {
+  ok: false;
+  reason: QueueApplyRejection;
+}
+
+export type QueueApplyOutcome = QueueApplySuccess | QueueApplyFailure;
+
+const pendingRow = (
+  input: SessionQueueInput,
+  rows: readonly QueueRow[],
+  weekSessionId: number,
+): QueueRow | undefined => {
+  const weekSession = input.weekSessions.find(
+    (row) => row.weekSessionId === weekSessionId,
+  );
+  if (weekSession === undefined || weekSession.status !== 'pending') {
+    return undefined;
+  }
+  return rows.find((row) => row.weekSession.weekSessionId === weekSessionId);
+};
+
+const dayOccupiedByOther = (
+  rows: readonly QueueRow[],
+  weekSessionId: number,
+  dayStamp: number,
+): boolean =>
+  rows.some(
+    (row) =>
+      row.weekSession.weekSessionId !== weekSessionId && effectiveDay(row) === dayStamp,
+  );
+
+const replaceWeekSession = (
+  input: SessionQueueInput,
+  weekSessionId: number,
+  patch: Partial<QueueWeekSessionRow>,
+): QueueWeekSessionRow[] =>
+  input.weekSessions.map((row) =>
+    row.weekSessionId === weekSessionId ? { ...row, ...patch } : row,
+  );
+
+/**
+ * "Do it today": the session becomes today's session and the queue head until
+ * it is resolved. Rejected when another session already occupies today — the
+ * one-per-day invariant, which is what makes stacking impossible.
+ */
+export function applyDoToday(
+  input: SessionQueueInput,
+  weekSessionId: number,
+  todayStamp: number,
+): QueueApplyOutcome {
+  const rows = buildQueueRows(input);
+  const target = pendingRow(input, rows, weekSessionId);
+  if (target === undefined) {
+    return { ok: false, reason: 'notPending' };
+  }
+  if (dayOccupiedByOther(rows, weekSessionId, todayStamp)) {
+    return { ok: false, reason: 'dayOccupied' };
+  }
+  return {
+    ok: true,
+    weekSessions: replaceWeekSession(input, weekSessionId, {
+      resolvedOnDate: todayStamp,
+    }),
+  };
+}
+
+/**
+ * "Move it": the session keeps its cycle position and exercises; only its day
+ * changes. Rejected when the target day already has any other session.
+ */
+export function applyMove(
+  input: SessionQueueInput,
+  weekSessionId: number,
+  targetStamp: number,
+): QueueApplyOutcome {
+  const rows = buildQueueRows(input);
+  const target = pendingRow(input, rows, weekSessionId);
+  if (target === undefined) {
+    return { ok: false, reason: 'notPending' };
+  }
+  if (dayOccupiedByOther(rows, weekSessionId, targetStamp)) {
+    return { ok: false, reason: 'dayOccupied' };
+  }
+  return {
+    ok: true,
+    weekSessions: replaceWeekSession(input, weekSessionId, {
+      status: 'moved',
+      resolvedOnDate: targetStamp,
+    }),
+  };
+}
+
+/**
+ * "Discard it": recorded as discarded on its nominal day — the day that
+ * counts as not done — never deleted silently. Never rejected on occupancy:
+ * discarding cannot place two sessions on one day.
+ */
+export function applyDiscard(
+  input: SessionQueueInput,
+  weekSessionId: number,
+): QueueApplyOutcome {
+  const weekSession = input.weekSessions.find(
+    (row) => row.weekSessionId === weekSessionId,
+  );
+  if (weekSession === undefined || weekSession.status !== 'pending') {
+    return { ok: false, reason: 'notPending' };
+  }
+  const rows = buildQueueRows(input);
+  const target = rows.find((row) => row.weekSession.weekSessionId === weekSessionId);
+  if (target === undefined) {
+    return { ok: false, reason: 'undatable' };
+  }
+  return {
+    ok: true,
+    weekSessions: replaceWeekSession(input, weekSessionId, {
+      status: 'discarded',
+      resolvedOnDate: target.nominal,
+    }),
   };
 }
 
@@ -312,14 +504,14 @@ const nullableNum = (value: unknown): number | null =>
 const nullableStr = (value: unknown): string | null =>
   value === null || value === undefined ? null : String(value);
 
-const toSessionRow = (row: Record<string, unknown>): TodaySessionRow => ({
+const toSessionRow = (row: Record<string, unknown>): QueueSessionRow => ({
   sessionId: num(row.session_id),
   weekday: num(row.weekday),
   name: str(row.name),
   sortOrder: num(row.sort_order),
 });
 
-const toExerciseRow = (row: Record<string, unknown>): TodayExerciseRow => ({
+const toExerciseRow = (row: Record<string, unknown>): QueueExerciseRow => ({
   sessionId: num(row.session_id),
   name: str(row.name),
   targetSets: num(row.target_sets),
@@ -333,47 +525,44 @@ const toExerciseRow = (row: Record<string, unknown>): TodayExerciseRow => ({
   sortOrder: num(row.sort_order),
 });
 
-const toWeekSessionRow = (row: Record<string, unknown>): TodayWeekSessionRow => ({
+const toCycleRow = (row: Record<string, unknown>): QueueCycleRow => ({
+  cycleId: num(row.cycle_id),
+  cycleNumber: num(row.cycle_number),
+  startedAt: nullableNum(row.started_at),
+});
+
+const toWeekSessionRow = (row: Record<string, unknown>): QueueWeekSessionRow => ({
   weekSessionId: num(row.week_session_id),
+  cycleId: num(row.cycle_id),
   weekNumber: num(row.week_number),
   sessionId: num(row.session_id),
-  status: str(row.status) as TodayWeekSessionRow['status'],
+  status: str(row.status) as QueueWeekSessionRow['status'],
   resolvedOnDate: nullableNum(row.resolved_on_date),
 });
 
-export async function loadTodayState(
-  db: RoutineDatabase,
-  todayStamp: number,
-): Promise<TodayState> {
+/** The active routine's queue inputs — cycles, plan rows and every week session. */
+async function loadSessionQueueInput(db: RoutineDatabase): Promise<SessionQueueInput> {
   const routineRow = await db.get(
     `SELECT routine_id, name, unit, rounding_increment
      FROM Routines WHERE is_active = 1 LIMIT 1;`,
     [],
   );
   if (routineRow === undefined) {
-    return { routine: null, dueToday: [], missed: [], nextSession: null };
+    return { routine: null, cycles: [], sessions: [], exercises: [], weekSessions: [] };
   }
-  const routine: TodayStateInput['routine'] = {
+  const routine: SessionQueueInput['routine'] = {
     routineId: num(routineRow.routine_id),
     name: str(routineRow.name),
     unit: str(routineRow.unit) as RoutineUnit,
     roundingIncrement: num(routineRow.rounding_increment),
   };
 
-  const cycleRow = await db.get(
-    `SELECT cycle_id, started_at, current_week, weeks
-     FROM Cycles WHERE routine_id = ? AND status = 'active'
-     ORDER BY cycle_number DESC LIMIT 1;`,
+  const cycleRows = await db.getAll(
+    `SELECT cycle_id, cycle_number, started_at
+     FROM Cycles WHERE routine_id = ? ORDER BY cycle_number;`,
     [routine.routineId],
   );
-  const cycle: TodayStateInput['cycle'] =
-    cycleRow === undefined
-      ? null
-      : {
-          startedAt: nullableNum(cycleRow.started_at),
-          currentWeek: num(cycleRow.current_week),
-          weeks: num(cycleRow.weeks),
-        };
+  const cycles = cycleRows.map(toCycleRow);
 
   const sessionRows = await db.getAll(
     `SELECT session_id, weekday, name, sort_order
@@ -382,15 +571,14 @@ export async function loadTodayState(
   );
   const sessions = sessionRows.map(toSessionRow);
 
-  const weekSessionRows =
-    cycleRow === undefined
-      ? []
-      : await db.getAll(
-          `SELECT ws.week_session_id, cw.week_number, ws.session_id, ws.status, ws.resolved_on_date
-           FROM WeekSessions ws JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
-           WHERE cw.cycle_id = ? AND ws.status = 'pending';`,
-          [num(cycleRow.cycle_id)],
-        );
+  const weekSessionRows = await db.getAll(
+    `SELECT ws.week_session_id, cw.cycle_id, cw.week_number, ws.session_id,
+            ws.status, ws.resolved_on_date
+     FROM WeekSessions ws
+     JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+     WHERE cw.cycle_id IN (SELECT cycle_id FROM Cycles WHERE routine_id = ?);`,
+    [routine.routineId],
+  );
   const weekSessions = weekSessionRows.map(toWeekSessionRow);
 
   const exerciseRows = await db.getAll(
@@ -403,52 +591,75 @@ export async function loadTodayState(
   );
   const exercises = exerciseRows.map(toExerciseRow);
 
-  return computeTodayState(
-    { routine, cycle, sessions, exercises, weekSessions },
-    todayStamp,
-  );
+  return { routine, cycles, sessions, exercises, weekSessions };
 }
 
-export type MissedResolution = 'moved' | 'doToday' | 'discarded';
-
-export interface MissedResolutionOptions {
-  todayStamp: number;
-  /** The day a moved session lands on. Required for 'moved'. */
-  targetStamp?: number;
+/** The queue for the active routine, from the database. */
+export async function loadSessionQueue(
+  db: RoutineDatabase,
+  todayStamp: number,
+): Promise<SessionQueueState> {
+  return computeSessionQueue(await loadSessionQueueInput(db), todayStamp);
 }
 
 /**
- * One §3.6 outcome for one unresolved session. The `status = 'pending'` guard
- * makes a second resolution a no-op — the prompt appears exactly once.
+ * The three resolution writers. Each validates through the pure layer against
+ * the same rows the queue computes from, then writes one row; a rejected
+ * resolution throws rather than being applied. The `status = 'pending'` guard
+ * makes a second resolution a no-op.
  */
-export async function resolveMissedSession(
+export async function resolveDoTodaySession(
   db: RoutineDatabase,
   weekSessionId: number,
-  resolution: MissedResolution,
-  options: MissedResolutionOptions,
+  todayStamp: number,
 ): Promise<void> {
-  if (resolution === 'moved') {
-    if (options.targetStamp === undefined) {
-      throw new Error('resolveMissedSession: targetStamp is required for moved sessions');
-    }
-    await db.run(
-      `UPDATE WeekSessions SET status = 'moved', resolved_on_date = ?
-       WHERE week_session_id = ? AND status = 'pending';`,
-      [options.targetStamp, weekSessionId],
-    );
-    return;
+  const input = await loadSessionQueueInput(db);
+  const outcome = applyDoToday(input, weekSessionId, todayStamp);
+  if (!outcome.ok) {
+    throw new Error(`resolveDoTodaySession: ${outcome.reason}`);
   }
-  if (resolution === 'doToday') {
-    await db.run(
-      `UPDATE WeekSessions SET resolved_on_date = ?
-       WHERE week_session_id = ? AND status = 'pending';`,
-      [options.todayStamp, weekSessionId],
-    );
-    return;
+  await db.run(
+    `UPDATE WeekSessions SET resolved_on_date = ?
+     WHERE week_session_id = ? AND status = 'pending';`,
+    [todayStamp, weekSessionId],
+  );
+}
+
+export async function resolveMoveSession(
+  db: RoutineDatabase,
+  weekSessionId: number,
+  targetStamp: number,
+): Promise<void> {
+  const input = await loadSessionQueueInput(db);
+  const outcome = applyMove(input, weekSessionId, targetStamp);
+  if (!outcome.ok) {
+    throw new Error(`resolveMoveSession: ${outcome.reason}`);
+  }
+  await db.run(
+    `UPDATE WeekSessions SET status = 'moved', resolved_on_date = ?
+     WHERE week_session_id = ? AND status = 'pending';`,
+    [targetStamp, weekSessionId],
+  );
+}
+
+export async function resolveDiscardSession(
+  db: RoutineDatabase,
+  weekSessionId: number,
+): Promise<void> {
+  const input = await loadSessionQueueInput(db);
+  const outcome = applyDiscard(input, weekSessionId);
+  if (!outcome.ok) {
+    throw new Error(`resolveDiscardSession: ${outcome.reason}`);
+  }
+  const discarded = outcome.weekSessions.find(
+    (row) => row.weekSessionId === weekSessionId,
+  );
+  if (discarded === undefined) {
+    throw new Error('resolveDiscardSession: no row to write');
   }
   await db.run(
     `UPDATE WeekSessions SET status = 'discarded', resolved_on_date = ?
      WHERE week_session_id = ? AND status = 'pending';`,
-    [options.todayStamp, weekSessionId],
+    [discarded.resolvedOnDate, weekSessionId],
   );
 }

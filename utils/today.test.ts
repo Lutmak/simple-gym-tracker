@@ -3,15 +3,22 @@ import { runSchema, type SchemaExecutor } from './schema';
 import { loadDemoData } from './demoData';
 import type { RoutineDatabase } from './routineActions';
 import {
-  computeTodayState,
+  applyDiscard,
+  applyDoToday,
+  applyMove,
+  computeSessionQueue,
   dayStampOf,
-  loadTodayState,
+  loadSessionQueue,
   nextOccurrenceStamp,
   nominalSessionStamp,
-  resolveMissedSession,
+  resolveDiscardSession,
+  resolveDoTodaySession,
+  resolveMoveSession,
   targetWeightFor,
   weekdayOfStamp,
-  type TodayStateInput,
+  type QueuedSession,
+  type QueueWeekSessionRow,
+  type SessionQueueInput,
 } from './today';
 
 type TestExecutor = SchemaExecutor & {
@@ -96,188 +103,218 @@ describe('targetWeightFor', () => {
   });
 });
 
-describe('loadTodayState and computeTodayState against the demo data', () => {
-  const demoDb = async (): Promise<{ executor: TestExecutor; db: RoutineDatabase }> => {
-    const { db, executor } = connect();
+describe('computeSessionQueue against the demo data', () => {
+  const demoDb = async (): Promise<TestExecutor> => {
+    const { executor } = connect();
     await runSchema(executor);
     await loadDemoData(executor);
-    return { executor, db: executor };
+    return executor;
   };
 
   test('no active routine is the first-run state', async () => {
     const { executor } = connect();
     await runSchema(executor);
-    const state = await loadTodayState(executor, dayStampFromYmd('2026-08-14'));
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-08-14'));
     expect(state.routine).toBeNull();
-    expect(state.dueToday).toEqual([]);
-    expect(state.missed).toEqual([]);
-    expect(state.nextSession).toBeNull();
+    expect(state.head).toBeNull();
+    expect(state.resolution).toBeNull();
+    expect(state.upcoming).toBeNull();
   });
 
-  test('demo week-4 sessions are all missed on a date after the cycle', async () => {
-    const { executor } = await demoDb();
-    const state = await loadTodayState(executor, dayStampFromYmd('2026-08-14'));
+  test('three unresolved past sessions: only the oldest is offered', async () => {
+    const executor = await demoDb();
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-08-14'));
     expect(state.routine?.name).toBe('Demo Routine');
-    expect(state.dueToday).toEqual([]);
-    expect(state.nextSession).toBeNull();
-    expect(state.missed.map((session) => session.name)).toEqual([
-      'Squat Day',
-      'Bench Day',
-      'Deadlift Day',
-    ]);
-    expect(state.missed.map((session) => session.date)).toEqual([
-      dayStampFromYmd('2026-05-25'),
-      dayStampFromYmd('2026-05-27'),
-      dayStampFromYmd('2026-05-29'),
-    ]);
-  });
-
-  test('a session whose nominal date is today is due with concrete targets', async () => {
-    const { executor } = await demoDb();
-    const state = await loadTodayState(executor, dayStampFromYmd('2026-05-25'));
-    expect(state.missed).toEqual([]);
-    expect(state.nextSession).toEqual({
+    expect(state.resolution).toBe('unresolved');
+    expect(state.head).toMatchObject({
+      name: 'Squat Day',
+      weekday: 1,
+      originDate: dayStampFromYmd('2026-05-25'),
+      date: dayStampFromYmd('2026-05-25'),
+      doTodayAvailable: true,
+    });
+    expect(state.upcoming).toMatchObject({
       name: 'Bench Day',
       weekday: 3,
       date: dayStampFromYmd('2026-05-27'),
       weekSessionId: expect.any(Number) as number,
     });
-    expect(state.dueToday).toHaveLength(1);
-    const session = state.dueToday[0];
-    expect(session?.name).toBe('Squat Day');
-    expect(session?.weekday).toBe(1);
-    expect(session?.exercises.map((exercise) => exercise.name)).toEqual([
+  });
+
+  test('a session whose nominal date is today is due with concrete targets', async () => {
+    const executor = await demoDb();
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-05-25'));
+    expect(state.resolution).toBe('due');
+    expect(state.head?.name).toBe('Squat Day');
+    expect(state.head?.date).toBe(dayStampFromYmd('2026-05-25'));
+    expect(state.head?.exercises.map((exercise) => exercise.name)).toEqual([
       'Barbell Full Squat',
       'Bent Over Two-Dumbbell Row',
     ]);
-    expect(session?.exercises[0]).toMatchObject({
+    expect(state.head?.exercises[0]).toMatchObject({
       targetSets: 3,
       targetReps: 5,
       isAmrap: true,
       targetWeight: 102.5,
       unit: 'kg',
     });
-    expect(session?.exercises[1]).toMatchObject({ targetWeight: 22.5, unit: 'kg' });
-  });
-
-  test('mid-week: the passed session is missed, the next one is upcoming', async () => {
-    const { executor } = await demoDb();
-    const state = await loadTodayState(executor, dayStampFromYmd('2026-05-26'));
-    expect(state.dueToday).toEqual([]);
-    expect(state.missed.map((session) => session.name)).toEqual(['Squat Day']);
-    expect(state.nextSession).toEqual({
+    expect(state.head?.exercises[1]).toMatchObject({ targetWeight: 22.5, unit: 'kg' });
+    expect(state.upcoming).toMatchObject({
       name: 'Bench Day',
-      weekday: 3,
       date: dayStampFromYmd('2026-05-27'),
-      weekSessionId: expect.any(Number) as number,
     });
   });
 
-  test('a do-it-today session becomes due today and stops prompting', async () => {
-    const { executor } = await demoDb();
-    const before = await loadTodayState(executor, dayStampFromYmd('2026-08-14'));
-    const squat = before.missed.find((session) => session.name === 'Squat Day');
-    expect(squat).toBeDefined();
-    const today = dayStampFromYmd('2026-08-14');
-    await resolveMissedSession(executor, (squat as { weekSessionId: number }).weekSessionId, 'doToday', {
-      todayStamp: today,
-    });
-
-    const row = await weekSessionRow(executor, (squat as { weekSessionId: number }).weekSessionId);
-    expect(row?.status).toBe('pending');
-    expect(row?.resolved_on_date).toBe(today);
-
-    const after = await loadTodayState(executor, today);
-    expect(after.missed.map((session) => session.name)).toEqual(['Bench Day', 'Deadlift Day']);
-    expect(after.dueToday.map((session) => session.name)).toEqual(['Squat Day']);
-    expect(after.dueToday[0]?.date).toBe(today);
-    expect(after.dueToday[0]?.exercises.length).toBe(2);
+  test('mid-week: the passed session is the head, the next one is upcoming', async () => {
+    const executor = await demoDb();
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-05-26'));
+    expect(state.resolution).toBe('unresolved');
+    expect(state.head?.name).toBe('Squat Day');
+    expect(state.upcoming?.name).toBe('Bench Day');
+    expect(state.upcoming?.date).toBe(dayStampFromYmd('2026-05-27'));
   });
 
-  test('moving a session records the target day and never prompts again', async () => {
-    const { executor } = await demoDb();
-    const before = await loadTodayState(executor, dayStampFromYmd('2026-08-14'));
-    const squat = before.missed.find((session) => session.name === 'Squat Day');
-    expect(squat).toBeDefined();
-    const today = dayStampFromYmd('2026-08-14');
-    const target = dayStampFromYmd('2026-08-17');
-    await resolveMissedSession(
-      executor,
-      (squat as { weekSessionId: number }).weekSessionId,
-      'moved',
-      { todayStamp: today, targetStamp: target },
-    );
-
-    const row = await weekSessionRow(executor, (squat as { weekSessionId: number }).weekSessionId);
-    expect(row?.status).toBe('moved');
-    expect(row?.resolved_on_date).toBe(target);
-
-    const after = await loadTodayState(executor, today);
-    expect(after.missed.map((session) => session.name)).toEqual(['Bench Day', 'Deadlift Day']);
-    expect(after.dueToday).toEqual([]);
-
-    await resolveMissedSession(
-      executor,
-      (squat as { weekSessionId: number }).weekSessionId,
-      'discarded',
-      { todayStamp: today },
-    );
-    const unchanged = await weekSessionRow(
-      executor,
-      (squat as { weekSessionId: number }).weekSessionId,
-    );
-    expect(unchanged?.status).toBe('moved');
-    expect(unchanged?.resolved_on_date).toBe(target);
-  });
-
-  test('discarding a session resolves it', async () => {
-    const { executor } = await demoDb();
-    const before = await loadTodayState(executor, dayStampFromYmd('2026-08-14'));
-    const squat = before.missed.find((session) => session.name === 'Squat Day');
-    expect(squat).toBeDefined();
-    const today = dayStampFromYmd('2026-08-14');
-    await resolveMissedSession(executor, (squat as { weekSessionId: number }).weekSessionId, 'discarded', {
-      todayStamp: today,
-    });
-
-    const row = await weekSessionRow(executor, (squat as { weekSessionId: number }).weekSessionId);
-    expect(row?.status).toBe('discarded');
-    expect(row?.resolved_on_date).toBe(today);
-
-    const after = await loadTodayState(executor, today);
-    expect(after.missed.map((session) => session.name)).toEqual(['Bench Day', 'Deadlift Day']);
-  });
-
-  test('move without a target day throws', async () => {
-    const { executor } = await demoDb();
-    const before = await loadTodayState(executor, dayStampFromYmd('2026-08-14'));
-    const squat = before.missed[0];
-    expect(squat).toBeDefined();
-    await expect(
-      resolveMissedSession(executor, (squat as { weekSessionId: number }).weekSessionId, 'moved', {
-        todayStamp: dayStampFromYmd('2026-08-14'),
-      }),
-    ).rejects.toThrow('targetStamp is required');
-  });
-
-  test('a resolved week shows no session state at all', async () => {
-    const { executor } = await demoDb();
-    const state = await loadTodayState(executor, dayStampFromYmd('2026-05-18'));
-    expect(state.dueToday).toEqual([]);
-    expect(state.missed).toEqual([]);
-    expect(state.nextSession).toEqual({
+  test('a rest day with nothing due shows the next pending session as upcoming', async () => {
+    const executor = await demoDb();
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-05-16'));
+    expect(state.head).toBeNull();
+    expect(state.resolution).toBeNull();
+    expect(state.upcoming).toMatchObject({
       name: 'Squat Day',
-      weekday: 1,
       date: dayStampFromYmd('2026-05-25'),
       weekSessionId: expect.any(Number) as number,
     });
   });
+
+  test('a resolved week shows the next session as upcoming', async () => {
+    const executor = await demoDb();
+    const state = await loadSessionQueue(executor, dayStampFromYmd('2026-05-18'));
+    expect(state.head).toBeNull();
+    expect(state.upcoming).toMatchObject({
+      name: 'Squat Day',
+      weekday: 1,
+      date: dayStampFromYmd('2026-05-25'),
+    });
+  });
 });
 
-describe('computeTodayState without a cycle', () => {
-  const input: TodayStateInput = {
+describe('resolution writers against the demo data', () => {
+  const demoDb = async (): Promise<TestExecutor> => {
+    const { executor } = connect();
+    await runSchema(executor);
+    await loadDemoData(executor);
+    return executor;
+  };
+
+  test('do it today makes the session due and keeps it the only head', async () => {
+    const executor = await demoDb();
+    const today = dayStampFromYmd('2026-08-14');
+    const before = await loadSessionQueue(executor, today);
+    const squat = before.head as QueuedSession;
+    expect(squat.name).toBe('Squat Day');
+    await resolveDoTodaySession(executor, squat.weekSessionId, today);
+
+    const row = await weekSessionRow(executor, squat.weekSessionId);
+    expect(row?.status).toBe('pending');
+    expect(row?.resolved_on_date).toBe(today);
+
+    const after = await loadSessionQueue(executor, today);
+    expect(after.resolution).toBe('due');
+    expect(after.head?.name).toBe('Squat Day');
+    expect(after.head?.date).toBe(today);
+    expect(after.head?.originDate).toBe(dayStampFromYmd('2026-05-25'));
+    expect(after.upcoming?.name).toBe('Bench Day');
+  });
+
+  test('do it today is rejected while another session occupies today', async () => {
+    const executor = await demoDb();
+    const today = dayStampFromYmd('2026-08-14');
+    const before = await loadSessionQueue(executor, today);
+    const squat = before.head as QueuedSession;
+    await resolveDoTodaySession(executor, squat.weekSessionId, today);
+
+    const after = await loadSessionQueue(executor, today);
+    const bench = after.upcoming as { weekSessionId: number };
+    await expect(
+      resolveDoTodaySession(executor, bench.weekSessionId, today),
+    ).rejects.toThrow('dayOccupied');
+  });
+
+  test('moving a session records the target day and reveals the next head', async () => {
+    const executor = await demoDb();
+    const today = dayStampFromYmd('2026-08-14');
+    const before = await loadSessionQueue(executor, today);
+    const squat = before.head as QueuedSession;
+    const target = dayStampFromYmd('2026-08-17');
+    await resolveMoveSession(executor, squat.weekSessionId, target);
+
+    const row = await weekSessionRow(executor, squat.weekSessionId);
+    expect(row?.status).toBe('moved');
+    expect(row?.resolved_on_date).toBe(target);
+
+    const after = await loadSessionQueue(executor, today);
+    expect(after.resolution).toBe('unresolved');
+    expect(after.head?.name).toBe('Bench Day');
+    expect(after.upcoming?.name).toBe('Deadlift Day');
+  });
+
+  test('moving onto a day that already has a session is rejected', async () => {
+    const executor = await demoDb();
+    const today = dayStampFromYmd('2026-08-14');
+    const before = await loadSessionQueue(executor, today);
+    const squat = before.head as QueuedSession;
+    await expect(
+      resolveMoveSession(executor, squat.weekSessionId, dayStampFromYmd('2026-05-27')),
+    ).rejects.toThrow('dayOccupied');
+    const unchanged = await weekSessionRow(executor, squat.weekSessionId);
+    expect(unchanged?.status).toBe('pending');
+    expect(unchanged?.resolved_on_date).toBeNull();
+  });
+
+  test('discarding a session records it on its nominal day and reveals the next', async () => {
+    const executor = await demoDb();
+    const today = dayStampFromYmd('2026-08-14');
+    const before = await loadSessionQueue(executor, today);
+    const squat = before.head as QueuedSession;
+    await resolveDiscardSession(executor, squat.weekSessionId);
+
+    const row = await weekSessionRow(executor, squat.weekSessionId);
+    expect(row?.status).toBe('discarded');
+    expect(row?.resolved_on_date).toBe(dayStampFromYmd('2026-05-25'));
+
+    const after = await loadSessionQueue(executor, today);
+    expect(after.resolution).toBe('unresolved');
+    expect(after.head?.name).toBe('Bench Day');
+  });
+
+  test('a second resolution of the same session is a no-op, not a delete', async () => {
+    const executor = await demoDb();
+    const today = dayStampFromYmd('2026-08-14');
+    const before = await loadSessionQueue(executor, today);
+    const squat = before.head as QueuedSession;
+    await resolveDiscardSession(executor, squat.weekSessionId);
+    await expect(
+      resolveDiscardSession(executor, squat.weekSessionId),
+    ).rejects.toThrow('notPending');
+    const row = await weekSessionRow(executor, squat.weekSessionId);
+    expect(row?.status).toBe('discarded');
+  });
+
+  test('discarding a missed head leaves do it today available for the next', async () => {
+    const executor = await demoDb();
+    const today = dayStampFromYmd('2026-08-14');
+    const before = await loadSessionQueue(executor, today);
+    await resolveDiscardSession(executor, (before.head as QueuedSession).weekSessionId);
+    const after = await loadSessionQueue(executor, today);
+    expect(after.head?.name).toBe('Bench Day');
+    expect(after.head?.doTodayAvailable).toBe(true);
+  });
+});
+
+describe('computeSessionQueue pure, without a cycle', () => {
+  const input: SessionQueueInput = {
     routine: { routineId: 1, name: 'Plain', unit: 'kg', roundingIncrement: 2.5 },
-    cycle: null,
+    cycles: [],
     sessions: [
       { sessionId: 1, weekday: 1, name: 'Monday Only', sortOrder: 1 },
       { sessionId: 2, weekday: 3, name: 'Wednesday', sortOrder: 2 },
@@ -286,114 +323,335 @@ describe('computeTodayState without a cycle', () => {
     weekSessions: [],
   };
 
-  test('next session comes from the plan, never today itself', () => {
+  test('nothing pending: the next session comes from the plan, never today itself', () => {
     const monday = dayStampFromYmd('2026-05-25');
-    const state = computeTodayState(input, monday);
-    expect(state.dueToday).toEqual([]);
-    expect(state.missed).toEqual([]);
-    expect(state.nextSession).toEqual({
+    const state = computeSessionQueue(input, monday);
+    expect(state.head).toBeNull();
+    expect(state.resolution).toBeNull();
+    expect(state.upcoming).toEqual({
       name: 'Wednesday',
       weekday: 3,
       date: dayStampFromYmd('2026-05-27'),
       weekSessionId: null,
+      sessionId: null,
     });
   });
 
   test('next session by weekday order from today', () => {
     const friday = dayStampFromYmd('2026-08-14');
-    const state = computeTodayState(input, friday);
-    expect(state.nextSession).toEqual({
+    const state = computeSessionQueue(input, friday);
+    expect(state.upcoming).toEqual({
       name: 'Monday Only',
       weekday: 1,
       date: dayStampFromYmd('2026-08-17'),
       weekSessionId: null,
+      sessionId: null,
     });
   });
 
-  test('no sessions means no next session', () => {
-    const state = computeTodayState({ ...input, sessions: [] }, dayStampFromYmd('2026-08-14'));
-    expect(state.nextSession).toBeNull();
+  test('no sessions means no upcoming', () => {
+    const state = computeSessionQueue({ ...input, sessions: [] }, dayStampFromYmd('2026-08-14'));
+    expect(state.upcoming).toBeNull();
   });
 
   test('no routine is the invitation state', () => {
-    const state = computeTodayState({ ...input, routine: null }, dayStampFromYmd('2026-08-14'));
+    const state = computeSessionQueue({ ...input, routine: null }, dayStampFromYmd('2026-08-14'));
     expect(state.routine).toBeNull();
-    expect(state.dueToday).toEqual([]);
-    expect(state.missed).toEqual([]);
-    expect(state.nextSession).toBeNull();
+    expect(state.head).toBeNull();
+    expect(state.resolution).toBeNull();
+    expect(state.upcoming).toBeNull();
   });
 });
 
-describe('computeTodayState with a cycle, pure', () => {
-  const input = (weekSessions: TodayStateInput['weekSessions']): TodayStateInput => ({
+describe('computeSessionQueue with a cycle, pure', () => {
+  const input = (weekSessions: SessionQueueInput['weekSessions']): SessionQueueInput => ({
     routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
-    cycle: { startedAt: dayStampFromYmd('2026-05-04'), currentWeek: 4, weeks: 4 },
-    sessions: [{ sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 }],
+    cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04') }],
+    sessions: [
+      { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
+      { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
+    ],
     exercises: [],
     weekSessions,
   });
 
-  const pending = (
+  const pending = (weekSessionId: number, weekNumber: number, resolvedOnDate: number | null = null) =>
+    ({
+      weekSessionId,
+      cycleId: 1,
+      weekNumber,
+      sessionId: 1,
+      status: 'pending',
+      resolvedOnDate,
+    }) as QueueWeekSessionRow;
+
+  const resolved = (
     weekSessionId: number,
     weekNumber: number,
-    resolvedOnDate: number | null = null,
-  ) => ({
+    status: 'completed' | 'moved' | 'discarded',
+    resolvedOnDate: number,
+  ): QueueWeekSessionRow => ({
     weekSessionId,
+    cycleId: 1,
     weekNumber,
     sessionId: 1,
-    status: 'pending' as const,
+    status,
     resolvedOnDate,
   });
 
-  test('a pending session in a past week is missed', () => {
-    const state = computeTodayState(
-      input([pending(1, 3)]),
-      dayStampFromYmd('2026-08-14'),
+  test('nothing pending on a rest day: no head, the plan preview is upcoming', () => {
+    const saturday = dayStampFromYmd('2026-05-16');
+    const state = computeSessionQueue(
+      input([resolved(1, 1, 'completed', dayStampFromYmd('2026-05-04'))]),
+      saturday,
     );
-    expect(state.missed).toEqual([
-      {
-        weekSessionId: 1,
-        sessionId: 1,
-        name: 'Squat Day',
-        weekday: 1,
-        date: dayStampFromYmd('2026-05-18'),
-      },
-    ]);
+    expect(state.head).toBeNull();
+    expect(state.upcoming).toEqual({
+      name: 'Squat Day',
+      weekday: 1,
+      date: dayStampFromYmd('2026-05-18'),
+      weekSessionId: null,
+      sessionId: null,
+    });
   });
 
-  test('a do-it-today intent suppresses the prompt', () => {
+  test('nothing pending on a training day: no head, the nearest plan day is upcoming', () => {
+    const monday = dayStampFromYmd('2026-05-11');
+    const state = computeSessionQueue(
+      input([resolved(1, 1, 'completed', dayStampFromYmd('2026-05-04'))]),
+      monday,
+    );
+    expect(state.head).toBeNull();
+    expect(state.upcoming).toEqual({
+      name: 'Bench Day',
+      weekday: 3,
+      date: dayStampFromYmd('2026-05-13'),
+      weekSessionId: null,
+      sessionId: null,
+    });
+  });
+
+  test('a pending session in a past week is the unresolved head', () => {
+    const state = computeSessionQueue(input([pending(1, 1)]), dayStampFromYmd('2026-08-14'));
+    expect(state.resolution).toBe('unresolved');
+    expect(state.head).toMatchObject({
+      weekSessionId: 1,
+      name: 'Squat Day',
+      originDate: dayStampFromYmd('2026-05-04'),
+    });
+  });
+
+  test('a do-it-today intent is due and suppresses the other past sessions', () => {
     const today = dayStampFromYmd('2026-08-14');
-    const state = computeTodayState(input([pending(1, 4, today)]), today);
-    expect(state.missed).toEqual([]);
-    expect(state.dueToday).toEqual([
-      {
-        weekSessionId: 1,
-        sessionId: 1,
-        name: 'Squat Day',
-        weekday: 1,
-        date: today,
-        exercises: [],
-      },
-    ]);
-  });
-
-  test('an unmarked future weekday is neither missed nor due', () => {
-    const today = dayStampFromYmd('2026-05-25');
-    const state = computeTodayState(
-      input([pending(1, 4)]),
+    const state = computeSessionQueue(
+      input([pending(1, 4, today), pending(2, 3)]),
       today,
     );
-    expect(state.dueToday.map((session) => session.weekSessionId)).toEqual([1]);
-    expect(state.missed).toEqual([]);
+    expect(state.resolution).toBe('due');
+    expect(state.head?.weekSessionId).toBe(1);
+    expect(state.head?.date).toBe(today);
+    expect(state.head?.originDate).toBe(dayStampFromYmd('2026-05-25'));
+    expect(state.upcoming?.weekSessionId).toBe(2);
   });
 
-  test('week sessions without a session row are ignored', () => {
-    const state = computeTodayState(
-      { ...input([pending(1, 4)]), sessions: [] },
+  test('a session whose nominal is today is due and nothing follows', () => {
+    const today = dayStampFromYmd('2026-05-25');
+    const state = computeSessionQueue(input([pending(1, 4)]), today);
+    expect(state.resolution).toBe('due');
+    expect(state.head?.weekSessionId).toBe(1);
+    expect(state.upcoming).toBeNull();
+  });
+
+  test('do it today is unavailable while another session occupies today', () => {
+    const today = dayStampFromYmd('2026-05-06');
+    const state = computeSessionQueue(
+      input([
+        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
+        { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+      ]),
+      today,
+    );
+    expect(state.resolution).toBe('unresolved');
+    expect(state.head?.doTodayAvailable).toBe(false);
+  });
+
+  test('week sessions without a session or cycle row are ignored', () => {
+    const state = computeSessionQueue(
+      { ...input([pending(1, 4)]), sessions: [], cycles: [] },
       dayStampFromYmd('2026-05-26'),
     );
-    expect(state.missed).toHaveLength(0);
-    expect(state.dueToday).toHaveLength(0);
-    expect(state.nextSession).toBeNull();
+    expect(state.head).toBeNull();
+    expect(state.upcoming).toBeNull();
+  });
+});
+
+describe('resolution transformations, pure', () => {
+  const input = (weekSessions: SessionQueueInput['weekSessions']): SessionQueueInput => ({
+    routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
+    cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04') }],
+    sessions: [
+      { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
+      { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
+    ],
+    exercises: [],
+    weekSessions,
+  });
+
+  const baseRows: QueueWeekSessionRow[] = [
+    { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
+    { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+  ];
+
+  test('a moved session landing on a day that already has one is rejected', () => {
+    const outcome = applyMove(input(baseRows), 1, dayStampFromYmd('2026-05-06'));
+    expect(outcome).toEqual({ ok: false, reason: 'dayOccupied' });
+  });
+
+  test('a move onto a resolved session\'s day is also rejected', () => {
+    const rows: QueueWeekSessionRow[] = [
+      { ...baseRows[0] },
+      { ...baseRows[1], status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-06') },
+    ];
+    const outcome = applyMove(input(rows), 1, dayStampFromYmd('2026-05-06'));
+    expect(outcome).toEqual({ ok: false, reason: 'dayOccupied' });
+  });
+
+  test('a move to a free day changes only the date and the status', () => {
+    const target = dayStampFromYmd('2026-05-07');
+    const outcome = applyMove(input(baseRows), 1, target);
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.weekSessions[0]).toEqual({
+        weekSessionId: 1,
+        cycleId: 1,
+        weekNumber: 1,
+        sessionId: 1,
+        status: 'moved',
+        resolvedOnDate: target,
+      });
+      expect(outcome.weekSessions[1]).toEqual(baseRows[1]);
+    }
+  });
+
+  test('do it today is rejected while another session occupies today', () => {
+    const rows: QueueWeekSessionRow[] = [
+      { ...baseRows[0] },
+      { ...baseRows[1], status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-06') },
+    ];
+    const outcome = applyDoToday(input(rows), 1, dayStampFromYmd('2026-05-06'));
+    expect(outcome).toEqual({ ok: false, reason: 'dayOccupied' });
+  });
+
+  test('do it today onto a free day keeps the session pending and due today', () => {
+    const today = dayStampFromYmd('2026-05-06');
+    const rows: QueueWeekSessionRow[] = [
+      { ...baseRows[0], resolvedOnDate: null },
+      { ...baseRows[1], weekNumber: 1, status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-04') },
+    ];
+    const outcome = applyDoToday(input(rows), 1, today);
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.weekSessions[0]).toEqual({
+        weekSessionId: 1,
+        cycleId: 1,
+        weekNumber: 1,
+        sessionId: 1,
+        status: 'pending',
+        resolvedOnDate: today,
+      });
+      const state = computeSessionQueue(input(outcome.weekSessions), today);
+      expect(state.resolution).toBe('due');
+      expect(state.head?.weekSessionId).toBe(1);
+    }
+  });
+
+  test('discarding records the nominal day and never deletes the row', () => {
+    const outcome = applyDiscard(input(baseRows), 1);
+    expect(outcome.ok).toBe(true);
+    if (outcome.ok) {
+      expect(outcome.weekSessions[0]).toEqual({
+        weekSessionId: 1,
+        cycleId: 1,
+        weekNumber: 1,
+        sessionId: 1,
+        status: 'discarded',
+        resolvedOnDate: dayStampFromYmd('2026-05-04'),
+      });
+      const state = computeSessionQueue(input(outcome.weekSessions), dayStampFromYmd('2026-05-06'));
+      expect(state.head?.weekSessionId).toBe(2);
+      expect(state.head?.name).toBe('Bench Day');
+    }
+  });
+
+  test('resolving a session that is not pending is rejected', () => {
+    const rows: QueueWeekSessionRow[] = [
+      { ...baseRows[0], status: 'moved', resolvedOnDate: dayStampFromYmd('2026-05-06') },
+      { ...baseRows[1] },
+    ];
+    expect(applyMove(input(rows), 1, dayStampFromYmd('2026-05-07'))).toEqual({
+      ok: false,
+      reason: 'notPending',
+    });
+    expect(applyDoToday(input(rows), 1, dayStampFromYmd('2026-05-07'))).toEqual({
+      ok: false,
+      reason: 'notPending',
+    });
+    expect(applyDiscard(input(rows), 1)).toEqual({ ok: false, reason: 'notPending' });
+  });
+
+  test('discarding an undatable session is rejected', () => {
+    const rows: QueueWeekSessionRow[] = [
+      { ...baseRows[0], cycleId: 9 },
+      { ...baseRows[1] },
+    ];
+    expect(applyDiscard(input(rows), 1)).toEqual({ ok: false, reason: 'undatable' });
+  });
+});
+
+describe('queue boundaries', () => {
+  test('a session unresolved across a week boundary stays the head', () => {
+    const input: SessionQueueInput = {
+      routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
+      cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04') }],
+      sessions: [
+        { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
+        { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
+      ],
+      exercises: [],
+      weekSessions: [
+        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
+        { weekSessionId: 2, cycleId: 1, weekNumber: 4, sessionId: 2, status: 'pending', resolvedOnDate: null },
+      ],
+    };
+    const state = computeSessionQueue(input, dayStampFromYmd('2026-06-08'));
+    expect(state.resolution).toBe('unresolved');
+    expect(state.head?.name).toBe('Squat Day');
+    expect(state.head?.originDate).toBe(dayStampFromYmd('2026-05-04'));
+    expect(state.upcoming?.name).toBe('Bench Day');
+  });
+
+  test('the head crosses a cycle boundary: an older cycle\'s unresolved session leads', () => {
+    const input: SessionQueueInput = {
+      routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
+      cycles: [
+        { cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-04-06') },
+        { cycleId: 2, cycleNumber: 2, startedAt: dayStampFromYmd('2026-05-04') },
+      ],
+      sessions: [
+        { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
+        { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
+      ],
+      exercises: [],
+      weekSessions: [
+        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
+        { weekSessionId: 2, cycleId: 2, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
+        { weekSessionId: 3, cycleId: 2, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+      ],
+    };
+    const state = computeSessionQueue(input, dayStampFromYmd('2026-05-18'));
+    expect(state.resolution).toBe('unresolved');
+    expect(state.head?.weekSessionId).toBe(1);
+    expect(state.head?.originDate).toBe(dayStampFromYmd('2026-04-06'));
+    expect(state.upcoming?.weekSessionId).toBe(2);
   });
 });

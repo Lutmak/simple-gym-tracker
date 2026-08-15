@@ -31,9 +31,9 @@ import {
 } from '../utils/sessionRunner';
 import { dayStampOf } from '../utils/today';
 import type { RoutineDatabase } from '../utils/routineActions';
-import type { HomeStackParamList } from '../App';
+import type { InicioStackParamList } from '../App';
 
-type Props = NativeStackScreenProps<HomeStackParamList, 'StartSession'>;
+type Props = NativeStackScreenProps<InicioStackParamList, 'StartSession'>;
 
 interface RestState {
   remaining: number;

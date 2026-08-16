@@ -8,9 +8,15 @@ export interface StoredSettings {
   dateFormat?: string;
   timeFormat?: string;
   weightFormat?: string;
+  /** The default rounding increment for new routines, in the stored unit (S2). */
+  roundingIncrement?: number;
+  /** The default bar profile for new barbell exercises (S2). */
+  barProfile?: string;
   firstWeekday?: string;
   notificationPermissionGranted?: boolean;
   notificationTime?: string;
+  /** Weekday (0 = Sunday) → `HH:MM`, for the days that disagree with the default (S3). */
+  notificationDayTimes?: Record<string, string>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -19,7 +25,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 export const saveSettings = async (settings: object) => {
   try {
     await FileSystem.writeAsStringAsync(SETTINGS_FILE, JSON.stringify(settings));
-    console.log('Settings saved successfully.');
   } catch (error) {
     console.error('Error saving settings:', error);
   }
@@ -29,7 +34,6 @@ export const loadSettings = async (): Promise<StoredSettings | null> => {
   try {
     const fileInfo = await FileSystem.getInfoAsync(SETTINGS_FILE);
     if (!fileInfo.exists) {
-      console.log("Settings file doesn't exist, using default settings.");
       return null;
     }
 

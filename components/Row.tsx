@@ -14,6 +14,8 @@ export type RowProps = {
   label: string;
   /** Secondary text on the right side, before any `right` control. */
   detail?: string;
+  /** Rich secondary content, for a detail line with an inline advisory. */
+  detailContent?: ReactNode;
   /** Place the secondary text below the label, for explanatory decision rows. */
   detailBelow?: boolean;
   /** A trailing control — a Switch, a chevron, a value chip. */
@@ -25,7 +27,17 @@ export type RowProps = {
   testID?: string;
 };
 
-export function Row({ label, detail, detailBelow, right, onPress, disabled, divided, testID }: RowProps) {
+export function Row({
+  label,
+  detail,
+  detailContent,
+  detailBelow,
+  right,
+  onPress,
+  disabled,
+  divided,
+  testID,
+}: RowProps) {
   const { tokens } = useTheme();
 
   const text = (
@@ -40,11 +52,17 @@ export function Row({ label, detail, detailBelow, right, onPress, disabled, divi
       >
         {label}
       </Text>
-      {detail !== undefined && (
-        <Text style={[styles.detail, { color: tokens.textSecondary }]} numberOfLines={2} maxFontSizeMultiplier={1.5}>
-          {detail}
-        </Text>
-      )}
+      {detailContent !== undefined
+        ? detailContent
+        : detail !== undefined && (
+            <Text
+              style={[styles.detail, { color: tokens.textSecondary }]}
+              numberOfLines={2}
+              maxFontSizeMultiplier={1.5}
+            >
+              {detail}
+            </Text>
+          )}
     </>
   );
   const content = detailBelow ? <View style={styles.textColumn}>{text}</View> : text;

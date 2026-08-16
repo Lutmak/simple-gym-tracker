@@ -1,33 +1,35 @@
 import React, { useEffect, useState } from 'react';
-import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useTranslation } from 'react-i18next';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
-import { displayFontSize, fontSize, radius, spacing, touchTarget } from '../utils/scale';
-import AppTextInput, {
-  APP_TEXT_MAX_FONT_SIZE_MULTIPLIER,
-  parseNumericInput,
-} from '../components/AppTextInput';
+import { useQueueRevision } from '../context/QueueRevision';
+import { Button } from '../components/Button';
+import { Field } from '../components/Field';
+import { NumberStepper } from '../components/NumberStepper';
+import { Row } from '../components/Row';
+import { Screen } from '../components/Screen';
+import { Section } from '../components/Section';
+import { Sheet } from '../components/Sheet';
+import { Timer } from '../components/Timer';
+import { fontSize, spacing, tabBar, touchTarget } from '../utils/scale';
 import {
   belowTarget,
+  buildPlannedDraft,
   loadRunnerSession,
-  runnerTargetWeight,
+  nextExtraSet,
+  formatRunnerPlanLine,
+  runnerTargetForSet,
+  runnerTargetsFor,
   saveSessionLog,
-  sessionTotals,
-  warmupSetsFor,
   type LoggedSet,
   type RunnerExercise,
   type RunnerSession,
+  type RunnerTargetSet,
+  type RunnerDraft,
+  warmupSetsFor,
 } from '../utils/sessionRunner';
 import { dayStampOf } from '../utils/today';
 import type { RoutineDatabase } from '../utils/routineActions';
@@ -40,35 +42,39 @@ interface RestState {
   running: boolean;
 }
 
-interface SavedSummary {
-  sets: number;
-  exercises: number;
+interface EditingSet {
+  exerciseIndex: number;
+  setIndex: number;
 }
 
 const formatWeight = (value: number): string => String(Number(value.toFixed(1)));
 
+const pressStyle = (pressed: boolean) => (pressed ? styles.pressed : null);
+
 export default function StartSessionScreen({ navigation, route }: Props) {
   const { weekSessionId } = route.params;
-  const { theme } = useTheme();
+  const { tokens } = useTheme();
   const { t } = useTranslation();
   const db = useSQLiteContext();
+  const { bump } = useQueueRevision();
 
   const [session, setSession] = useState<RunnerSession | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [draft, setDraft] = useState<(LoggedSet | null)[][]>([]);
-  const [showWarmups, setShowWarmups] = useState(true);
+  const [draft, setDraft] = useState<RunnerDraft>([]);
+  const [exerciseIndex, setExerciseIndex] = useState(0);
+  const [warmupEnabled, setWarmupEnabled] = useState<boolean[]>([]);
   const [warmupDone, setWarmupDone] = useState<Set<string>>(() => new Set());
-  const [editing, setEditing] = useState<string | null>(null);
+  const [warmupCollapsed, setWarmupCollapsed] = useState<Set<number>>(() => new Set());
+  const [editing, setEditing] = useState<EditingSet | null>(null);
+  const [informationExercise, setInformationExercise] = useState<RunnerExercise | null>(null);
   const [rest, setRest] = useState<RestState | null>(null);
-  const [savedSummary, setSavedSummary] = useState<SavedSummary | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const routineDb: RoutineDatabase = {
     run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
     get: async (sql, params) =>
-      (await db.getFirstAsync<Record<string, unknown>>(
-        sql,
-        (params ?? []) as never[],
-      )) ?? undefined,
+      (await db.getFirstAsync<Record<string, unknown>>(sql, (params ?? []) as never[])) ??
+      undefined,
     getAll: async (sql, params) =>
       db.getAllAsync<Record<string, unknown>>(sql, (params ?? []) as never[]),
   };
@@ -81,11 +87,10 @@ export default function StartSessionScreen({ navigation, route }: Props) {
           return;
         }
         setSession(loaded);
-        setDraft(
-          loaded.exercises.map((exercise) =>
-            Array.from({ length: exercise.targetSets }, () => null),
-          ),
-        );
+        setDraft(buildPlannedDraft(loaded));
+        setWarmupEnabled(loaded.exercises.map((exercise) => exercise.role === 'main'));
+        setWarmupDone(new Set());
+        setWarmupCollapsed(new Set());
       })
       .catch((error) => {
         if (!cancelled) {
@@ -98,17 +103,32 @@ export default function StartSessionScreen({ navigation, route }: Props) {
     };
   }, [db, weekSessionId]);
 
-  const loggedCount =
-    session === null
-      ? 0
-      : session.exercises.reduce(
-          (total, exercise, index) =>
-            total + (draft[index] ?? []).filter((set) => set !== null).length,
-          0,
-        );
+  const currentExercise = session?.exercises[exerciseIndex];
+  const currentSets = draft[exerciseIndex] ?? [];
+  const warmups =
+    session !== null && currentExercise !== undefined
+      ? warmupSetsFor(currentExercise, session)
+      : [];
+  const running = rest?.running ?? false;
 
   useEffect(() => {
-    if (savedSummary !== null || loggedCount === 0) {
+    if (!running) {
+      return;
+    }
+    const interval = setInterval(() => {
+      setRest((current) => {
+        if (current === null || !current.running) {
+          return current;
+        }
+        const remaining = current.remaining - 1;
+        return remaining <= 0 ? null : { ...current, remaining };
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [running]);
+
+  useEffect(() => {
+    if (session === null || draft.length === 0 || saving) {
       return;
     }
     const unsubscribe = navigation.addListener('beforeRemove', (event) => {
@@ -123,815 +143,710 @@ export default function StartSessionScreen({ navigation, route }: Props) {
       ]);
     });
     return unsubscribe;
-  }, [navigation, savedSummary, loggedCount, t]);
-
-  const running = rest?.running ?? false;
-  useEffect(() => {
-    if (!running) {
-      return;
-    }
-    const interval = setInterval(() => {
-      setRest((current) => {
-        if (current === null || !current.running) {
-          return current;
-        }
-        const remaining = current.remaining - 1;
-        return remaining <= 0
-          ? { remaining: 0, running: false }
-          : { ...current, remaining };
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [running]);
+  }, [draft.length, navigation, saving, session, t]);
 
   const startRest = (role: RunnerExercise['role']) => {
     if (session === null) {
       return;
     }
-    const seconds =
-      role === 'main' ? session.restMainSeconds : session.restAccessorySeconds;
-    if (seconds <= 0) {
-      return;
+    const seconds = role === 'main' ? session.restMainSeconds : session.restAccessorySeconds;
+    if (seconds > 0) {
+      setRest({ remaining: seconds, running: true });
     }
-    setRest({ remaining: seconds, running: true });
   };
 
   const adjustRest = (delta: number) => {
-    setRest((current) =>
-      current === null
-        ? current
-        : { ...current, remaining: Math.max(0, current.remaining + delta) },
-    );
+    setRest((current) => {
+      if (current === null) {
+        return null;
+      }
+      const remaining = Math.max(0, current.remaining + delta);
+      return remaining === 0 ? null : { ...current, remaining };
+    });
   };
 
-  const logSet = (exerciseIndex: number, setIndex: number, set: LoggedSet) => {
+  const handleBack = () => {
+    if (exerciseIndex > 0) {
+      setExerciseIndex((current) => current - 1);
+      return;
+    }
+    navigation.goBack();
+  };
+
+  const openExerciseInformation = (exercise: RunnerExercise) => {
+    setInformationExercise(exercise);
+  };
+
+  const commitSet = (value: LoggedSet | null) => {
+    if (editing === null || session === null) {
+      return;
+    }
+    const { exerciseIndex: selectedExercise, setIndex } = editing;
     setDraft((current) => {
-      const next = current.map((exercise) => [...exercise]);
-      next[exerciseIndex][setIndex] = set;
+      const next = current.map((sets) => [...sets]);
+      const exerciseSets = next[selectedExercise] ?? [];
+      exerciseSets[setIndex] = value;
+      next[selectedExercise] = exerciseSets;
       return next;
     });
-    if (session !== null) {
-      startRest(session.exercises[exerciseIndex].role);
-    }
+    setEditing(null);
+    startRest(session.exercises[selectedExercise].role);
   };
 
-  const handleRowPress = (exerciseIndex: number, setIndex: number) => {
-    if (session === null) {
+  const addExtraSet = () => {
+    if (session === null || currentExercise === undefined) {
       return;
     }
-    const exercise = session.exercises[exerciseIndex];
-    const logged = draft[exerciseIndex]?.[setIndex];
-    if (logged !== null && logged !== undefined) {
-      setEditing(`${exerciseIndex}:${setIndex}`);
-      return;
-    }
-    if (exercise.isAmrap) {
-      setEditing(`${exerciseIndex}:${setIndex}`);
-      return;
-    }
-    logSet(exerciseIndex, setIndex, {
-      reps: exercise.targetReps,
-      weight: runnerTargetWeight(exercise, session.roundingIncrement),
+    const extra = nextExtraSet(currentExercise, session, currentSets);
+    setDraft((current) => {
+      const next = current.map((sets) => [...sets]);
+      next[exerciseIndex] = [...(next[exerciseIndex] ?? []), extra];
+      return next;
     });
   };
 
-  const finishSession = () => {
-    if (session === null) {
-      return;
-    }
-    const totals = sessionTotals(session, draft);
-    const setsText = t('runnerSetsCount', { count: totals.loggedSets });
-    const exercisesText = t('runnerExercisesCount', { count: totals.loggedExercises });
-    const confirmAndSave = () => {
-      saveSessionLog(routineDb, weekSessionId, session, draft)
-        .then(() => {
-          setSavedSummary({
-            sets: totals.loggedSets,
-            exercises: totals.loggedExercises,
-          });
-          setRest(null);
-        })
-        .catch((error) => {
-          console.error('Error saving session:', error);
-          Alert.alert(t('errorTitle'), t('runnerSaveFailed'));
-        });
-    };
-    if (totals.loggedSets === 0) {
-      Alert.alert(t('runnerNothingSavedTitle'), t('runnerNothingSavedMessage'), [
-        { text: t('runnerStay'), style: 'cancel' },
-        {
-          text: t('runnerExit'),
-          style: 'destructive',
-          onPress: () => navigation.goBack(),
-        },
-      ]);
-      return;
-    }
-    const confirmDialog = () => {
-      Alert.alert(
-        t('finishConfirmTitle'),
-        t('finishConfirmMessage', {
-          session: session.sessionName,
-          sets: setsText,
-          exercises: exercisesText,
-        }),
-        [
-          { text: t('Cancel'), style: 'cancel' },
-          { text: t('finishSession'), onPress: confirmAndSave },
-        ],
-      );
-    };
-    const unlogged = totals.totalSets - totals.loggedSets;
-    if (unlogged > 0) {
-      Alert.alert(
-        t('finishUnloggedTitle'),
-        t('finishUnloggedMessage', { count: unlogged }),
-        [
-          { text: t('Cancel'), style: 'cancel' },
-          { text: t('finishAnyway'), onPress: confirmDialog },
-        ],
-      );
-    } else {
-      confirmDialog();
-    }
+  const markAllWarmups = () => {
+    const next = new Set(warmupDone);
+    warmups.forEach((_, index) => next.add(`${exerciseIndex}:${index}`));
+    setWarmupDone(next);
+    setWarmupCollapsed((current) => new Set(current).add(exerciseIndex));
   };
 
-  const buildNote = (exercise: RunnerExercise, set: LoggedSet): string | null => {
-    if (session === null) {
-      return null;
+  const toggleWarmup = (warmupIndex: number) => {
+    const key = `${exerciseIndex}:${warmupIndex}`;
+    setWarmupDone((current) => {
+      const next = new Set(current);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
+
+  const enableWarmups = () => {
+    setWarmupEnabled((current) => {
+      const next = [...current];
+      next[exerciseIndex] = true;
+      return next;
+    });
+  };
+
+  const finishSession = async () => {
+    if (session === null || saving) {
+      return;
     }
-    const { repsShort, weightShort } = belowTarget(
-      exercise,
-      set,
-      session.roundingIncrement,
-    );
-    const unit = exercise.unitOverride ?? session.unit;
-    const parts: string[] = [];
-    if (repsShort > 0) {
-      parts.push(t('runnerBelowReps', { count: repsShort }));
+    setSaving(true);
+    try {
+      await saveSessionLog(routineDb, weekSessionId, session, draft);
+      bump();
+      navigation.getParent()?.navigate('Progress');
+    } catch (error) {
+      console.error('Error saving session:', error);
+      setSaving(false);
+      Alert.alert(t('errorTitle'), t('runnerSaveFailed'));
     }
-    if (weightShort !== null) {
-      parts.push(
-        t('runnerBelowWeight', {
-          weight: formatWeight(weightShort),
-          unit,
-        }),
-      );
-    }
-    return parts.length > 0 ? parts.join(' · ') : null;
   };
 
   if (loadError) {
     return (
-      <View style={[styles.container, styles.center, { backgroundColor: theme.background }]}>
-        <Text style={[styles.screenTitle, { color: theme.text }]}>{t('errorTitle')}</Text>
-        <Text style={[styles.helper, { color: theme.text }]}>{t('runnerLoadFailed')}</Text>
-        <Pressable
-          style={({ pressed }) => [
-            styles.primaryButton,
-            { backgroundColor: theme.buttonBackground },
-            pressed && styles.pressed,
-          ]}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-            {t('ok')}
+      <Screen fill testID="runner-error">
+        <View style={styles.center}>
+          <Text style={[styles.errorTitle, { color: tokens.textPrimary }]}>{t('errorTitle')}</Text>
+          <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+            {t('runnerLoadFailed')}
           </Text>
-        </Pressable>
-      </View>
+          <Button label={t('ok')} onPress={() => navigation.goBack()} style={styles.errorButton} />
+        </View>
+      </Screen>
     );
   }
 
-  if (session === null) {
-    return <View style={[styles.container, { backgroundColor: theme.background }]} />;
-  }
-
-  if (savedSummary !== null) {
+  if (session === null || currentExercise === undefined) {
     return (
-      <View style={[styles.container, styles.center, { backgroundColor: theme.background }]}>
-        <Text
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[styles.completedTitle, { color: theme.text }]}
-        >
-          {t('sessionSavedTitle')}
-        </Text>
-        <Text style={[styles.savedMessage, { color: theme.text }]}>
-          {t('sessionSavedMessage', {
-            session: session.sessionName,
-            sets: t('runnerSetsCount', { count: savedSummary.sets }),
-            exercises: t('runnerExercisesCount', { count: savedSummary.exercises }),
-          })}
-        </Text>
-        <Text style={[styles.helper, { color: theme.text }]}>{t('sessionSavedWhere')}</Text>
-        <Pressable
-          style={({ pressed }) => [
-            styles.primaryButton,
-            styles.savedButton,
-            { backgroundColor: theme.buttonBackground },
-            pressed && styles.pressed,
-          ]}
-          onPress={() => navigation.getParent()?.navigate('Progress')}
-        >
-          <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-            {t('sessionSavedSeeProgress')}
-          </Text>
-        </Pressable>
-      </View>
+      <Screen fill testID="runner-loading">
+        <View style={styles.runner} />
+      </Screen>
     );
   }
 
-  const totals = sessionTotals(session, draft);
+  const unit = currentExercise.unitOverride ?? session.unit;
+  const totalRows = Math.max(currentExercise.targetSets, currentSets.length);
+  const isLastExercise = exerciseIndex === session.exercises.length - 1;
+  const isWarmupOn = warmupEnabled[exerciseIndex] === true;
+  const isWarmupCollapsed = warmupCollapsed.has(exerciseIndex);
+
+  const planLineFor = (exercise: RunnerExercise): string => {
+    const exerciseUnit = exercise.unitOverride ?? session.unit;
+    return formatRunnerPlanLine(runnerTargetsFor(exercise, session), {
+      role: t(exercise.role === 'main' ? 'roleMain' : 'roleAccessory'),
+      setsOf: t('runnerPlanSetsOf'),
+      maxReps: t('runnerMaxReps'),
+      unit: exerciseUnit,
+      missingWeight:
+        exercise.loadSource === 'bodyweight'
+          ? t('loadBodyweight')
+          : t('runnerWeightToLearn'),
+    });
+  };
+  const planLine = planLineFor(currentExercise);
+  const informationPlanLine =
+    informationExercise === null ? null : planLineFor(informationExercise);
+
+  const formatTargetLoad = (target: RunnerTargetSet): string => {
+    if (target.targetWeight !== null) {
+      return `${formatWeight(target.targetWeight)} ${unit}`;
+    }
+    return currentExercise.loadSource === 'bodyweight'
+      ? t('loadBodyweight')
+      : t('runnerWeightToLearn');
+  };
+
+  const formatSetDetail = (target: RunnerTargetSet, logged: LoggedSet): string => {
+    const weight =
+      logged.weight === null ? formatTargetLoad(target) : `${formatWeight(logged.weight)} ${unit}`;
+    const sameAsTarget = logged.reps === target.targetReps && logged.weight === target.targetWeight;
+    if (sameAsTarget && target.isAmrap) {
+      return `${t('runnerMaxReps')} · ${weight}`;
+    }
+    if (sameAsTarget) {
+      return `${target.targetReps} ${t('Reps')} · ${weight}`;
+    }
+    const targetReps = `${target.targetReps}${target.isAmrap ? '+' : ''} ${t('Reps')}`;
+    return `${logged.reps} ${t('Reps')} · ${t('runnerTargetWord')} ${targetReps} · ${weight}`;
+  };
+
+  const belowTargetNote = (setIndex: number, logged: LoggedSet): string | null => {
+    if (setIndex >= currentExercise.targetSets) {
+      return null;
+    }
+    const result = belowTarget(
+      currentExercise,
+      logged,
+      session.roundingIncrement,
+      session.weekNumber,
+      setIndex,
+    );
+    const notes: string[] = [];
+    if (result.repsShort > 0) {
+      notes.push(t('runnerBelowReps', { count: result.repsShort }));
+    }
+    if (result.weightShort !== null) {
+      notes.push(
+        t('runnerBelowWeight', {
+          weight: formatWeight(result.weightShort),
+          unit,
+        }),
+      );
+    }
+    return notes.length === 0 ? null : notes.join(' · ');
+  };
+
+  const renderSetRow = (setIndex: number) => {
+    const logged = currentSets[setIndex] ?? null;
+    const target = runnerTargetForSet(currentExercise, session, currentSets, setIndex);
+    const extra = setIndex >= currentExercise.targetSets;
+    const position = extra
+      ? session.progressionRule === 'wave'
+        ? t('runnerJoker', { n: setIndex - currentExercise.targetSets + 1 })
+        : t('runnerExtraSetPosition', {
+            n: setIndex - currentExercise.targetSets + 1,
+          })
+      : t('setPosition', { n: setIndex + 1, total: currentExercise.targetSets });
+    const warning = logged === null ? null : belowTargetNote(setIndex, logged);
+    const detail =
+      logged === null ? (
+        <Text style={[styles.rowDetail, { color: tokens.textSecondary }]}>
+          {t('runnerNotDone')}
+        </Text>
+      ) : (
+        <View>
+          <Text style={[styles.rowDetail, { color: tokens.textSecondary }]}>
+            {formatSetDetail(target, logged)}
+          </Text>
+          {warning !== null && (
+            <Text style={[styles.warning, { color: tokens.warning }]}>{warning}</Text>
+          )}
+        </View>
+      );
+
+    return (
+      <Row
+        key={`${exerciseIndex}:${setIndex}`}
+        label={position}
+        detailContent={detail}
+        detailBelow
+        onPress={() => setEditing({ exerciseIndex, setIndex })}
+        divided
+        testID={`runner-set-${setIndex + 1}`}
+      />
+    );
+  };
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.content}
-      >
-        <Text style={[styles.screenTitle, { color: theme.text }]}>
-          {session.sessionName}
-        </Text>
-        <Text style={[styles.helper, { color: theme.text }]}>{session.workoutName}</Text>
-
-        <View style={[styles.warmupToggleRow, { borderColor: theme.border }]}>
-          <Text style={[styles.warmupToggleLabel, { color: theme.text }]}>
-            {t('runnerWarmups')}
-          </Text>
-          <Switch
-            value={showWarmups}
-            onValueChange={setShowWarmups}
-            trackColor={{
-              true: theme.buttonBackground,
-              false: theme.inactivetint,
-            }}
-          />
+    <Screen fill testID="runner-screen">
+      <View style={styles.runner}>
+        <View style={[styles.header, { borderBottomColor: tokens.divider }]}>
+          <View style={styles.headerTop}>
+            <Pressable
+              style={({ pressed }) => [styles.iconButton, pressStyle(pressed)]}
+              onPress={handleBack}
+              accessibilityRole="button"
+              accessibilityLabel={t('runnerPreviousExercise')}
+              testID="runner-back"
+            >
+              <Ionicons name="chevron-back" size={tabBar.icon} color={tokens.textPrimary} />
+            </Pressable>
+            <Text style={[styles.position, { color: tokens.accent }]}>
+              {t('runnerExercisePosition', {
+                n: exerciseIndex + 1,
+                total: session.exercises.length,
+              })}
+            </Text>
+            <View style={styles.elapsed}>
+              <Text style={[styles.elapsedLabel, { color: tokens.textSecondary }]}>
+                {t('runnerSessionElapsed')}
+              </Text>
+              <Timer mode="elapsed" size="header" />
+            </View>
+          </View>
+          <Pressable
+            style={({ pressed }) => [styles.exerciseHeader, pressStyle(pressed)]}
+            onPress={() => openExerciseInformation(currentExercise)}
+            accessibilityRole="button"
+            accessibilityLabel={t('runnerOpenExerciseInfo')}
+            testID="runner-exercise-information"
+          >
+            <View style={styles.exerciseNameRow}>
+              <Text style={[styles.exerciseName, { color: tokens.textPrimary }]} numberOfLines={2}>
+                {currentExercise.name}
+              </Text>
+              <Ionicons name="information-circle-outline" size={tabBar.icon} color={tokens.textSecondary} />
+            </View>
+            <Text style={[styles.planSummary, { color: tokens.textSecondary }]}>
+              {planLine}
+            </Text>
+          </Pressable>
         </View>
 
-        {rest !== null && (
-          <View
-            style={[
-              styles.card,
-              styles.restCard,
-              { backgroundColor: theme.card, borderColor: theme.border },
-            ]}
-          >
-            <Text
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-              style={[styles.restTimer, { color: theme.text }]}
-            >
-              {rest.remaining}
-              <Text style={[styles.restTimerUnit, { color: theme.text }]}>
-                {' '}
-                {t('sec')}
-              </Text>
-            </Text>
-            {rest.remaining === 0 ? (
-              <>
-                <Text style={[styles.helper, { color: theme.text }]}>{t('runnerRestDone')}</Text>
+        <ScrollView
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {isWarmupOn && warmups.length > 0 ? (
+            <Section title={t('runnerWarmups')} testID="runner-warmups">
+              {isWarmupCollapsed ? (
+                <Row
+                  label={t('runnerWarmupComplete')}
+                  onPress={() =>
+                    setWarmupCollapsed((current) => {
+                      const next = new Set(current);
+                      next.delete(exerciseIndex);
+                      return next;
+                    })
+                  }
+                  divided
+                />
+              ) : (
+                <>
+                  <Row
+                    label={t('runnerWarmupAll')}
+                    onPress={markAllWarmups}
+                    right={<Ionicons name="checkmark-done-outline" size={tabBar.icon} color={tokens.textPrimary} />}
+                    divided
+                  />
+                  {warmups.map((warmup, warmupIndex) => {
+                    const done = warmupDone.has(`${exerciseIndex}:${warmupIndex}`);
+                    return (
+                      <Row
+                        key={`${exerciseIndex}:warmup:${warmupIndex}`}
+                        label={`${formatWeight(warmup.weight)} ${unit} · ${warmup.reps} ${t('Reps')}`}
+                        onPress={() => toggleWarmup(warmupIndex)}
+                        right={
+                          <Ionicons
+                            name={done ? 'checkmark-circle' : 'ellipse-outline'}
+                            size={tabBar.icon}
+                            color={done ? tokens.success : tokens.textSecondary}
+                          />
+                        }
+                        divided
+                        testID={`runner-warmup-${warmupIndex + 1}`}
+                      />
+                    );
+                  })}
+                </>
+              )}
+            </Section>
+          ) : !isWarmupOn && currentExercise.role === 'accessory' ? (
+            <Section testID="runner-warmup-off">
+              <Row label={t('runnerAddWarmup')} onPress={enableWarmups} divided />
+            </Section>
+          ) : null}
+
+          <Section title={t('runnerWorkSets')} testID="runner-work-sets">
+            {Array.from({ length: totalRows }, (_, setIndex) => renderSetRow(setIndex))}
+            <Row
+              label={
+                session.progressionRule === 'wave' ? t('runnerAddJoker') : t('runnerAddSet')
+              }
+              onPress={addExtraSet}
+              right={<Ionicons name="add" size={tabBar.icon} color={tokens.textPrimary} />}
+              divided
+              testID="runner-add-set"
+            />
+          </Section>
+        </ScrollView>
+
+        <View style={[styles.footer, { borderTopColor: tokens.divider }]}>
+          {rest !== null && (
+            <View style={styles.restFooter} testID="runner-rest">
+              <View style={styles.restSummary}>
+                <Text style={[styles.restLabel, { color: tokens.textPrimary }]}>
+                  {t('runnerRestLabel')} ·
+                </Text>
+                <Timer
+                  mode="countdown"
+                  currentSeconds={rest.remaining}
+                  paused
+                  size="header"
+                  testID="runner-rest-timer"
+                />
+              </View>
+              <View style={styles.restActions}>
                 <Pressable
-                  style={({ pressed }) => [
-                    styles.restButton,
-                    styles.restDoneButton,
-                    { borderColor: theme.border },
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={() => setRest(null)}
-                >
-                  <Text style={[styles.restButtonText, { color: theme.text }]}>
-                    {t('skipRest')}
-                  </Text>
-                </Pressable>
-              </>
-            ) : (
-              <View style={styles.restControls}>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.restButton,
-                    { borderColor: theme.border },
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={() => adjustRest(-15)}
-                >
-                  <Text style={[styles.restButtonText, { color: theme.text }]}>
-                    {t('runnerSubtractTime')}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.restButton,
-                    { borderColor: theme.border },
-                    pressed && styles.pressed,
-                  ]}
+                  style={({ pressed }) => [styles.restAction, pressStyle(pressed)]}
                   onPress={() =>
                     setRest((current) =>
-                      current === null ? current : { ...current, running: !current.running },
+                      current === null ? null : { ...current, running: !current.running },
                     )
                   }
+                  accessibilityRole="button"
                 >
-                  <Text style={[styles.restButtonText, { color: theme.text }]}>
+                  <Text style={[styles.restActionLabel, { color: tokens.textPrimary }]}>
                     {rest.running ? t('runnerRestPause') : t('runnerRestResume')}
                   </Text>
                 </Pressable>
                 <Pressable
-                  style={({ pressed }) => [
-                    styles.restButton,
-                    { borderColor: theme.border },
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={() => adjustRest(15)}
+                  style={({ pressed }) => [styles.restAction, pressStyle(pressed)]}
+                  onPress={() => adjustRest(-15)}
+                  accessibilityRole="button"
                 >
-                  <Text style={[styles.restButtonText, { color: theme.text }]}>
+                  <Text style={[styles.restActionLabel, { color: tokens.textPrimary }]}>
+                    {t('runnerSubtractTime')}
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [styles.restAction, pressStyle(pressed)]}
+                  onPress={() => adjustRest(15)}
+                  accessibilityRole="button"
+                >
+                  <Text style={[styles.restActionLabel, { color: tokens.textPrimary }]}>
                     {t('addTime')}
                   </Text>
                 </Pressable>
                 <Pressable
-                  style={({ pressed }) => [
-                    styles.restButton,
-                    { borderColor: theme.border },
-                    pressed && styles.pressed,
-                  ]}
+                  style={({ pressed }) => [styles.restAction, pressStyle(pressed)]}
                   onPress={() => setRest(null)}
+                  accessibilityRole="button"
                 >
-                  <Text style={[styles.restButtonText, { color: theme.text }]}>
-                    {t('skipRest')}
+                  <Text style={[styles.restActionLabel, { color: tokens.textPrimary }]}>
+                    {t('runnerSkipRest')}
                   </Text>
                 </Pressable>
               </View>
-            )}
-          </View>
-        )}
-
-        {session.exercises.map((exercise, exerciseIndex) => {
-          const unit = exercise.unitOverride ?? session.unit;
-          const targetWeight = runnerTargetWeight(exercise, session.roundingIncrement);
-          const warmups = warmupSetsFor(exercise, session);
-          return (
-            <View
-              key={exercise.sessionExerciseId}
-              style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-            >
-              <View style={styles.cardHeader}>
-                <Text style={[styles.exerciseName, { color: theme.text }]} numberOfLines={2}>
-                  {exercise.name}
-                </Text>
-                <View style={styles.badgeRow}>
-                  <View style={[styles.roleBadge, { borderColor: theme.border }]}>
-                    <Text style={[styles.roleBadgeText, { color: theme.text }]}>
-                      {t(exercise.role === 'main' ? 'roleMain' : 'roleAccessory')}
-                    </Text>
-                  </View>
-                  <Text style={[styles.unitLabel, { color: theme.text }]}>{unit}</Text>
-                </View>
-              </View>
-
-              {showWarmups &&
-                warmups.map((warmup, warmupIndex) => {
-                  const key = `${exerciseIndex}:w${warmupIndex}`;
-                  const done = warmupDone.has(key);
-                  return (
-                    <Pressable
-                      key={key}
-                      style={({ pressed }) => [
-                        styles.warmupRow,
-                        pressed && styles.pressed,
-                        done && { opacity: 0.5 },
-                      ]}
-                      onPress={() =>
-                        setWarmupDone((current) => {
-                          const next = new Set(current);
-                          if (next.has(key)) {
-                            next.delete(key);
-                          } else {
-                            next.add(key);
-                          }
-                          return next;
-                        })
-                      }
-                    >
-                      <Ionicons
-                        name={done ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={20}
-                        color={theme.text}
-                      />
-                      <Text style={[styles.warmupLabel, { color: theme.text }]}>
-                        {`${t('runnerWarmup')} ${warmupIndex + 1}`}
-                      </Text>
-                      <Text style={[styles.warmupTarget, { color: theme.text }]}>
-                        {`${formatWeight(warmup.weight)} ${unit} × ${warmup.reps}`}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-
-              {Array.from({ length: exercise.targetSets }, (_, setIndex) => {
-                const logged = draft[exerciseIndex]?.[setIndex] ?? null;
-                const editingKey = `${exerciseIndex}:${setIndex}`;
-                if (editing === editingKey) {
-                  return (
-                    <SetEditor
-                      key={editingKey}
-                      unit={unit}
-                      targetWeight={targetWeight}
-                      initial={logged ?? {
-                        reps: exercise.targetReps,
-                        weight: targetWeight,
-                      }}
-                      onCommit={(set) => {
-                        setEditing(null);
-                        logSet(exerciseIndex, setIndex, set);
-                      }}
-                      onCancel={() => setEditing(null)}
-                    />
-                  );
-                }
-                const note = logged === null ? null : buildNote(exercise, logged);
-                return (
-                  <Pressable
-                    key={editingKey}
-                    style={({ pressed }) => [
-                      styles.setRow,
-                      { borderColor: theme.border },
-                      pressed && styles.pressed,
-                    ]}
-                    onPress={() => handleRowPress(exerciseIndex, setIndex)}
-                  >
-                    <View style={styles.setRowText}>
-                      <Text style={[styles.setPosition, { color: theme.text }]}>
-                        {t('setPosition', { n: setIndex + 1, total: exercise.targetSets })}
-                      </Text>
-                      <Text style={[styles.setTarget, { color: theme.text }]}>
-                        {exercise.isAmrap
-                          ? `${exercise.targetReps}+`
-                          : `${exercise.targetSets} × ${exercise.targetReps}`}
-                        {targetWeight === null
-                          ? ` · ${t('loadBodyweight')}`
-                          : ` · ${formatWeight(targetWeight)} ${unit}`}
-                      </Text>
-                      {logged !== null && (
-                        <Text style={[styles.setLogged, { color: theme.text }]}>
-                          {`${logged.reps} ${t('Reps')}`}
-                          {logged.weight !== null
-                            ? ` · ${formatWeight(logged.weight)} ${unit}`
-                            : ''}
-                        </Text>
-                      )}
-                      {note !== null && (
-                        <Text style={[styles.belowTargetNote, { color: theme.text }]}>
-                          {note}
-                        </Text>
-                      )}
-                    </View>
-                    <View style={styles.setRowActions}>
-                      {logged !== null && (
-                        <Ionicons name="checkmark-circle" size={20} color={theme.text} />
-                      )}
-                      <Pressable
-                        hitSlop={8}
-                        accessibilityLabel={t('runnerEditSet')}
-                        onPress={() => setEditing(editingKey)}
-                      >
-                        <Ionicons name="create-outline" size={20} color={theme.text} />
-                      </Pressable>
-                    </View>
-                  </Pressable>
-                );
-              })}
             </View>
-          );
-        })}
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.primaryButton,
-            { backgroundColor: theme.buttonBackground },
-            pressed && styles.pressed,
-          ]}
-          onPress={finishSession}
-        >
-          <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-            {t('finishSession')}
-          </Text>
-        </Pressable>
-        <Text style={[styles.finishHelper, { color: theme.text }]}>
-          {t('finishHelper', {
-            logged: totals.loggedSets,
-            total: totals.totalSets,
-          })}
-        </Text>
-      </ScrollView>
-    </View>
-  );
-}
-
-interface SetEditorProps {
-  unit: string;
-  targetWeight: number | null;
-  initial: LoggedSet;
-  onCommit: (set: LoggedSet) => void;
-  onCancel: () => void;
-}
-
-const SetEditor = ({
-  unit,
-  targetWeight,
-  initial,
-  onCommit,
-  onCancel,
-}: SetEditorProps) => {
-  const { theme } = useTheme();
-  const { t } = useTranslation();
-  const [repsRaw, setRepsRaw] = useState(String(initial.reps));
-  const [weightRaw, setWeightRaw] = useState(
-    initial.weight === null ? '' : String(initial.weight),
-  );
-
-  const commit = () => {
-    const reps = parseNumericInput(repsRaw);
-    if (reps === null || reps < 1 || !Number.isInteger(reps)) {
-      return;
-    }
-    const bodyweight = targetWeight === null;
-    const weight = bodyweight ? null : parseNumericInput(weightRaw);
-    if (!bodyweight && (weight === null || weight <= 0)) {
-      return;
-    }
-    onCommit({ reps, weight });
-  };
-
-  return (
-    <View style={[styles.setRow, { borderColor: theme.buttonBackground }]}>
-      <View style={styles.editorRow}>
-        <View style={styles.editorField}>
-          <Text
-            maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            style={[styles.editorLabel, { color: theme.text }]}
-          >
-            {t('runnerActualReps')}
-          </Text>
-          <AppTextInput
-            variant="numeric"
-            value={repsRaw}
-            onRawChange={setRepsRaw}
-            onSubmitEditing={commit}
-            keyboardType="numeric"
-            style={styles.editorInput}
+          )}
+          <Button
+            label={isLastExercise ? t('finishSession') : t('runnerNextExercise')}
+            onPress={() => {
+              startRest(currentExercise.role);
+              if (isLastExercise) {
+                void finishSession();
+              } else {
+                setExerciseIndex((current) => current + 1);
+              }
+            }}
+            disabled={saving}
+            style={styles.footerButton}
+            testID={isLastExercise ? 'runner-finish' : 'runner-next'}
           />
         </View>
-        {targetWeight !== null && (
-          <View style={styles.editorField}>
-            <Text
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-              style={[styles.editorLabel, { color: theme.text }]}
-            >
-              {t('weightLabel', { unit })}
-            </Text>
-            <AppTextInput
-              variant="numeric"
-              value={weightRaw}
-              onRawChange={setWeightRaw}
-              onSubmitEditing={commit}
-              keyboardType="numeric"
-              style={styles.editorInput}
-            />
-          </View>
-        )}
       </View>
-      <View style={styles.editorActions}>
-        <Pressable
-          hitSlop={8}
-          accessibilityLabel={t('Cancel')}
-          onPress={onCancel}
-        >
-          <Ionicons name="close-circle-outline" size={24} color={theme.text} />
-        </Pressable>
-        <Pressable
-          hitSlop={8}
-          accessibilityLabel={t('confirm')}
-          onPress={commit}
-        >
-          <Ionicons name="checkmark-circle" size={24} color={theme.text} />
-        </Pressable>
-      </View>
-    </View>
+
+      {editing !== null && (
+        <RunnerSetEditor
+          key={`${editing.exerciseIndex}:${editing.setIndex}`}
+          visible
+          exercise={session.exercises[editing.exerciseIndex]}
+          session={session}
+          setIndex={editing.setIndex}
+          initial={
+            draft[editing.exerciseIndex]?.[editing.setIndex] ?? {
+              reps: runnerTargetForSet(
+                session.exercises[editing.exerciseIndex],
+                session,
+                draft[editing.exerciseIndex] ?? [],
+                editing.setIndex,
+              ).targetReps,
+              weight: runnerTargetForSet(
+                session.exercises[editing.exerciseIndex],
+                session,
+                draft[editing.exerciseIndex] ?? [],
+                editing.setIndex,
+              ).targetWeight,
+            }
+          }
+          target={runnerTargetForSet(
+            session.exercises[editing.exerciseIndex],
+            session,
+            draft[editing.exerciseIndex] ?? [],
+            editing.setIndex,
+          )}
+          onClose={() => setEditing(null)}
+          onCommit={commitSet}
+        />
+      )}
+
+      <Sheet
+        visible={informationExercise !== null}
+        title={informationExercise?.name}
+        onClose={() => setInformationExercise(null)}
+        testID="runner-exercise-information-sheet"
+      >
+        <Section title={t('runnerInfoPlan')} testID="runner-info-plan">
+          <Text style={[styles.infoPlan, { color: tokens.textPrimary }]}>
+            {informationPlanLine}
+          </Text>
+          <Row
+            label={t('runnerInfoWeek')}
+            detail={t('runnerInfoWeekValue', { week: session.weekNumber })}
+            divided
+          />
+        </Section>
+      </Sheet>
+    </Screen>
   );
-};
+}
+
+interface RunnerSetEditorProps {
+  visible: boolean;
+  exercise: RunnerExercise;
+  session: RunnerSession;
+  setIndex: number;
+  initial: LoggedSet;
+  target: RunnerTargetSet;
+  onClose: () => void;
+  onCommit: (set: LoggedSet | null) => void;
+}
+
+function RunnerSetEditor({
+  visible,
+  exercise,
+  session,
+  setIndex,
+  initial,
+  target,
+  onClose,
+  onCommit,
+}: RunnerSetEditorProps) {
+  const { tokens } = useTheme();
+  const { t } = useTranslation();
+  const [reps, setReps] = useState<number | null>(initial.reps);
+  const [weight, setWeight] = useState<number | null>(initial.weight);
+  const unit = exercise.unitOverride ?? session.unit;
+  const canEditWeight = exercise.loadSource !== 'bodyweight';
+
+  const commit = () => {
+    if (reps === null || !Number.isInteger(reps) || reps < 1) {
+      return;
+    }
+    if (canEditWeight && (weight === null || weight <= 0)) {
+      return;
+    }
+    onCommit({ reps, weight: canEditWeight ? weight : null, unit: initial.unit });
+  };
+
+  const targetReps = target.isAmrap
+    ? t('runnerMaxReps')
+    : `${target.targetReps} ${t('Reps')}`;
+  const targetWeight =
+    target.targetWeight === null
+      ? exercise.loadSource === 'bodyweight'
+        ? t('loadBodyweight')
+        : t('runnerWeightToLearn')
+      : `${formatWeight(target.targetWeight)} ${unit}`;
+  const position =
+    setIndex >= exercise.targetSets
+      ? session.progressionRule === 'wave'
+        ? t('runnerJoker', { n: setIndex - exercise.targetSets + 1 })
+        : t('runnerExtraSetPosition', { n: setIndex - exercise.targetSets + 1 })
+      : t('setPosition', { n: setIndex + 1, total: exercise.targetSets });
+
+  return (
+    <Sheet
+      visible={visible}
+      title={`${exercise.name} · ${position}`}
+      onClose={onClose}
+      testID="runner-set-editor"
+    >
+      <Text style={[styles.editorTarget, { color: tokens.textSecondary }]}>
+        {t('runnerTargetDescription', { reps: targetReps, weight: targetWeight })}
+      </Text>
+      <Field label={t('runnerActualReps')}>
+        <NumberStepper value={reps} onChange={setReps} min={1} step={1} testID="editor-reps" />
+      </Field>
+      {canEditWeight && (
+        <Field label={t('weightLabel', { unit })}>
+          <NumberStepper
+            value={weight}
+            onChange={setWeight}
+            min={0}
+            step={session.roundingIncrement}
+            testID="editor-weight"
+          />
+        </Field>
+      )}
+      <Row
+        label={t('runnerMarkNotDone')}
+        onPress={() => onCommit(null)}
+        divided
+        testID="editor-not-done"
+      />
+      <Button label={t('runnerApplyEdit')} onPress={commit} style={styles.editorButton} />
+    </Sheet>
+  );
+}
 
 const styles = StyleSheet.create({
-  container: {
+  runner: {
     flex: 1,
   },
-  center: {
+  header: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingBottom: spacing.cardGap,
+  },
+  headerTop: {
+    minHeight: touchTarget.control,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.inline,
+  },
+  iconButton: {
+    width: touchTarget.control,
+    height: touchTarget.control,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.gutter,
   },
-  content: {
-    padding: spacing.gutter,
-    paddingBottom: spacing.section * 2,
+  position: {
+    flex: 1,
+    fontSize: fontSize.body,
+    fontWeight: '700',
   },
-  screenTitle: {
+  elapsed: {
+    alignItems: 'flex-end',
+  },
+  elapsedLabel: {
+    fontSize: fontSize.caption,
+  },
+  exerciseHeader: {
+    minHeight: touchTarget.row,
+    paddingTop: spacing.cardGap,
+  },
+  exerciseNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.inline,
+  },
+  exerciseName: {
+    flex: 1,
+    fontSize: fontSize.cardTitle,
+    fontWeight: '700',
+  },
+  planSummary: {
+    fontSize: fontSize.helper,
+    marginTop: spacing.label,
+  },
+  body: {
+    flex: 1,
+  },
+  bodyContent: {
+    paddingBottom: spacing.section,
+  },
+  rowDetail: {
+    fontSize: fontSize.body,
+  },
+  warning: {
+    fontSize: fontSize.helper,
+    marginTop: spacing.label,
+  },
+  footer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: spacing.cardGap,
+    gap: spacing.cardGap,
+  },
+  footerButton: {
+    alignSelf: 'stretch',
+  },
+  restFooter: {
+    gap: spacing.label,
+  },
+  restSummary: {
+    minHeight: touchTarget.control,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.inline,
+  },
+  restLabel: {
+    fontSize: fontSize.body,
+    fontWeight: '700',
+  },
+  restActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: spacing.inline,
+  },
+  restAction: {
+    minHeight: touchTarget.control,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.inline,
+  },
+  restActionLabel: {
+    fontSize: fontSize.button,
+    fontWeight: '600',
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  errorTitle: {
     fontSize: fontSize.screenTitle,
-    fontWeight: '900',
-    textAlign: 'center',
-    marginBottom: spacing.label,
+    fontWeight: '700',
+  },
+  errorButton: {
+    alignSelf: 'stretch',
+    marginTop: spacing.section,
   },
   helper: {
     fontSize: fontSize.helper,
-    opacity: 0.7,
-    textAlign: 'center',
     marginTop: spacing.label,
-  },
-  completedTitle: {
-    fontSize: displayFontSize.completedTitle,
-    fontWeight: '900',
     textAlign: 'center',
   },
-  savedMessage: {
+  editorTarget: {
     fontSize: fontSize.body,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginTop: spacing.section,
+    marginBottom: spacing.section,
   },
-  savedButton: {
-    marginTop: spacing.section,
-  },
-  warmupToggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderRadius: radius.card,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.label,
-    marginTop: spacing.card,
-  },
-  warmupToggleLabel: {
-    fontSize: fontSize.body,
-    fontWeight: '600',
-  },
-  card: {
-    borderWidth: 1,
-    borderRadius: radius.card,
-    padding: spacing.card,
+  editorButton: {
     marginTop: spacing.cardGap,
   },
-  restCard: {
-    alignItems: 'center',
-  },
-  restTimer: {
-    fontSize: displayFontSize.restTimer,
-    fontWeight: '800',
-  },
-  restTimerUnit: {
-    fontSize: displayFontSize.displayUnit,
-    fontWeight: '600',
-  },
-  restControls: {
-    flexDirection: 'row',
-    gap: spacing.inline,
-    marginTop: spacing.card,
-  },
-  restButton: {
-    borderRadius: radius.control,
-    borderWidth: 1,
-    paddingHorizontal: spacing.card,
-    minHeight: touchTarget.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  restButtonText: {
-    fontSize: fontSize.button,
-    fontWeight: '600',
-  },
-  restDoneButton: {
-    marginTop: spacing.card,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.inline,
-    marginBottom: spacing.card,
-  },
-  exerciseName: {
-    fontSize: fontSize.cardTitle,
-    fontWeight: '700',
-    flex: 1,
-  },
-  badgeRow: {
-    alignItems: 'flex-end',
-    gap: spacing.label,
-  },
-  roleBadge: {
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    paddingHorizontal: spacing.card,
-    paddingVertical: 2,
-  },
-  roleBadgeText: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-  },
-  unitLabel: {
-    fontSize: fontSize.caption,
-    fontWeight: '600',
-  },
-  warmupRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.inline,
-    paddingVertical: spacing.label,
-  },
-  warmupLabel: {
+  infoPlan: {
     fontSize: fontSize.body,
-    fontWeight: '600',
-    flex: 1,
-  },
-  warmupTarget: {
-    fontSize: fontSize.body,
-    fontWeight: '600',
-  },
-  setRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.inline,
-    borderWidth: 1,
-    borderRadius: radius.control,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.card,
-    marginTop: spacing.cardGap,
-  },
-  setRowText: {
-    flex: 1,
-  },
-  setPosition: {
-    fontSize: fontSize.caption,
-    fontWeight: '600',
-    opacity: 0.7,
-  },
-  setTarget: {
-    fontSize: fontSize.body,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  setLogged: {
-    fontSize: fontSize.body,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  belowTargetNote: {
-    fontSize: fontSize.helper,
-    fontWeight: '600',
-    marginTop: spacing.label,
-  },
-  setRowActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.inline,
-  },
-  editorRow: {
-    flex: 1,
-    flexDirection: 'row',
-    gap: spacing.inline,
-  },
-  editorField: {
-    flex: 1,
-  },
-  editorLabel: {
-    fontSize: fontSize.caption,
-    fontWeight: '600',
-    marginBottom: spacing.label,
-  },
-  editorInput: {
-    paddingHorizontal: spacing.inline,
-    paddingVertical: spacing.inline,
-    minHeight: touchTarget.control,
-  },
-  editorActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.inline,
-  },
-  primaryButton: {
-    borderRadius: radius.control,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.card,
-    minHeight: touchTarget.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.section,
-  },
-  primaryButtonText: {
-    fontSize: fontSize.button,
-    fontWeight: '700',
-  },
-  finishHelper: {
-    fontSize: fontSize.caption,
-    opacity: 0.7,
-    textAlign: 'center',
-    marginTop: spacing.card,
+    marginBottom: spacing.section,
   },
   pressed: {
     opacity: 0.7,

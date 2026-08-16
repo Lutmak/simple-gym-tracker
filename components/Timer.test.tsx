@@ -76,4 +76,17 @@ describe('Timer', () => {
 
     expect(screen.getByText('0:02')).toBeTruthy();
   });
+
+  it('renders a parent-controlled countdown without taking over its state', () => {
+    const { rerender } = render(<Timer currentSeconds={90} paused />);
+    expect(screen.getByText('1:30')).toBeTruthy();
+
+    act(() => {
+      jest.advanceTimersByTime(3000);
+    });
+    expect(screen.getByText('1:30')).toBeTruthy();
+
+    rerender(<Timer currentSeconds={89} paused />);
+    expect(screen.getByText('1:29')).toBeTruthy();
+  });
 });

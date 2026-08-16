@@ -55,7 +55,11 @@ const WAVE_PRESET_KEY = '531';
 export default function NewRoutineScreen({ navigation }: Props) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
-  const { weightFormat, firstWeekday } = useSettings();
+  const {
+    weightFormat,
+    firstWeekday,
+    roundingIncrement: settingsIncrement,
+  } = useSettings();
   const db = useSQLiteContext();
 
   const unit: RoutineUnit = weightFormat === 'lbs' ? 'lb' : 'kg';
@@ -96,7 +100,7 @@ export default function NewRoutineScreen({ navigation }: Props) {
     try {
       const routineId = await createBlankRoutine(
         routineDb,
-        blankRoutineDraft(t('routineNewDefaultName'), unit),
+        blankRoutineDraft(t('routineNewDefaultName'), unit, settingsIncrement),
       );
       navigation.replace('EditRoutine', { routineId });
     } catch {

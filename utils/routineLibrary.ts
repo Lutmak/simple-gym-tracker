@@ -21,6 +21,7 @@
  * the rows and hand them to the pure builders.
  */
 
+import { ROUNDING_INCREMENT_OPTIONS } from './waveSetup';
 import type {
   RoutineDatabase,
   RoutineOrigin,
@@ -214,11 +215,24 @@ const BLANK_ROUNDING_INCREMENT: Record<RoutineUnit, number> = { kg: 2.5, lb: 5 }
 export const BLANK_REST_MAIN_SECONDS = 120;
 export const BLANK_REST_ACCESSORY_SECONDS = 60;
 
-export function blankRoutineDraft(name: string, unit: RoutineUnit): BlankRoutineDraft {
+/**
+ * `storedIncrement` is Ajustes' default for new routines (SPECS.md S2). It is a
+ * default, not a conversion: it seeds this routine and changes nothing that
+ * already exists, and a unit that cannot express it falls back to that unit's
+ * own convention rather than to a value the editor could not show as selected.
+ */
+export function blankRoutineDraft(
+  name: string,
+  unit: RoutineUnit,
+  storedIncrement?: number,
+): BlankRoutineDraft {
   return {
     name,
     unit,
-    roundingIncrement: BLANK_ROUNDING_INCREMENT[unit],
+    roundingIncrement:
+      storedIncrement !== undefined && ROUNDING_INCREMENT_OPTIONS[unit].includes(storedIncrement)
+        ? storedIncrement
+        : BLANK_ROUNDING_INCREMENT[unit],
     restMainSeconds: BLANK_REST_MAIN_SECONDS,
     restAccessorySeconds: BLANK_REST_ACCESSORY_SECONDS,
     progressionRule: 'linear',

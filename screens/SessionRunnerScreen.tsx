@@ -115,7 +115,7 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
   const weekSessionId = mode === 'planned' ? route.params.weekSessionId : null;
   const { tokens } = useTheme();
   const { t } = useTranslation();
-  const { weightFormat } = useSettings();
+  const { weightFormat, barProfile: settingsBarProfile } = useSettings();
   const db = useSQLiteContext();
   const { bump } = useQueueRevision();
 
@@ -327,6 +327,7 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
           catalogRow?.uses_bar === null || catalogRow?.uses_bar === undefined
             ? null
             : catalogRow.uses_bar === 1,
+          settingsBarProfile,
         );
       }
       const exercise = buildFreeRunnerExercise(

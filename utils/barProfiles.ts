@@ -76,11 +76,18 @@ export function defaultBarProfileForEquipment(equipment: string | null): BarProf
 export function defaultBarProfileForCatalogRow(
   equipment: string | null,
   usesBar: boolean | null,
+  /**
+   * Ajustes' default bar for new barbell exercises (SPECS.md S2). It answers
+   * "which bar", never "is there a bar" — an exercise that uses no bar stays
+   * bar-less whatever the setting says. Omitted, the olympic bar is assumed,
+   * which is what every routine was created with before S2 existed.
+   */
+  settingsDefault: BarProfileKey = 'olympic',
 ): BarProfileKey | null {
   if (usesBar === null) {
     return defaultBarProfileForEquipment(equipment);
   }
-  return usesBar ? 'olympic' : null;
+  return usesBar ? settingsDefault : null;
 }
 
 export const KG_PER_LB = 0.45359237;

@@ -231,7 +231,7 @@ const errorKey = (detail: EditRoutineError): string =>
 export default function EditRoutineScreen({ navigation, route }: Props) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
-  const { firstWeekday } = useSettings();
+  const { firstWeekday, barProfile: settingsBarProfile } = useSettings();
   const db = useSQLiteContext();
   const { routineId } = route.params;
 
@@ -380,7 +380,11 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
     if (pickerFor === null) {
       return;
     }
-    const barProfile = defaultBarProfileForCatalogRow(selection.equipment, selection.usesBar);
+    const barProfile = defaultBarProfileForCatalogRow(
+      selection.equipment,
+      selection.usesBar,
+      settingsBarProfile,
+    );
     if (pickerFor.exerciseKey === null) {
       const key = `n${nextKey.current++}`;
       patchSession(pickerFor.sessionKey, (session) => ({

@@ -53,7 +53,7 @@ describe('rounding increment defaults', () => {
   });
 
   it('keeps a stored increment the unit offers', () => {
-    expect(resolveRoundingIncrement(1, 'kg')).toBe(1);
+    expect(resolveRoundingIncrement(1.25, 'kg')).toBe(1.25);
     expect(resolveRoundingIncrement(10, 'lb')).toBe(10);
   });
 
@@ -81,13 +81,17 @@ describe('rounding increment defaults', () => {
   });
 
   it('resolves rather than trusts when the unit did not change', () => {
-    expect(roundingIncrementOnUnitChange(1, 'kg', 'kg')).toBe(1);
+    expect(roundingIncrementOnUnitChange(1.25, 'kg', 'kg')).toBe(1.25);
     expect(roundingIncrementOnUnitChange(99, 'kg', 'kg')).toBe(2.5);
   });
 
   it('labels every option with its value and unit', () => {
     expect(roundingIncrementOptions('kg')).toEqual([
-      { value: '1', labelKey: 'settingsIncrementOption', labelParams: { value: '1', unit: 'kg' } },
+      {
+        value: '1.25',
+        labelKey: 'settingsIncrementOption',
+        labelParams: { value: '1.25', unit: 'kg' },
+      },
       { value: '2.5', labelKey: 'settingsIncrementOption', labelParams: { value: '2.5', unit: 'kg' } },
       { value: '5', labelKey: 'settingsIncrementOption', labelParams: { value: '5', unit: 'kg' } },
     ]);

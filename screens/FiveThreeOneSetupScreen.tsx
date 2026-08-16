@@ -42,6 +42,7 @@ import {
   type WaveSetupDraft,
   type WaveSetupError,
 } from '../utils/waveSetup';
+import { resolveRoundingIncrement } from '../utils/settingsOptions';
 import {
   getActiveRoutine,
   loadPresetRoutineSource,
@@ -161,7 +162,7 @@ const errorKey = (detail: WaveSetupError): string =>
 export default function FiveThreeOneSetupScreen({ navigation, route }: Props) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
-  const { weightFormat, firstWeekday } = useSettings();
+  const { weightFormat, firstWeekday, roundingIncrement: settingsIncrement } = useSettings();
   const db = useSQLiteContext();
   const { presetKey } = route.params;
 
@@ -203,7 +204,9 @@ export default function FiveThreeOneSetupScreen({ navigation, route }: Props) {
         setDraft({
           name: source.routine.name,
           unit,
-          roundingIncrement: defaultRoundingIncrement(unit),
+          // S2's stored default seeds a NEW routine; a unit that cannot express
+          // it falls back to that unit's own convention rather than to nothing.
+          roundingIncrement: resolveRoundingIncrement(settingsIncrement, unit),
           includeDeload: true,
           warmupsEnabled: true,
           advanced: recommendedWaveAdvanced(unit),

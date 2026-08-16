@@ -29,7 +29,7 @@
 
 import { BAR_PROFILES, formatWeight, type BarProfileKey } from './barProfiles';
 import type { RoutineUnit } from './routineActions';
-import { WAVE_UNIT_DEFAULTS } from './waveSetup';
+import { ROUNDING_INCREMENT_OPTIONS, WAVE_UNIT_DEFAULTS } from './waveSetup';
 
 /** The stored weight-format value. `lbs` is the historical spelling and is kept. */
 export type WeightFormat = 'kg' | 'lbs';
@@ -75,14 +75,13 @@ export const WEIGHT_FORMAT_OPTIONS: readonly SettingOption<WeightFormat>[] = [
 ];
 
 /**
- * The rounding increments offered per unit. The middle value of each list is
- * the unit's default, and it is the same number `WAVE_UNIT_DEFAULTS` already
- * ships — one source for "what a kg routine steps by", not two.
+ * The rounding increments offered per unit — the routine editor's own list, not
+ * a second one. Ajustes and the editor offered different kg lists for a while
+ * (1 kg here, 1.25 kg there), so a user could store a default the editor could
+ * not display as selected. There is one list, and it lives with the unit
+ * defaults it belongs to.
  */
-export const ROUNDING_INCREMENTS: Record<RoutineUnit, readonly number[]> = {
-  kg: [1, 2.5, 5],
-  lb: [2.5, 5, 10],
-};
+export const ROUNDING_INCREMENTS = ROUNDING_INCREMENT_OPTIONS;
 
 export function defaultRoundingIncrement(unit: RoutineUnit): number {
   return WAVE_UNIT_DEFAULTS[unit].roundingIncrement;

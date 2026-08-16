@@ -4,9 +4,11 @@ import { loadDemoData } from './demoData';
 import { buildExerciseSeries } from './exerciseHistory';
 import {
   belowTarget,
+  buildPlannedDraft,
   buildLogRows,
   loadRunnerSession,
-  runnerTargetWeight,
+  nextExtraSet,
+  runnerTargetsFor,
   saveSessionLog,
   sessionTotals,
   warmupSetsFor,
@@ -67,13 +69,7 @@ const fixture = async (executor: TestExecutor): Promise<RunnerSession> => {
   return loadRunnerSession(executor, Number(row.week_session_id), TODAY);
 };
 
-const planned = (session: RunnerSession): RunnerDraft =>
-  session.exercises.map((exercise) =>
-    Array.from({ length: exercise.targetSets }, () => ({
-      reps: exercise.targetReps,
-      weight: runnerTargetWeight(exercise, session.roundingIncrement),
-    })),
-  );
+const planned = (session: RunnerSession): RunnerDraft => buildPlannedDraft(session);
 
 const squat = (session: RunnerSession): RunnerSession['exercises'][number] => {
   const exercise = session.exercises.find((e) => e.name === 'Barbell Full Squat');
@@ -99,9 +95,9 @@ describe('warmupSetsFor — the ramp is a UI affordance, never a work set', () =
     const session = await fixture(executor);
     const warmups = warmupSetsFor(squat(session), session);
     expect(warmups).toEqual([
-      { weight: 42.5, reps: 5 },
-      { weight: 55, reps: 5 },
-      { weight: 65, reps: 3 },
+      { weight: 20, reps: 5 },
+      { weight: 25, reps: 5 },
+      { weight: 27.5, reps: 3 },
     ]);
   });
 
@@ -116,6 +112,77 @@ describe('warmupSetsFor — the ramp is a UI affordance, never a work set', () =
       trainingMaxPct: null,
     };
     expect(warmupSetsFor(bodyweight, session)).toEqual([]);
+  });
+});
+
+describe('runnerTargetsFor — the runner receives the cycle week', () => {
+  const exercise: RunnerSession['exercises'][number] = {
+    sessionExerciseId: 1,
+    name: 'Squat',
+    role: 'main',
+    targetSets: 3,
+    targetReps: 5,
+    loadSource: 'training_max_pct',
+    absoluteWeight: null,
+    trainingMaxWeight: 100,
+    trainingMaxPct: 0.9,
+    unitOverride: null,
+    isAmrap: true,
+  };
+
+  const sessionForWeek = (weekNumber: number): RunnerSession => ({
+    weekSessionId: 1,
+    sessionId: 1,
+    sessionName: 'Squat Day',
+    workoutName: 'Wave',
+    workoutDate: TODAY,
+    weekNumber,
+    unit: 'kg',
+    progressionRule: 'wave',
+    roundingIncrement: 2.5,
+    restMainSeconds: 180,
+    restAccessorySeconds: 90,
+    exercises: [exercise],
+  });
+
+  it.each([
+    [1, [65, 75, 85], [5, 5, 5], [false, false, true]],
+    [2, [70, 80, 90], [3, 3, 3], [false, false, true]],
+    [3, [75, 85, 95], [5, 3, 1], [false, false, true]],
+    [4, [40, 50, 60], [5, 5, 5], [false, false, false]],
+  ] as const)('returns concrete week %i work targets', (week, weights, reps, amrap) => {
+    expect(
+      runnerTargetsFor(exercise, sessionForWeek(week)).map((set) => ({
+        weight: set.targetWeight,
+        reps: set.targetReps,
+        isAmrap: set.isAmrap,
+      })),
+    ).toEqual(
+      weights.map((weight, index) => ({
+        weight,
+        reps: reps[index],
+        isAmrap: amrap[index],
+      })),
+    );
+  });
+
+  it('builds the as-planned draft with every work set already complete', () => {
+    const draft = buildPlannedDraft(sessionForWeek(1));
+
+    expect(draft).toEqual([
+      [
+        { reps: 5, weight: 65 },
+        { reps: 5, weight: 75 },
+        { reps: 5, weight: 85 },
+      ],
+    ]);
+  });
+
+  it('uses the existing joker seam for a wave extra set', () => {
+    const session = sessionForWeek(1);
+    const current = buildPlannedDraft(session)[0];
+
+    expect(nextExtraSet(exercise, session, current)).toEqual({ reps: 5, weight: 87.5 });
   });
 });
 
@@ -153,6 +220,15 @@ describe('belowTarget — the soft inline note', () => {
       weightShort: null,
     });
   });
+
+  it('uses the selected wave set target rather than the flat training-max percentage', async () => {
+    const { executor } = connect();
+    const session = await fixture(executor);
+
+    expect(
+      belowTarget(squat(session), { reps: 3, weight: 45 }, session.roundingIncrement, 4, 0),
+    ).toEqual({ repsShort: 2, weightShort: 2.5 });
+  });
 });
 
 describe('buildLogRows — the §3.2 history rows', () => {
@@ -177,7 +253,7 @@ describe('buildLogRows — the §3.2 history rows', () => {
     expect(rows.weightLog).toHaveLength(12);
     const squatSets = rows.weightLog.filter((s) => s.loggedExerciseIndex === 0);
     expect(squatSets.map((s) => s.setNumber)).toEqual([1, 2, 3]);
-    expect(squatSets.map((s) => s.weight)).toEqual([107.5, 107.5, 107.5]);
+    expect(squatSets.map((s) => s.weight)).toEqual([47.5, 60, 72.5]);
     expect(squatSets.every((s) => s.unit === 'kg')).toBe(true);
     const rowSets = rows.weightLog.filter((s) => s.loggedExerciseIndex === 1);
     expect(rowSets.map((s) => s.setNumber)).toEqual([1, 2, 3]);
@@ -219,7 +295,9 @@ describe('buildLogRows — the §3.2 history rows', () => {
 
     const rows = buildLogRows(session, planned(session));
 
-    const weights = rows.weightLog.map((s) => s.weight);
+    const weights = rows.weightLog
+      .filter((s) => s.loggedExerciseIndex === 0)
+      .map((s) => s.weight);
     expect(weights).not.toContain(warmups[0].weight);
     expect(weights).not.toContain(warmups[1].weight);
     expect(weights).not.toContain(warmups[2].weight);
@@ -335,8 +413,8 @@ describe('buildLogRows — the §3.2 history rows', () => {
       unit: s.unit,
     }));
     const series = buildExerciseSeries(historyRows);
-    expect(series.points[0].volume).toBe(107.5 * 5 * 3 + 105 * 3 + 107.5 * 1);
-    expect(series.points[0].volume).toBeGreaterThan(107.5 * 5 * 3);
+    expect(series.points[0].volume).toBe(47.5 * 5 + 60 * 5 + 72.5 * 5 + 105 * 3 + 107.5);
+    expect(series.points[0].volume).toBeGreaterThan(47.5 * 5 + 60 * 5 + 72.5 * 5);
   });
 
   it('writes the per-set timing columns from the draft (§3.9)', async () => {
@@ -392,6 +470,7 @@ describe('loadRunnerSession', () => {
     expect(loaded.workoutName).toBe('Demo Routine');
     expect(loaded.sessionName).toBe('Squat Day');
     expect(loaded.workoutDate).toBe(resolved);
+    expect(loaded.weekNumber).toBe(4);
     expect(loaded.unit).toBe('kg');
     expect(loaded.roundingIncrement).toBe(2.5);
     expect(loaded.restMainSeconds).toBe(180);

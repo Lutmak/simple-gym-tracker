@@ -9,7 +9,7 @@ import { spacing } from '../utils/scale';
  * wraps every other element. Content inside a Screen must not add its own horizontal padding;
  * rows are full-bleed within the gutter on purpose.
  *
- * It also owns the **top safe-area inset**, because no screen in this app has a navigation header
+ * It also owns the **top and bottom safe-area insets**, because no screen in this app has a navigation header
  * (`headerShown: false` on every route — each screen draws its own title). Android is edge-to-edge
  * from SDK 54 and cannot be opted out of, so without this the first line of every screen sits
  * under the clock — observed on the emulator, 2026-08-15, with the Settings section title printed
@@ -21,18 +21,22 @@ export type ScreenProps = {
   children: ReactNode;
   /** Wrap content in a ScrollView. */
   scroll?: boolean;
+  /** Let the content own a fixed-header/body/footer layout. */
+  fill?: boolean;
   testID?: string;
 };
 
-export function Screen({ children, scroll, testID }: ScreenProps) {
+export function Screen({ children, scroll, fill, testID }: ScreenProps) {
   const { tokens } = useTheme();
   const insets = useSafeAreaInsets();
   const padded = [
     styles.padded,
+    fill && styles.fill,
     {
       paddingTop: insets.top + spacing.section,
       paddingLeft: spacing.gutter + insets.left,
       paddingRight: spacing.gutter + insets.right,
+      paddingBottom: spacing.section + insets.bottom,
     },
   ];
 
@@ -58,5 +62,8 @@ const styles = StyleSheet.create({
   },
   padded: {
     paddingBottom: spacing.section,
+  },
+  fill: {
+    flex: 1,
   },
 });

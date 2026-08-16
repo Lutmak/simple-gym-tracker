@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
-import { displayFontSize } from '../utils/scale';
+import { displayFontSize, fontSize } from '../utils/scale';
 
 /**
  * A self-ticking timer in display type — read from the floor, not the hand. Counts down a rest or
- * counts up a session's elapsed time; the parent owns the numbers that seed it, it owns the
- * ticking. `onComplete` fires exactly once when a countdown reaches zero.
+ * counts up a session's elapsed time; a parent can control the displayed countdown when it also
+ * owns pause and adjustment state. `onComplete` fires exactly once when an uncontrolled countdown
+ * reaches zero.
  */
 
 /** "92" → "1:32"; "3661" → "1:01:01". */
@@ -26,17 +27,20 @@ export type TimerProps = {
   mode?: 'countdown' | 'elapsed';
   /** countdown only. */
   duration?: number;
+  /** A parent-controlled countdown value, used when a footer owns pause and adjustment state. */
+  currentSeconds?: number;
   paused?: boolean;
   /** countdown only; fires once when the timer reaches zero. */
   onComplete?: () => void;
   /** Which display token the time renders in. */
-  size?: 'rest' | 'workout';
+  size?: 'rest' | 'workout' | 'header';
   testID?: string;
 };
 
 export function Timer({
   mode = 'countdown',
   duration = 0,
+  currentSeconds,
   paused = false,
   onComplete,
   size = 'rest',
@@ -44,19 +48,21 @@ export function Timer({
 }: TimerProps) {
   const { tokens } = useTheme();
   const [remaining, setRemaining] = useState(mode === 'countdown' ? duration : 0);
+  const controlled = currentSeconds !== undefined;
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 
   useEffect(() => {
-    if (mode === 'countdown') {
+    if (mode === 'countdown' && !controlled) {
       setRemaining(duration);
     }
-  }, [duration, mode]);
+  }, [controlled, duration, mode]);
 
-  const runningOut = mode === 'countdown' && remaining <= 0;
+  const displayedSeconds = currentSeconds ?? remaining;
+  const runningOut = mode === 'countdown' && displayedSeconds <= 0;
 
   useEffect(() => {
-    if (paused || runningOut) {
+    if (controlled || paused || runningOut) {
       return;
     }
     const interval = setInterval(() => {
@@ -65,23 +71,30 @@ export function Timer({
       );
     }, 1000);
     return () => clearInterval(interval);
-  }, [paused, runningOut, mode]);
+  }, [controlled, paused, runningOut, mode]);
 
   useEffect(() => {
-    if (mode === 'countdown' && remaining === 0 && !paused) {
+    if (!controlled && mode === 'countdown' && remaining === 0 && !paused) {
       onCompleteRef.current?.();
     }
-  }, [remaining, mode, paused]);
+  }, [controlled, remaining, mode, paused]);
+
+  const sizeValue =
+    size === 'rest'
+      ? displayFontSize.restTimer
+      : size === 'workout'
+        ? displayFontSize.workoutTimer
+        : fontSize.body;
 
   return (
     <Text
       style={[
         styles.time,
-        { color: tokens.textPrimary, fontSize: size === 'rest' ? displayFontSize.restTimer : displayFontSize.workoutTimer },
+        { color: tokens.textPrimary, fontSize: sizeValue },
       ]}
       testID={testID}
     >
-      {formatDuration(remaining)}
+      {formatDuration(displayedSeconds)}
     </Text>
   );
 }

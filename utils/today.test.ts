@@ -17,6 +17,7 @@ import {
   resolveDoTodaySession,
   resolveMoveSession,
   undoDiscardSession,
+  targetSetsFor,
   targetWeightFor,
   weekdayOfStamp,
   type QueuedSession,
@@ -104,6 +105,49 @@ describe('targetWeightFor', () => {
       targetWeightFor({ loadSource: 'bodyweight', absoluteWeight: null, trainingMaxWeight: null, trainingMaxPct: null }, 2.5),
     ).toBeNull();
   });
+
+  test('wave targets use the cycle week table for every planned set', () => {
+    const exercise = {
+      loadSource: 'training_max_pct' as const,
+      absoluteWeight: null,
+      trainingMaxWeight: 100,
+      trainingMaxPct: 0.9,
+      targetSets: 3,
+      targetReps: 5,
+      isAmrap: true,
+    };
+
+    expect(
+      ([1, 2, 3, 4] as const).map((week) =>
+        targetSetsFor(exercise, 2.5, week).map((set) => ({
+          weight: set.targetWeight,
+          reps: set.targetReps,
+          isAmrap: set.isAmrap,
+        })),
+      ),
+    ).toEqual([
+      [
+        { weight: 65, reps: 5, isAmrap: false },
+        { weight: 75, reps: 5, isAmrap: false },
+        { weight: 85, reps: 5, isAmrap: true },
+      ],
+      [
+        { weight: 70, reps: 3, isAmrap: false },
+        { weight: 80, reps: 3, isAmrap: false },
+        { weight: 90, reps: 3, isAmrap: true },
+      ],
+      [
+        { weight: 75, reps: 5, isAmrap: false },
+        { weight: 85, reps: 3, isAmrap: false },
+        { weight: 95, reps: 1, isAmrap: true },
+      ],
+      [
+        { weight: 40, reps: 5, isAmrap: false },
+        { weight: 50, reps: 5, isAmrap: false },
+        { weight: 60, reps: 5, isAmrap: false },
+      ],
+    ]);
+  });
 });
 
 describe('computeSessionQueue against the demo data', () => {
@@ -154,8 +198,8 @@ describe('computeSessionQueue against the demo data', () => {
     expect(state.head?.exercises[0]).toMatchObject({
       targetSets: 3,
       targetReps: 5,
-      isAmrap: true,
-      targetWeight: 57.5,
+      isAmrap: false,
+      targetWeight: 25,
       unit: 'kg',
     });
     expect(state.head?.exercises[1]).toMatchObject({ targetWeight: 120, unit: 'lb' });
@@ -466,6 +510,37 @@ describe('computeSessionQueue with a cycle, pure', () => {
     expect(state.resolution).toBe('due');
     expect(state.head?.weekSessionId).toBe(1);
     expect(state.upcoming).toBeNull();
+  });
+
+  test('the queue passes the cycle week to a wave exercise target', () => {
+    const today = dayStampFromYmd('2026-05-11');
+    const state = computeSessionQueue(
+      {
+        ...input([pending(1, 2)]),
+        exercises: [
+          {
+            sessionId: 1,
+            name: 'Squat',
+            targetSets: 3,
+            targetReps: 5,
+            loadSource: 'training_max_pct',
+            absoluteWeight: null,
+            trainingMaxWeight: 100,
+            trainingMaxPct: 0.9,
+            unitOverride: null,
+            isAmrap: true,
+            sortOrder: 1,
+          },
+        ],
+      },
+      today,
+    );
+
+    expect(state.head?.exercises[0]).toMatchObject({
+      targetWeight: 70,
+      targetReps: 3,
+      isAmrap: true,
+    });
   });
 
   test('do it today is unavailable while another session occupies today', () => {

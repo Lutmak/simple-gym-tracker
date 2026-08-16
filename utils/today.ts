@@ -19,6 +19,7 @@
  * that counts as not done).
  */
 
+import { calcSetWeight, waveForWeek } from './fiveThreeOne';
 import { roundTo } from './progression';
 import type { RoutineDatabase, RoutineLoadSource, RoutineUnit } from './routineActions';
 
@@ -64,15 +65,29 @@ export function nextOccurrenceStamp(todayStamp: number, weekday: number): number
 }
 
 /** The concrete target weight for an exercise's load source (§7.3, SPECS.md). */
-export function targetWeightFor(
-  exercise: {
-    loadSource: RoutineLoadSource;
-    absoluteWeight: number | null;
-    trainingMaxWeight: number | null;
-    trainingMaxPct: number | null;
-  },
+export interface PlannedTargetSet {
+  targetReps: number;
+  targetWeight: number | null;
+  isAmrap: boolean;
+}
+
+interface TargetExercise {
+  loadSource: RoutineLoadSource;
+  absoluteWeight: number | null;
+  trainingMaxWeight: number | null;
+  trainingMaxPct: number | null;
+  targetSets: number;
+  targetReps: number;
+  isAmrap: boolean;
+}
+
+const flatTargetWeightFor = (
+  exercise: Pick<
+    TargetExercise,
+    'loadSource' | 'absoluteWeight' | 'trainingMaxWeight' | 'trainingMaxPct'
+  >,
   roundingIncrement: number,
-): number | null {
+): number | null => {
   switch (exercise.loadSource) {
     case 'absolute':
       return exercise.absoluteWeight;
@@ -80,11 +95,64 @@ export function targetWeightFor(
       if (exercise.trainingMaxWeight === null || exercise.trainingMaxPct === null) {
         return null;
       }
-      // Same arithmetic as progression.ts currentTargetFor, rounded like its proposals.
+      // This fallback is kept for non-cycle callers; cycle callers use the wave table below.
       return roundTo(exercise.trainingMaxWeight * exercise.trainingMaxPct, roundingIncrement);
     case 'bodyweight':
       return null;
   }
+};
+
+const waveTargetSetsFor = (
+  exercise: Pick<TargetExercise, 'trainingMaxWeight'>,
+  roundingIncrement: number,
+  weekNumber: number,
+): PlannedTargetSet[] => {
+  const wave = waveForWeek(weekNumber);
+  return wave.sets.map((set) => ({
+    targetReps: set.targetReps,
+    targetWeight:
+      exercise.trainingMaxWeight === null
+        ? null
+        : calcSetWeight(
+            exercise.trainingMaxWeight,
+            set.percent,
+            roundingIncrement,
+            'nearest',
+          ),
+    isAmrap: set.isAmrap,
+  }));
+};
+
+export function targetWeightFor(
+  exercise: Pick<
+    TargetExercise,
+    'loadSource' | 'absoluteWeight' | 'trainingMaxWeight' | 'trainingMaxPct'
+  >,
+  roundingIncrement: number,
+  weekNumber?: number,
+): number | null {
+  if (exercise.loadSource === 'training_max_pct' && weekNumber !== undefined) {
+    return waveTargetSetsFor(exercise, roundingIncrement, weekNumber)[0]?.targetWeight ?? null;
+  }
+  return flatTargetWeightFor(exercise, roundingIncrement);
+}
+
+/** The concrete reps, AMRAP state, and load for every planned work set. */
+export function targetSetsFor(
+  exercise: TargetExercise,
+  roundingIncrement: number,
+  weekNumber?: number,
+): PlannedTargetSet[] {
+  if (exercise.loadSource === 'training_max_pct' && weekNumber !== undefined) {
+    return waveTargetSetsFor(exercise, roundingIncrement, weekNumber);
+  }
+
+  const targetWeight = flatTargetWeightFor(exercise, roundingIncrement);
+  return Array.from({ length: exercise.targetSets }, (_, index) => ({
+    targetReps: exercise.targetReps,
+    targetWeight,
+    isAmrap: exercise.isAmrap && index === exercise.targetSets - 1,
+  }));
 }
 
 export interface QueueSessionRow {
@@ -249,15 +317,24 @@ function buildHead(
     originDate: headRow.nominal,
     doTodayAvailable: todayOccupant === undefined,
     todayOccupiedBy: todayOccupant?.session.name ?? null,
-    exercises: exercises.map((exercise) => ({
-      name: exercise.name,
-      targetSets: exercise.targetSets,
-      targetReps: exercise.targetReps,
-      targetWeight: targetWeightFor(exercise, roundingIncrement),
-      unit: exercise.unitOverride ?? routineUnit,
-      isAmrap: exercise.isAmrap,
-      sortOrder: exercise.sortOrder,
-    })),
+    exercises: exercises.map((exercise) => {
+      const targets = targetSetsFor(
+        exercise,
+        roundingIncrement,
+        headRow.weekSession.weekNumber,
+      );
+      const firstTarget = targets[0];
+      const lastTarget = targets[targets.length - 1];
+      return {
+        name: exercise.name,
+        targetSets: exercise.targetSets,
+        targetReps: firstTarget?.targetReps ?? exercise.targetReps,
+        targetWeight: firstTarget?.targetWeight ?? null,
+        unit: exercise.unitOverride ?? routineUnit,
+        isAmrap: lastTarget?.isAmrap ?? exercise.isAmrap,
+        sortOrder: exercise.sortOrder,
+      };
+    }),
   };
 }
 

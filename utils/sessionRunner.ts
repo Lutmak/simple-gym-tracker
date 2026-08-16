@@ -28,10 +28,12 @@
 
 import { warmupSets } from './fiveThreeOne';
 import { inferBaselineWeight, baselineColumn } from './learnedWeights';
-import { targetWeightFor } from './today';
+import { proposeJokerWeight } from './jokers';
+import { targetSetsFor, targetWeightFor, type PlannedTargetSet } from './today';
 import type {
   RoutineDatabase,
   RoutineLoadSource,
+  RoutineProgressionRule,
   RoutineUnit,
 } from './routineActions';
 
@@ -57,7 +59,10 @@ export interface RunnerSession {
   workoutName: string;
   /** The calendar day the log lands on: the resolved date, or today. */
   workoutDate: number;
+  /** The 1..4 position inside the cycle; wave targets depend on it. */
+  weekNumber: number;
   unit: RoutineUnit;
+  progressionRule: RoutineProgressionRule;
   roundingIncrement: number;
   restMainSeconds: number;
   restAccessorySeconds: number;
@@ -103,6 +108,70 @@ export interface RunnerTotals {
   loggedExercises: number;
 }
 
+export type RunnerTargetSet = PlannedTargetSet;
+
+/** The runner's complete target for each planned work set. */
+export function runnerTargetsFor(
+  exercise: RunnerExercise,
+  session: RunnerSession,
+): RunnerTargetSet[] {
+  return targetSetsFor(exercise, session.roundingIncrement, session.weekNumber);
+}
+
+/** The session's default draft: the plan is already recorded until the user edits it. */
+export function buildPlannedDraft(session: RunnerSession): RunnerDraft {
+  return session.exercises.map((exercise) =>
+    runnerTargetsFor(exercise, session).map((target) => ({
+      reps: target.targetReps,
+      weight: target.targetWeight,
+    })),
+  );
+}
+
+/** The next extra set, using the current work weight as a wave joker when applicable. */
+export function nextExtraSet(
+  exercise: RunnerExercise,
+  session: RunnerSession,
+  currentSets: readonly (LoggedSet | null)[],
+): LoggedSet {
+  const targets = runnerTargetsFor(exercise, session);
+  const fallback = targets[targets.length - 1] ?? {
+    targetReps: exercise.targetReps,
+    targetWeight: runnerTargetWeight(exercise, session.roundingIncrement, session.weekNumber),
+    isAmrap: exercise.isAmrap,
+  };
+  const last = [...currentSets].reverse().find((set): set is LoggedSet => set !== null);
+  const currentWeight = last?.weight ?? fallback.targetWeight;
+  const weight =
+    session.progressionRule === 'wave' && currentWeight !== null
+      ? proposeJokerWeight(currentWeight, session.roundingIncrement)
+      : currentWeight;
+
+  return {
+    reps: last?.reps ?? fallback.targetReps,
+    weight,
+  };
+}
+
+/** Target metadata for a row, including an appended extra set. */
+export function runnerTargetForSet(
+  exercise: RunnerExercise,
+  session: RunnerSession,
+  currentSets: readonly (LoggedSet | null)[],
+  setIndex: number,
+): RunnerTargetSet {
+  const planned = runnerTargetsFor(exercise, session)[setIndex];
+  if (planned !== undefined) {
+    return planned;
+  }
+  const extra = nextExtraSet(exercise, session, currentSets.slice(0, setIndex));
+  return {
+    targetReps: extra.reps,
+    targetWeight: extra.weight,
+    isAmrap: false,
+  };
+}
+
 const exerciseUnit = (exercise: RunnerExercise, session: RunnerSession): RoutineUnit =>
   exercise.unitOverride ?? session.unit;
 
@@ -110,8 +179,9 @@ const exerciseUnit = (exercise: RunnerExercise, session: RunnerSession): Routine
 export function runnerTargetWeight(
   exercise: RunnerExercise,
   roundingIncrement: number,
+  weekNumber?: number,
 ): number | null {
-  return targetWeightFor(exercise, roundingIncrement);
+  return targetWeightFor(exercise, roundingIncrement, weekNumber);
 }
 
 /**
@@ -124,7 +194,7 @@ export function warmupSetsFor(
   exercise: RunnerExercise,
   session: RunnerSession,
 ): { weight: number; reps: number }[] {
-  const target = runnerTargetWeight(exercise, session.roundingIncrement);
+  const target = runnerTargetWeight(exercise, session.roundingIncrement, session.weekNumber);
   if (target === null || target <= 0) {
     return [];
   }
@@ -159,9 +229,16 @@ export function belowTarget(
   exercise: RunnerExercise,
   set: LoggedSet,
   roundingIncrement: number,
+  weekNumber?: number,
+  setIndex = 0,
 ): { repsShort: number; weightShort: number | null } {
-  const repsShort = Math.max(0, exercise.targetReps - set.reps);
-  const target = runnerTargetWeight(exercise, roundingIncrement);
+  const targetSet = targetSetsFor(exercise, roundingIncrement, weekNumber)[setIndex] ?? {
+    targetReps: exercise.targetReps,
+    targetWeight: runnerTargetWeight(exercise, roundingIncrement, weekNumber),
+    isAmrap: exercise.isAmrap,
+  };
+  const repsShort = Math.max(0, targetSet.targetReps - set.reps);
+  const target = targetSet.targetWeight;
   const weightShort =
     target !== null && set.weight !== null && set.weight < target
       ? target - set.weight
@@ -378,11 +455,13 @@ export async function loadRunnerSession(
   todayStamp: number,
 ): Promise<RunnerSession> {
   const row = await db.get(
-    `SELECT ws.week_session_id, ws.status, ws.resolved_on_date,
+    `SELECT ws.week_session_id, ws.status, ws.resolved_on_date, cw.week_number,
             s.session_id, s.name AS session_name,
-            r.name AS workout_name, r.unit, r.rounding_increment,
+            r.name AS workout_name, r.unit, r.progression_rule,
+            r.rounding_increment,
             r.rest_main_seconds, r.rest_accessory_seconds
      FROM WeekSessions ws
+     JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
      JOIN Sessions s ON s.session_id = ws.session_id
      JOIN Routines r ON r.routine_id = s.routine_id
      WHERE ws.week_session_id = ?;`,
@@ -420,7 +499,9 @@ export async function loadRunnerSession(
       row.resolved_on_date === null || row.resolved_on_date === undefined
         ? todayStamp
         : num(row.resolved_on_date),
+    weekNumber: num(row.week_number),
     unit: str(row.unit) as RoutineUnit,
+    progressionRule: str(row.progression_rule) as RoutineProgressionRule,
     roundingIncrement: num(row.rounding_increment),
     restMainSeconds: num(row.rest_main_seconds),
     restAccessorySeconds: num(row.rest_accessory_seconds),

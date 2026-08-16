@@ -187,7 +187,7 @@ const InicioStack = () => {
       <InicioStackNavigator.Screen
         name="StartSession"
         component={StartSessionScreen}
-        options={{ title: t('inicioStartSession') }}
+        options={{ headerShown: false }}
       />
       <InicioStackNavigator.Screen
         name="FreeLogging"

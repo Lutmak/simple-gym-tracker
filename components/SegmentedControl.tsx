@@ -19,6 +19,8 @@ export type SegmentedControlProps<T extends string> = {
   value: T;
   onChange: (value: T) => void;
   disabled?: boolean;
+  /** Wrap longer option sets into compact rows while keeping one selection. */
+  wrap?: boolean;
   testID?: string;
 };
 
@@ -27,12 +29,13 @@ export function SegmentedControl<T extends string>({
   value,
   onChange,
   disabled,
+  wrap,
   testID,
 }: SegmentedControlProps<T>) {
   const { tokens } = useTheme();
 
   return (
-    <View style={styles.container} testID={testID}>
+    <View style={[styles.container, wrap && styles.wrappedContainer]} testID={testID}>
       {options.map((option) => {
         const selected = option.value === value;
         return (
@@ -44,6 +47,7 @@ export function SegmentedControl<T extends string>({
             accessibilityState={{ selected, disabled: disabled === true }}
             style={({ pressed }) => [
               styles.segment,
+              wrap && styles.wrappedSegment,
               selected
                 ? { backgroundColor: tokens.accent }
                 : pressed && !disabled
@@ -74,6 +78,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.inline,
   },
+  wrappedContainer: {
+    flexWrap: 'wrap',
+  },
   segment: {
     flex: 1,
     minHeight: touchTarget.control,
@@ -81,6 +88,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.card,
+  },
+  wrappedSegment: {
+    flexBasis: '30%',
   },
   label: {
     fontSize: fontSize.button,

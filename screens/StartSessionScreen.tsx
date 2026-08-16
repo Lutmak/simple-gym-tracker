@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useTranslation } from 'react-i18next';
@@ -7,14 +16,27 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { useQueueRevision } from '../context/QueueRevision';
 import { Button } from '../components/Button';
+import AppTextInput from '../components/AppTextInput';
 import { Field } from '../components/Field';
 import { NumberStepper } from '../components/NumberStepper';
+import { PlatePicker } from '../components/PlatePicker';
 import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { Section } from '../components/Section';
+import { SegmentedControl } from '../components/SegmentedControl';
 import { Sheet } from '../components/Sheet';
 import { Timer } from '../components/Timer';
 import { fontSize, spacing, tabBar, touchTarget } from '../utils/scale';
+import {
+  BAR_PROFILES,
+  STANDARD_PLATES,
+  barWeightFor,
+  canSaveBarProfile,
+  composeLoad,
+  formatWeight,
+  suggestPlates,
+  type BarProfileKey,
+} from '../utils/barProfiles';
 import {
   belowTarget,
   buildPlannedDraft,
@@ -23,6 +45,7 @@ import {
   formatRunnerPlanLine,
   runnerTargetForSet,
   runnerTargetsFor,
+  saveRunnerBarProfile,
   saveSessionLog,
   type LoggedSet,
   type RunnerExercise,
@@ -32,7 +55,7 @@ import {
   warmupSetsFor,
 } from '../utils/sessionRunner';
 import { dayStampOf } from '../utils/today';
-import type { RoutineDatabase } from '../utils/routineActions';
+import type { RoutineDatabase, RoutineUnit } from '../utils/routineActions';
 import type { InicioStackParamList } from '../App';
 
 type Props = NativeStackScreenProps<InicioStackParamList, 'StartSession'>;
@@ -47,9 +70,24 @@ interface EditingSet {
   setIndex: number;
 }
 
-const formatWeight = (value: number): string => String(Number(value.toFixed(1)));
-
 const pressStyle = (pressed: boolean) => (pressed ? styles.pressed : null);
+
+const BAR_PROFILE_KEYS = Object.keys(BAR_PROFILES) as BarProfileKey[];
+
+const barProfileLabelKey = (profile: BarProfileKey): string => {
+  switch (profile) {
+    case 'olympic':
+      return 'runnerBarProfileOlympic';
+    case 'semi-olympic':
+      return 'runnerBarProfileSemiOlympic';
+    case 'smith':
+      return 'runnerBarProfileSmith';
+    case 'ez':
+      return 'runnerBarProfileEz';
+    case 'custom':
+      return 'runnerBarProfileCustom';
+  }
+};
 
 export default function StartSessionScreen({ navigation, route }: Props) {
   const { weekSessionId } = route.params;
@@ -193,6 +231,36 @@ export default function StartSessionScreen({ navigation, route }: Props) {
     startRest(session.exercises[selectedExercise].role);
   };
 
+  const commitBarProfile = async (
+    exercise: RunnerExercise,
+    barProfile: BarProfileKey,
+    barWeight: number | null,
+  ): Promise<void> => {
+    try {
+      await saveRunnerBarProfile(routineDb, exercise.sessionExerciseId, barProfile, barWeight);
+      setSession((current) =>
+        current === null
+          ? current
+          : {
+              ...current,
+              exercises: current.exercises.map((candidate) =>
+                candidate.sessionExerciseId === exercise.sessionExerciseId
+                  ? {
+                      ...candidate,
+                      barProfile,
+                      barWeight: barProfile === 'custom' ? barWeight : null,
+                    }
+                  : candidate,
+              ),
+            },
+      );
+    } catch (error) {
+      console.error('Error saving bar profile:', error);
+      Alert.alert(t('errorTitle'), t('runnerBarSaveFailed'));
+      throw error;
+    }
+  };
+
   const addExtraSet = () => {
     if (session === null || currentExercise === undefined) {
       return;
@@ -271,7 +339,7 @@ export default function StartSessionScreen({ navigation, route }: Props) {
     );
   }
 
-  const unit = currentExercise.unitOverride ?? session.unit;
+  const planUnit = currentExercise.unitOverride ?? session.unit;
   const totalRows = Math.max(currentExercise.targetSets, currentSets.length);
   const isLastExercise = exerciseIndex === session.exercises.length - 1;
   const isWarmupOn = warmupEnabled[exerciseIndex] === true;
@@ -296,7 +364,7 @@ export default function StartSessionScreen({ navigation, route }: Props) {
 
   const formatTargetLoad = (target: RunnerTargetSet): string => {
     if (target.targetWeight !== null) {
-      return `${formatWeight(target.targetWeight)} ${unit}`;
+      return `${formatWeight(target.targetWeight)} ${planUnit}`;
     }
     return currentExercise.loadSource === 'bodyweight'
       ? t('loadBodyweight')
@@ -304,9 +372,15 @@ export default function StartSessionScreen({ navigation, route }: Props) {
   };
 
   const formatSetDetail = (target: RunnerTargetSet, logged: LoggedSet): string => {
+    const loggedUnit = logged.unit ?? planUnit;
     const weight =
-      logged.weight === null ? formatTargetLoad(target) : `${formatWeight(logged.weight)} ${unit}`;
-    const sameAsTarget = logged.reps === target.targetReps && logged.weight === target.targetWeight;
+      logged.weight === null
+        ? formatTargetLoad(target)
+        : `${formatWeight(logged.weight)} ${loggedUnit}`;
+    const sameAsTarget =
+      logged.reps === target.targetReps &&
+      logged.weight === target.targetWeight &&
+      loggedUnit === planUnit;
     if (sameAsTarget && target.isAmrap) {
       return `${t('runnerMaxReps')} · ${weight}`;
     }
@@ -336,7 +410,7 @@ export default function StartSessionScreen({ navigation, route }: Props) {
       notes.push(
         t('runnerBelowWeight', {
           weight: formatWeight(result.weightShort),
-          unit,
+          unit: logged.unit ?? planUnit,
         }),
       );
     }
@@ -463,7 +537,7 @@ export default function StartSessionScreen({ navigation, route }: Props) {
                     return (
                       <Row
                         key={`${exerciseIndex}:warmup:${warmupIndex}`}
-                        label={`${formatWeight(warmup.weight)} ${unit} · ${warmup.reps} ${t('Reps')}`}
+                        label={`${formatWeight(warmup.weight)} ${planUnit} · ${warmup.reps} ${t('Reps')}`}
                         onPress={() => toggleWarmup(warmupIndex)}
                         right={
                           <Ionicons
@@ -607,6 +681,13 @@ export default function StartSessionScreen({ navigation, route }: Props) {
           )}
           onClose={() => setEditing(null)}
           onCommit={commitSet}
+          onBarProfileChange={(barProfile, barWeight) =>
+            commitBarProfile(
+              session.exercises[editing.exerciseIndex],
+              barProfile,
+              barWeight,
+            )
+          }
         />
       )}
 
@@ -640,6 +721,7 @@ interface RunnerSetEditorProps {
   target: RunnerTargetSet;
   onClose: () => void;
   onCommit: (set: LoggedSet | null) => void;
+  onBarProfileChange: (barProfile: BarProfileKey, barWeight: number | null) => Promise<void>;
 }
 
 function RunnerSetEditor({
@@ -651,13 +733,151 @@ function RunnerSetEditor({
   target,
   onClose,
   onCommit,
+  onBarProfileChange,
 }: RunnerSetEditorProps) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
   const [reps, setReps] = useState<number | null>(initial.reps);
   const [weight, setWeight] = useState<number | null>(initial.weight);
-  const unit = exercise.unitOverride ?? session.unit;
+  const planUnit = exercise.unitOverride ?? session.unit;
+  const [unit, setUnit] = useState<RoutineUnit>(initial.unit ?? planUnit);
+  const [barProfile, setBarProfile] = useState<BarProfileKey | null>(
+    exercise.barProfile,
+  );
+  const [customBarWeight, setCustomBarWeight] = useState<number | null>(
+    exercise.barWeight,
+  );
+  const initialBarWeight =
+    exercise.barProfile === null
+      ? null
+      : barWeightFor(exercise.barProfile, exercise.barWeight, unit);
+  const [plates, setPlates] = useState<number[]>(() => {
+    if (initial.weight === null || initialBarWeight === null) {
+      return [];
+    }
+    return suggestPlates(initial.weight, initialBarWeight, STANDARD_PLATES[unit]) ?? [];
+  });
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [savingProfile, setSavingProfile] = useState(false);
   const canEditWeight = exercise.loadSource !== 'bodyweight';
+  const currentBarWeight =
+    barProfile === null
+      ? null
+      : barWeightFor(
+          barProfile,
+          barProfile === 'custom' ? customBarWeight : null,
+          unit,
+        );
+  const canSaveComposer =
+    barProfile !== null &&
+    canSaveBarProfile(barProfile, barProfile === 'custom' ? customBarWeight : null);
+
+  const changeUnit = (nextUnit: RoutineUnit) => {
+    setUnit(nextUnit);
+    if (barProfile === null || weight === null) {
+      setPlates([]);
+      return;
+    }
+    const nextBarWeight = barWeightFor(
+      barProfile,
+      barProfile === 'custom' ? customBarWeight : null,
+      nextUnit,
+    );
+    setPlates(
+      nextBarWeight === null
+        ? []
+        : suggestPlates(weight, nextBarWeight, STANDARD_PLATES[nextUnit]) ?? [],
+    );
+  };
+
+  const chooseBarProfile = (nextProfile: BarProfileKey) => {
+    setBarProfile(nextProfile);
+    const nextBarWeight = barWeightFor(
+      nextProfile,
+      nextProfile === 'custom' ? customBarWeight : null,
+      unit,
+    );
+    const nextTotal = weight ?? nextBarWeight;
+    if (weight === null && nextTotal !== null) {
+      setWeight(nextTotal);
+    }
+    setPlates(
+      nextTotal === null || nextBarWeight === null
+        ? []
+        : suggestPlates(nextTotal, nextBarWeight, STANDARD_PLATES[unit]) ?? [],
+    );
+  };
+
+  const changeCustomBarWeight = (nextBarWeight: number | null) => {
+    setCustomBarWeight(nextBarWeight);
+    if (barProfile !== 'custom') {
+      return;
+    }
+    const nextTotal = weight ?? nextBarWeight;
+    if (weight === null && nextBarWeight !== null) {
+      setWeight(nextBarWeight);
+    }
+    setPlates(
+      nextTotal === null || nextBarWeight === null
+        ? []
+        : suggestPlates(nextTotal, nextBarWeight, STANDARD_PLATES[unit]) ?? [],
+    );
+  };
+
+  const addPlate = (plate: number) => {
+    if (currentBarWeight === null) {
+      return;
+    }
+    const nextPlates = [...plates, plate];
+    setPlates(nextPlates);
+    setWeight(composeLoad(currentBarWeight, nextPlates));
+  };
+
+  const removePlate = (plate: number) => {
+    if (currentBarWeight === null) {
+      return;
+    }
+    const plateIndex = plates.lastIndexOf(plate);
+    if (plateIndex < 0) {
+      return;
+    }
+    const nextPlates = plates.filter((_, index) => index !== plateIndex);
+    setPlates(nextPlates);
+    setWeight(composeLoad(currentBarWeight, nextPlates));
+  };
+
+  const restorePersistedBarProfile = () => {
+    setBarProfile(exercise.barProfile);
+    setCustomBarWeight(exercise.barWeight);
+    const persistedBarWeight =
+      exercise.barProfile === null
+        ? null
+        : barWeightFor(exercise.barProfile, exercise.barWeight, unit);
+    setPlates(
+      weight === null || persistedBarWeight === null
+        ? []
+        : suggestPlates(weight, persistedBarWeight, STANDARD_PLATES[unit]) ?? [],
+    );
+    setComposerOpen(false);
+  };
+
+  const saveComposer = async () => {
+    if (barProfile === null || !canSaveComposer || savingProfile) {
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      await onBarProfileChange(
+        barProfile,
+        barProfile === 'custom' ? customBarWeight : null,
+      );
+      setComposerOpen(false);
+    } catch {
+      // The parent reports the database error and keeps the composer open.
+    } finally {
+      setSavingProfile(false);
+    }
+  };
 
   const commit = () => {
     if (reps === null || !Number.isInteger(reps) || reps < 1) {
@@ -666,7 +886,11 @@ function RunnerSetEditor({
     if (canEditWeight && (weight === null || weight <= 0)) {
       return;
     }
-    onCommit({ reps, weight: canEditWeight ? weight : null, unit: initial.unit });
+    onCommit({
+      reps,
+      weight: canEditWeight ? weight : null,
+      unit: canEditWeight ? unit : undefined,
+    });
   };
 
   const targetReps = target.isAmrap
@@ -677,7 +901,7 @@ function RunnerSetEditor({
       ? exercise.loadSource === 'bodyweight'
         ? t('loadBodyweight')
         : t('runnerWeightToLearn')
-      : `${formatWeight(target.targetWeight)} ${unit}`;
+      : `${formatWeight(target.targetWeight)} ${planUnit}`;
   const position =
     setIndex >= exercise.targetSets
       ? session.progressionRule === 'wave'
@@ -685,37 +909,232 @@ function RunnerSetEditor({
         : t('runnerExtraSetPosition', { n: setIndex - exercise.targetSets + 1 })
       : t('setPosition', { n: setIndex + 1, total: exercise.targetSets });
 
+  const barSummary =
+    barProfile === null
+      ? null
+      : currentBarWeight === null
+        ? t('runnerBarSummaryNoWeight', {
+            profile: t(barProfileLabelKey(barProfile)),
+          })
+        : t('runnerBarSummary', {
+            profile: t(barProfileLabelKey(barProfile)),
+            weight: formatWeight(currentBarWeight),
+            unit,
+          });
+  const composition =
+    weight === null || currentBarWeight === null
+      ? null
+      : suggestPlates(weight, currentBarWeight, STANDARD_PLATES[unit]);
+  const canCommit =
+    reps !== null &&
+    Number.isInteger(reps) &&
+    reps >= 1 &&
+    (!canEditWeight || (weight !== null && weight > 0));
+
   return (
     <Sheet
       visible={visible}
-      title={`${exercise.name} · ${position}`}
+      title={
+        composerOpen
+          ? t('runnerComposeTitle', {
+              total:
+                weight === null
+                  ? t('runnerWeightToLearn')
+                  : `${formatWeight(weight)} ${unit}`,
+            })
+          : `${exercise.name} · ${position}`
+      }
       onClose={onClose}
+      onBack={composerOpen ? restorePersistedBarProfile : undefined}
       testID="runner-set-editor"
     >
-      <Text style={[styles.editorTarget, { color: tokens.textSecondary }]}>
-        {t('runnerTargetDescription', { reps: targetReps, weight: targetWeight })}
-      </Text>
-      <Field label={t('runnerActualReps')}>
-        <NumberStepper value={reps} onChange={setReps} min={1} step={1} testID="editor-reps" />
-      </Field>
-      {canEditWeight && (
-        <Field label={t('weightLabel', { unit })}>
-          <NumberStepper
-            value={weight}
-            onChange={setWeight}
-            min={0}
-            step={session.roundingIncrement}
-            testID="editor-weight"
-          />
-        </Field>
+      {composerOpen && barProfile !== null ? (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.editorKeyboard}
+        >
+          <View style={styles.composerLayout}>
+            <ScrollView
+              style={styles.composerScroll}
+              contentContainerStyle={styles.composerContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Section
+                title={t('runnerBarProfileLabel')}
+                hint={t('runnerBarProfileFuture')}
+                testID="editor-bar-profiles"
+              >
+                <SegmentedControl
+                  options={BAR_PROFILE_KEYS.map((profile) => ({
+                    value: profile,
+                    label: t(barProfileLabelKey(profile)),
+                  }))}
+                  value={barProfile}
+                  onChange={chooseBarProfile}
+                  wrap
+                  testID="editor-bar-profile-options"
+                />
+                <Text
+                  style={[styles.composition, { color: tokens.textPrimary }]}
+                >
+                  {barSummary}
+                </Text>
+              </Section>
+
+              {barProfile === 'custom' && (
+                <Field
+                  label={t('runnerCustomBarWeight', { unit })}
+                  hint={t('runnerCustomBarWeightHint')}
+                >
+                  <AppTextInput
+                    variant="numeric"
+                    value={customBarWeight === null ? '' : String(customBarWeight)}
+                    onCommit={changeCustomBarWeight}
+                    keyboardType="decimal-pad"
+                    testID="editor-custom-bar"
+                  />
+                </Field>
+              )}
+
+              <Section
+                title={t('runnerPlatesTitle')}
+                hint={t('runnerPlateHoldToRemove')}
+                testID="editor-plates"
+              >
+                <Text
+                  style={[styles.composition, { color: tokens.textPrimary }]}
+                >
+                  {t('runnerPlatesPerSide')}:{' '}
+                  {plates.length === 0
+                    ? t('runnerNoPlates')
+                    : plates.map((plate) => `${formatWeight(plate)} ${unit}`).join(' + ')}
+                </Text>
+                <PlatePicker
+                  options={STANDARD_PLATES[unit].map((plate) => ({
+                    value: plate,
+                    label: `+${formatWeight(plate)} ${unit}`,
+                  }))}
+                  onPress={addPlate}
+                  onLongPress={removePlate}
+                  longPressHint={t('runnerPlateHoldToRemove')}
+                  testID="editor-plate-picker"
+                />
+                {weight !== null && (currentBarWeight === null || composition === null) && (
+                  <Text
+                    style={[styles.compositionHint, { color: tokens.textSecondary }]}
+                  >
+                    {t('runnerCompositionUnavailable')}
+                  </Text>
+                )}
+              </Section>
+            </ScrollView>
+
+            <View style={styles.composerFooter}>
+              <View style={styles.composerTotal}>
+                <Text
+                  style={[styles.composerTotalLabel, { color: tokens.textSecondary }]}
+                >
+                  {t('runnerTotalLabel')}
+                </Text>
+                <Text
+                  style={[styles.composerTotalValue, { color: tokens.textPrimary }]}
+                >
+                  {weight === null
+                    ? t('runnerWeightToLearn')
+                    : `${formatWeight(weight)} ${unit}`}
+                </Text>
+              </View>
+              <Button
+                label={t('runnerDone')}
+                onPress={() => void saveComposer()}
+                disabled={savingProfile || !canSaveComposer}
+                testID="editor-composer-done"
+              />
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      ) : (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.editorKeyboard}
+        >
+          <ScrollView
+            style={styles.editorScroll}
+            contentContainerStyle={styles.editorContent}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Text style={[styles.editorTarget, { color: tokens.textSecondary }]}>
+              {t('runnerTargetDescription', { reps: targetReps, weight: targetWeight })}
+            </Text>
+            <Field label={t('runnerActualReps')}>
+              <NumberStepper
+                value={reps}
+                onChange={setReps}
+                min={1}
+                step={1}
+                testID="editor-reps"
+              />
+            </Field>
+            {canEditWeight && (
+              <Field label={t('runnerWeightLabel')}>
+                <View style={styles.unitControl}>
+                  <Text style={[styles.unitLabel, { color: tokens.textSecondary }]}>
+                    {t('runnerSetUnit')}
+                  </Text>
+                  <SegmentedControl<RoutineUnit>
+                    options={[
+                      { value: 'kg', label: 'kg' },
+                      { value: 'lb', label: 'lb' },
+                    ]}
+                    value={unit}
+                    onChange={changeUnit}
+                    testID="editor-unit"
+                  />
+                </View>
+                <View style={styles.weightStepper}>
+                  <NumberStepper
+                    value={weight}
+                    onChange={setWeight}
+                    min={0}
+                    step={session.roundingIncrement}
+                    testID="editor-weight"
+                  />
+                  <Text style={[styles.weightUnit, { color: tokens.textPrimary }]}>{unit}</Text>
+                </View>
+              </Field>
+            )}
+            {canEditWeight && barSummary !== null && (
+              <Row
+                label={barSummary}
+                detail={t('runnerBarProfileOpen')}
+                right={
+                  <Ionicons
+                    name="chevron-forward"
+                    size={tabBar.icon}
+                    color={tokens.textPrimary}
+                  />
+                }
+                onPress={() => setComposerOpen(true)}
+                divided
+                testID="editor-bar-composer"
+              />
+            )}
+            <Row
+              label={t('runnerMarkNotDone')}
+              onPress={() => onCommit(null)}
+              divided
+              testID="editor-not-done"
+            />
+            <Button
+              label={t('runnerDone')}
+              onPress={commit}
+              disabled={!canCommit}
+              style={styles.editorButton}
+              testID="editor-done"
+            />
+          </ScrollView>
+        </KeyboardAvoidingView>
       )}
-      <Row
-        label={t('runnerMarkNotDone')}
-        onPress={() => onCommit(null)}
-        divided
-        testID="editor-not-done"
-      />
-      <Button label={t('runnerApplyEdit')} onPress={commit} style={styles.editorButton} />
     </Sheet>
   );
 }
@@ -840,6 +1259,64 @@ const styles = StyleSheet.create({
   editorTarget: {
     fontSize: fontSize.body,
     marginBottom: spacing.section,
+  },
+  editorKeyboard: {
+    flexShrink: 1,
+  },
+  editorScroll: {
+    flexShrink: 1,
+  },
+  editorContent: {
+    paddingBottom: spacing.cardGap,
+  },
+  composerContent: {
+    paddingBottom: spacing.cardGap,
+  },
+  composerLayout: {
+    flexShrink: 1,
+  },
+  composerScroll: {
+    flexShrink: 1,
+  },
+  composerFooter: {
+    gap: spacing.cardGap,
+  },
+  unitControl: {
+    gap: spacing.label,
+    marginBottom: spacing.cardGap,
+  },
+  unitLabel: {
+    fontSize: fontSize.helper,
+  },
+  weightStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.inline,
+  },
+  weightUnit: {
+    fontSize: fontSize.body,
+    fontWeight: '600',
+  },
+  composition: {
+    fontSize: fontSize.body,
+  },
+  compositionHint: {
+    fontSize: fontSize.helper,
+    marginTop: spacing.label,
+  },
+  composerTotal: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: spacing.inline,
+    marginTop: spacing.cardGap,
+  },
+  composerTotalLabel: {
+    fontSize: fontSize.label,
+  },
+  composerTotalValue: {
+    fontSize: fontSize.cardTitle,
+    fontWeight: '700',
   },
   editorButton: {
     marginTop: spacing.cardGap,

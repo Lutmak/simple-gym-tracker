@@ -1,9 +1,11 @@
 import {
   BAR_PROFILES,
   barWeightFor,
+  canSaveBarProfile,
   composeLoad,
   convertWeight,
   defaultBarProfileForEquipment,
+  formatWeight,
   suggestPlates,
   STANDARD_PLATES,
 } from './barProfiles';
@@ -47,8 +49,27 @@ describe('BAR_PROFILES and barWeightFor', () => {
     expect(barWeightFor('semi-olympic', null, 'kg')).toBe(15);
     expect(barWeightFor('custom', 27.5, 'kg')).toBe(27.5);
     expect(barWeightFor('custom', 60, 'lb')).toBe(60);
+    expect(barWeightFor('custom', 0, 'kg')).toBeNull();
     expect(barWeightFor(null, null, 'kg')).toBeNull();
     expect(barWeightFor(null, 20, 'kg')).toBeNull();
+  });
+
+  it('only allows a custom profile to be saved with a finite positive weight', () => {
+    expect(canSaveBarProfile('olympic', null)).toBe(true);
+    expect(canSaveBarProfile('custom', 27.5)).toBe(true);
+    expect(canSaveBarProfile('custom', null)).toBe(false);
+    expect(canSaveBarProfile('custom', 0)).toBe(false);
+    expect(canSaveBarProfile('custom', -1)).toBe(false);
+    expect(canSaveBarProfile('custom', Number.NaN)).toBe(false);
+  });
+});
+
+describe('formatWeight', () => {
+  it('keeps plate precision while trimming ordinary trailing zeroes', () => {
+    expect(formatWeight(1.25)).toBe('1.25');
+    expect(formatWeight(2.5)).toBe('2.5');
+    expect(formatWeight(20)).toBe('20');
+    expect(formatWeight(1.234)).toBe('1.23');
   });
 });
 

@@ -32,4 +32,18 @@ describe('SegmentedControl', () => {
     fireEvent.press(screen.getByText('lb'));
     expect(onChange).not.toHaveBeenCalled();
   });
+
+  it('keeps every wrapped option visible and tappable', () => {
+    const onChange = jest.fn();
+    render(
+      <SegmentedControl options={OPTIONS} value="kg" onChange={onChange} wrap />,
+    );
+
+    expect(screen.getByText('kg')).toBeTruthy();
+    expect(screen.getByText('lb')).toBeTruthy();
+    expect(screen.getByText('Bodyweight')).toBeTruthy();
+
+    fireEvent.press(screen.getByText('Bodyweight'));
+    expect(onChange).toHaveBeenCalledWith('bodyweight');
+  });
 });

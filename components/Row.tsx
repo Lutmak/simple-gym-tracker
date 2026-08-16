@@ -21,6 +21,7 @@ export type RowProps = {
   /** A trailing control — a Switch, a chevron, a value chip. */
   right?: ReactNode;
   onPress?: () => void;
+  onLongPress?: () => void;
   disabled?: boolean;
   /** A hairline under this row, for lists where the boundary is real. */
   divided?: boolean;
@@ -34,6 +35,7 @@ export function Row({
   detailBelow,
   right,
   onPress,
+  onLongPress,
   disabled,
   divided,
   testID,
@@ -70,6 +72,7 @@ export function Row({
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       disabled={disabled || onPress === undefined}
       accessibilityRole={onPress !== undefined ? 'button' : undefined}
       accessibilityState={{ disabled: disabled === true || onPress === undefined }}

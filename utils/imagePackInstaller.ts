@@ -179,6 +179,33 @@ export function validateImagePackArchive(
   return { images };
 }
 
+/**
+ * Where an installed image lives. R2's exercise sheet is the first surface to read the pack back:
+ * the install writes one `<catalogKey>.jpg` per exercise, so the key alone is the whole lookup.
+ */
+export function imagePackImageUri(catalogKey: string): string {
+  return `${FileSystem.documentDirectory}${IMAGE_PACK_INSTALL_DIR}/${catalogKey}.jpg`;
+}
+
+/**
+ * The image for an exercise, or null when the pack is not installed or does not cover it. The pack
+ * is optional and partial by design, so a missing image is an ordinary answer, never an error.
+ */
+export async function findImagePackImage(
+  catalogKey: string | null,
+): Promise<string | null> {
+  if (catalogKey === null) {
+    return null;
+  }
+  const uri = imagePackImageUri(catalogKey);
+  try {
+    const info = await FileSystem.getInfoAsync(uri);
+    return info.exists ? uri : null;
+  } catch {
+    return null;
+  }
+}
+
 const decodeBase64 = (value: string): Uint8Array => {
   const binary = globalThis.atob(value);
   const bytes = new Uint8Array(binary.length);

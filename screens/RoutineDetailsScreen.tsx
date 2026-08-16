@@ -9,6 +9,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
 import { fontSize, spacing } from '../utils/scale';
 import WeekdayIndicator from '../components/WeekdayIndicator';
+import { ExerciseSheet } from '../components/ExerciseSheet';
 import {
   activatePresetRoutine,
   activateRoutineById,
@@ -62,6 +63,8 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
 
   const [source, setSource] = useState<RoutineSourceBundle | null>(null);
   const [busy, setBusy] = useState(false);
+  /** R2: the exercise whose shared sheet is open. */
+  const [information, setInformation] = useState<ExerciseSource | null>(null);
 
   const isPreset = presetKey !== undefined;
 
@@ -304,7 +307,14 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
                 {t(WEEKDAY_FULL_KEYS[session.weekday])} · {session.name}
               </Text>
               {sessionExercises.map((exercise) => (
-                <View key={exercise.exerciseId} style={styles.exerciseRow}>
+                // R2: every exercise in the app is one tap from its full description.
+                <Pressable
+                  key={exercise.exerciseId}
+                  style={({ pressed }) => [styles.exerciseRow, pressed && styles.pressed]}
+                  onPress={() => setInformation(exercise)}
+                  accessibilityRole='button'
+                  accessibilityLabel={t('exerciseInfoAction')}
+                >
                   <Text style={[styles.exerciseName, { color: theme.text }]} numberOfLines={1}>
                     {exercise.name}
                   </Text>
@@ -314,7 +324,7 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
                   >
                     {exercise.targetSets}×{exercise.targetReps} · {loadLabel(exercise)}
                   </Text>
-                </View>
+                </Pressable>
               ))}
             </View>
           );
@@ -365,6 +375,29 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
           </>
         )}
       </View>
+
+      {/* R2: the shared exercise sheet, the same one every other surface opens. */}
+      <ExerciseSheet
+        exercise={
+          information === null
+            ? null
+            : {
+                name: information.name,
+                catalogExerciseId: information.catalogExerciseId,
+              }
+        }
+        plan={
+          information === null
+            ? null
+            : {
+                role: information.role,
+                targetSets: information.targetSets,
+                targetReps: information.targetReps,
+                isAmrap: information.isAmrap,
+              }
+        }
+        onClose={() => setInformation(null)}
+      />
     </View>
   );
 }
@@ -491,6 +524,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.card,
     paddingVertical: spacing.label,
+  },
+  pressed: {
+    opacity: 0.7,
   },
   exerciseName: {
     fontSize: fontSize.body,

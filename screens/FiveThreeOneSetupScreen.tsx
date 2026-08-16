@@ -21,6 +21,7 @@ import { useSettings } from '../context/SettingsContext';
 import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
 import AppTextInput, { parseNumericInput } from '../components/AppTextInput';
 import ExerciseCatalogPicker from '../components/ExerciseCatalogPicker';
+import { ExerciseSheet } from '../components/ExerciseSheet';
 import {
   ASSISTANCE_BIAS_DEFAULTS,
   DEFAULT_TRAINING_DAYS,
@@ -139,6 +140,13 @@ export default function FiveThreeOneSetupScreen({ navigation, route }: Props) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [weekdayPickerFor, setWeekdayPickerFor] = useState<string | null>(null);
   const [pickerFor, setPickerFor] = useState<PickerTarget | null>(null);
+  /** R2: the exercise whose shared sheet is open, with the plan row it was opened from. */
+  const [information, setInformation] = useState<{
+    name: string;
+    catalogExerciseId: string | null;
+    targetSets: number | null;
+    targetReps: number | null;
+  } | null>(null);
   const nextKey = useRef(1000);
   const scrollRef = useRef<ScrollView>(null);
   const sectionOffsets = useRef<Record<string, number>>({});
@@ -820,6 +828,25 @@ export default function FiveThreeOneSetupScreen({ navigation, route }: Props) {
                 </Text>
                 <Ionicons name='swap-horizontal' size={16} color={theme.text} />
               </Pressable>
+              {/* R2: the main lift is one tap from its full description too. */}
+              <Pressable
+                onPress={() =>
+                  setInformation({
+                    name: day.liftName,
+                    catalogExerciseId: day.catalogExerciseId,
+                    targetSets: null,
+                    targetReps: null,
+                  })
+                }
+                style={({ pressed }) => [styles.liftRow, pressed && styles.pressed]}
+                accessibilityRole='button'
+                accessibilityLabel={t('exerciseInfoAction')}
+              >
+                <Text style={[styles.helper, { color: theme.text }]} maxFontSizeMultiplier={1.5}>
+                  {t('exerciseInfoAction')}
+                </Text>
+                <Ionicons name='information-circle-outline' size={16} color={theme.text} />
+              </Pressable>
               <Text style={[styles.categoryBadge, { color: theme.text }]} maxFontSizeMultiplier={1.5}>
                 {day.category === 'lower' ? t('categoryLower') : t('categoryUpper')}
               </Text>
@@ -951,6 +978,26 @@ export default function FiveThreeOneSetupScreen({ navigation, route }: Props) {
                         keyboardType='number-pad'
                       />
                     </View>
+                    {/* R2: every exercise is one tap from its full description. */}
+                    <Pressable
+                      onPress={() =>
+                        setInformation({
+                          name: row.name,
+                          catalogExerciseId: row.catalogExerciseId,
+                          targetSets: parseNumericInput(row.sets) ?? 0,
+                          targetReps: parseNumericInput(row.reps) ?? 0,
+                        })
+                      }
+                      style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
+                      accessibilityRole='button'
+                      accessibilityLabel={t('exerciseInfoAction')}
+                    >
+                      <Ionicons
+                        name='information-circle-outline'
+                        size={18}
+                        color={theme.text}
+                      />
+                    </Pressable>
                     <Pressable
                       onPress={() => removeAssistance(day.key, row.key)}
                       style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
@@ -1111,6 +1158,30 @@ export default function FiveThreeOneSetupScreen({ navigation, route }: Props) {
         catalogExerciseId={pickerFor?.catalogExerciseId ?? null}
         onSelect={applyPickerSelection}
         onClose={() => setPickerFor(null)}
+      />
+
+      {/* R2: the shared exercise sheet. */}
+      <ExerciseSheet
+        exercise={
+          information === null
+            ? null
+            : {
+                name: information.name,
+                catalogExerciseId: information.catalogExerciseId,
+              }
+        }
+        plan={
+          information === null ||
+          information.targetSets === null ||
+          information.targetReps === null
+            ? null
+            : {
+                role: 'accessory',
+                targetSets: information.targetSets,
+                targetReps: information.targetReps,
+              }
+        }
+        onClose={() => setInformation(null)}
       />
     </KeyboardAvoidingView>
   );

@@ -4,6 +4,8 @@ import {
   ImagePackValidationError,
   IMAGE_PACK_INSTALL_DIR,
   MAX_IMAGE_PACK_BYTES,
+  findImagePackImage,
+  imagePackImageUri,
   installImagePackFromUri,
   validateImagePackArchive,
 } from './imagePackInstaller';
@@ -354,5 +356,52 @@ describe('installImagePackFromUri', () => {
       (path) => path.includes('image-pack-installing-') || path.includes('image-pack.backup-'),
     );
     expect(leftovers).toEqual([]);
+  });
+});
+
+describe('findImagePackImage', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('builds the install path from the catalog key alone', () => {
+    expect(imagePackImageUri('Barbell_Full_Squat')).toBe(
+      `${installDirectory}/Barbell_Full_Squat.jpg`,
+    );
+  });
+
+  it('returns the uri when the pack covers the exercise', async () => {
+    mockedFileSystem.getInfoAsync.mockResolvedValue({
+      exists: true as const,
+      uri: `${installDirectory}/Barbell_Full_Squat.jpg`,
+      size: 1,
+      isDirectory: false,
+      modificationTime: 0,
+    });
+
+    await expect(findImagePackImage('Barbell_Full_Squat')).resolves.toBe(
+      `${installDirectory}/Barbell_Full_Squat.jpg`,
+    );
+  });
+
+  it('returns null when the pack is not installed or does not cover it', async () => {
+    mockedFileSystem.getInfoAsync.mockResolvedValue({
+      exists: false,
+      uri: 'file:///missing',
+      isDirectory: false,
+    });
+
+    await expect(findImagePackImage('Barbell_Full_Squat')).resolves.toBeNull();
+  });
+
+  it('has nothing to look up for an exercise with no catalog key', async () => {
+    await expect(findImagePackImage(null)).resolves.toBeNull();
+    expect(mockedFileSystem.getInfoAsync).not.toHaveBeenCalled();
+  });
+
+  it('treats a filesystem error as no image, never as a failure', async () => {
+    mockedFileSystem.getInfoAsync.mockRejectedValue(new Error('unreadable'));
+
+    await expect(findImagePackImage('Barbell_Full_Squat')).resolves.toBeNull();
   });
 });

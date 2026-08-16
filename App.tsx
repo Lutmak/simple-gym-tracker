@@ -170,7 +170,8 @@ import type { SessionSummary } from './utils/sessionSummary';
 
   export type RootTabParamList = {
     Inicio: NavigatorScreenParams<InicioStackParamList> | undefined;
-    Progress: { focus?: ProgressFocus } | undefined;
+    /** `exercise` is R2's link from the shared exercise sheet to that exercise's full chart. */
+    Progress: { focus?: ProgressFocus; exercise?: string } | undefined;
     Routines: NavigatorScreenParams<RoutinesStackParamList> | undefined;
     Settings: undefined;
   };

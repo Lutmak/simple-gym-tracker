@@ -17,9 +17,11 @@ import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
 import { fontSize, spacing } from '../utils/scale';
 import AppTextInput from '../components/AppTextInput';
+import { ExerciseSheet } from '../components/ExerciseSheet';
 import {
   activatePresetRoutine,
   loadPresetRoutineSource,
+  type ExerciseSource,
   type RoutineDatabase,
   type RoutineSourceBundle,
   type RoutineUnit,
@@ -53,6 +55,8 @@ export default function ActivateRoutineScreen({ navigation, route }: Props) {
   const [source, setSource] = useState<RoutineSourceBundle | null>(null);
   const [inputs, setInputs] = useState<InputState>({});
   const [busy, setBusy] = useState(false);
+  /** R2: the exercise whose shared sheet is open. */
+  const [information, setInformation] = useState<ExerciseSource | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -152,9 +156,16 @@ export default function ActivateRoutineScreen({ navigation, route }: Props) {
               <Text style={[styles.dayTitle, { color: theme.text }]}>{session.name}</Text>
               {sessionExercises.map((exercise) => (
                 <View key={exercise.exerciseId} style={styles.exercise}>
-                  <Text style={[styles.exerciseName, { color: theme.text }]} numberOfLines={1}>
-                    {exercise.name}
-                  </Text>
+                  {/* R2: the name opens the shared exercise sheet; the weight field keeps its own taps. */}
+                  <Pressable
+                    onPress={() => setInformation(exercise)}
+                    accessibilityRole='button'
+                    accessibilityLabel={t('exerciseInfoAction')}
+                  >
+                    <Text style={[styles.exerciseName, { color: theme.text }]} numberOfLines={1}>
+                      {exercise.name}
+                    </Text>
+                  </Pressable>
                   <Text style={[styles.exerciseDetail, { color: theme.text }]}>
                     {exercise.targetSets}×{exercise.targetReps}
                   </Text>
@@ -197,6 +208,29 @@ export default function ActivateRoutineScreen({ navigation, route }: Props) {
           <Text style={[styles.activateText, { color: theme.buttonText }]}>{t('activate')}</Text>
         </Pressable>
       </View>
+
+      {/* R2: the shared exercise sheet. */}
+      <ExerciseSheet
+        exercise={
+          information === null
+            ? null
+            : {
+                name: information.name,
+                catalogExerciseId: information.catalogExerciseId,
+              }
+        }
+        plan={
+          information === null
+            ? null
+            : {
+                role: information.role,
+                targetSets: information.targetSets,
+                targetReps: information.targetReps,
+                isAmrap: information.isAmrap,
+              }
+        }
+        onClose={() => setInformation(null)}
+      />
     </KeyboardAvoidingView>
   );
 }

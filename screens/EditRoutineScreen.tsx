@@ -19,6 +19,7 @@ import { useSettings } from '../context/SettingsContext';
 import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
 import AppTextInput, { parseNumericInput } from '../components/AppTextInput';
 import ExerciseCatalogPicker from '../components/ExerciseCatalogPicker';
+import { ExerciseSheet } from '../components/ExerciseSheet';
 import {
   EditRoutineValidationError,
   saveRoutineEdit,
@@ -34,7 +35,8 @@ import {
   type RoutineUnit,
 } from '../utils/routineActions';
 import type { BarProfileKey } from '../utils/barProfiles';
-import type { RoutinesStackParamList } from '../App';
+import type { RootTabParamList, RoutinesStackParamList } from '../App';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
 type Props = NativeStackScreenProps<RoutinesStackParamList, 'EditRoutine'>;
 
@@ -184,6 +186,8 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
     exerciseKey: string | null;
     catalogExerciseId: string | null;
   } | null>(null);
+  /** R2: the exercise whose shared sheet is open, with the plan row it was opened from. */
+  const [information, setInformation] = useState<ScreenExercise | null>(null);
   const nextKey = useRef(1000);
 
   useEffect(() => {
@@ -354,6 +358,14 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
       [sessions[index], sessions[target]] = [sessions[target], sessions[index]];
       return { ...current, sessions };
     });
+  };
+
+  /** R2's link from the exercise sheet to that exercise's full chart, on the Progreso tab. */
+  const openExerciseHistory = (exerciseName: string) => {
+    setInformation(null);
+    navigation
+      .getParent<BottomTabNavigationProp<RootTabParamList>>()
+      ?.navigate('Progress', { exercise: exerciseName });
   };
 
   const openPicker = (sessionKey: string, exercise: ScreenExercise | null) => {
@@ -625,6 +637,12 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
                     <Ionicons name='swap-horizontal' size={16} color={theme.text} />
                   </Pressable>
                   <View style={styles.exerciseControls}>
+                    <IconButton
+                      icon='information-circle-outline'
+                      label={t('exerciseInfoAction')}
+                      onPress={() => setInformation(exercise)}
+                      theme={theme}
+                    />
                     <IconButton
                       icon='arrow-up'
                       label={t('moveExerciseUp')}
@@ -930,6 +948,30 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
         catalogExerciseId={pickerFor?.catalogExerciseId ?? null}
         onSelect={applyPickerSelection}
         onClose={() => setPickerFor(null)}
+      />
+
+      {/* R2: the same sheet the runner, the picker and Progreso open. */}
+      <ExerciseSheet
+        exercise={
+          information === null
+            ? null
+            : {
+                name: information.name,
+                catalogExerciseId: information.catalogExerciseId,
+              }
+        }
+        plan={
+          information === null
+            ? null
+            : {
+                role: information.role,
+                targetSets: parseNumericInput(information.sets) ?? 0,
+                targetReps: parseNumericInput(information.reps) ?? 0,
+                isAmrap: information.isAmrap,
+              }
+        }
+        onClose={() => setInformation(null)}
+        onOpenHistory={openExerciseHistory}
       />
     </KeyboardAvoidingView>
   );

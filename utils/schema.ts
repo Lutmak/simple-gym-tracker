@@ -107,6 +107,10 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
 
   // Exercise catalog (§3.5). Seed data is generated at build time by
   // scripts/ingest-catalog.mts into data/catalog-seed.ts; the app never fetches.
+  // `origin` and `uses_bar` are R2's: a custom exercise is a catalog row the user wrote, so it
+  // carries a muscle group, equipment and a bar answer, and therefore appears in the same body-part
+  // filters and the same exercise sheet as a seeded one. `uses_bar` is NULL for seeded rows — their
+  // bar comes from the equipment mapping in barProfiles.ts — and 0/1 only where the user answered.
   `CREATE TABLE IF NOT EXISTS Catalog_Exercises (
     exercise_key TEXT PRIMARY KEY NOT NULL,
     name TEXT NOT NULL UNIQUE,
@@ -115,7 +119,9 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     force TEXT,
     mechanic TEXT,
     equipment TEXT,
-    instructions TEXT
+    instructions TEXT,
+    origin TEXT NOT NULL DEFAULT 'catalog' CHECK (origin IN ('catalog', 'user')),
+    uses_bar INTEGER CHECK (uses_bar IS NULL OR uses_bar IN (0, 1))
   );`,
 
   `CREATE TABLE IF NOT EXISTS Catalog_Exercise_Muscles (
@@ -355,6 +361,27 @@ export async function ensureSessionExercisesColumns(
   }
 }
 
+/** The R2 custom-exercise columns on Catalog_Exercises (origin + the bar answer). */
+export async function ensureCatalogExerciseOriginColumns(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(Catalog_Exercises);',
+  );
+  if (!columns.some((column) => column.name === 'origin')) {
+    await executor.exec(
+      `ALTER TABLE Catalog_Exercises ADD COLUMN origin TEXT NOT NULL DEFAULT 'catalog'
+       CHECK (origin IN ('catalog', 'user'));`,
+    );
+  }
+  if (!columns.some((column) => column.name === 'uses_bar')) {
+    await executor.exec(
+      `ALTER TABLE Catalog_Exercises ADD COLUMN uses_bar INTEGER
+       CHECK (uses_bar IS NULL OR uses_bar IN (0, 1));`,
+    );
+  }
+}
+
 /** The M2 planned-jokers column on Routines. */
 export async function ensureRoutinesPlannedJokers(
   executor: SchemaExecutor,
@@ -468,6 +495,7 @@ export async function runSchema(executor: SchemaExecutor): Promise<void> {
   await ensureWeightLogUnitColumn(executor);
   await ensureWeightLogTimingColumns(executor);
   await ensureSessionExercisesColumns(executor);
+  await ensureCatalogExerciseOriginColumns(executor);
   await ensureRoutinesPlannedJokers(executor);
   await seedCatalog(executor);
   await seedPresetRoutines(executor);

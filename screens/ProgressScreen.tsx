@@ -17,6 +17,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
 import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
+import { ExerciseSheet } from '../components/ExerciseSheet';
 import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
 import { dayStampOf } from '../utils/today';
 import {
@@ -92,6 +93,8 @@ export default function ProgressScreen({ navigation, route }: Props) {
   const { width } = useWindowDimensions();
   const db = useSQLiteContext();
   const requestedFocus: ProgressFocus | undefined = route.params?.focus;
+  /** R2: the exercise sheet's "see the full chart" link arrives here. */
+  const requestedExercise: string | undefined = route.params?.exercise;
 
   const [routines, setRoutines] = useState<ProgressRoutine[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -101,6 +104,8 @@ export default function ProgressScreen({ navigation, route }: Props) {
   const [view, setView] = useState<'routine' | 'exercises'>('routine');
   const [exerciseSummaries, setExerciseSummaries] = useState<ExerciseSummary[]>([]);
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
+  /** R2: the exercise whose shared sheet is open. */
+  const [information, setInformation] = useState<string | null>(null);
   const [exerciseSeries, setExerciseSeries] = useState<ExerciseSeries | null>(null);
   const [weekDetail, setWeekDetail] = useState<SelectedWeek | null>(null);
   const [weekData, setWeekData] = useState<WeekDetailData | null>(null);
@@ -146,14 +151,28 @@ export default function ProgressScreen({ navigation, route }: Props) {
               loaded[0]?.routineId ??
               null);
         setSelectedId((current) => (current === preferred ? current : preferred));
+        // R2's deep link wins over whatever was last selected: the user asked for this exercise's
+        // chart from its sheet, so the screen opens on it and on the exercise view.
+        const linkedExercise =
+          requestedExercise !== undefined &&
+          summaries.some((entry) => entry.name === requestedExercise)
+            ? requestedExercise
+            : null;
         const preferredExercise =
-          selectedExercise !== null &&
+          linkedExercise ??
+          (selectedExercise !== null &&
           summaries.some((entry) => entry.name === selectedExercise)
             ? selectedExercise
-            : (summaries[0]?.name ?? null);
+            : (summaries[0]?.name ?? null));
         setSelectedExercise((current) =>
           current === preferredExercise ? current : preferredExercise,
         );
+        if (requestedExercise !== undefined) {
+          if (linkedExercise !== null) {
+            setView('exercises');
+          }
+          navigation.setParams({ exercise: undefined });
+        }
         if (preferred === null) {
           setRoutineData(null);
           setSeries([]);
@@ -198,12 +217,22 @@ export default function ProgressScreen({ navigation, route }: Props) {
           if (requestedFocus !== undefined) {
             navigation.setParams({ focus: undefined });
           }
+          if (requestedExercise !== undefined) {
+            navigation.setParams({ exercise: undefined });
+          }
         }
       });
       return () => {
         cancelled = true;
       };
-    }, [db, navigation, requestedFocus, selectedId, selectedExercise]),
+    }, [
+      db,
+      navigation,
+      requestedFocus,
+      requestedExercise,
+      selectedId,
+      selectedExercise,
+    ]),
   );
 
   React.useEffect(() => {
@@ -595,9 +624,22 @@ export default function ProgressScreen({ navigation, route }: Props) {
     }
     return (
       <>
-        <Text style={[styles.sectionTitle, { color: theme.text }]}>
-          {t('progressExerciseHistory')}
-        </Text>
+        <View style={styles.historyHeader}>
+          <Text style={[styles.sectionTitle, { color: theme.text }]}>
+            {t('progressExerciseHistory')}
+          </Text>
+          {selectedExercise !== null && (
+            <Pressable
+              onPress={() => setInformation(selectedExercise)}
+              style={({ pressed }) => [styles.historyInfo, pressed && styles.pressed]}
+              accessibilityRole="button"
+              accessibilityLabel={t('exerciseInfoAction')}
+              testID="progress-exercise-information"
+            >
+              <Ionicons name="information-circle-outline" size={24} color={theme.text} />
+            </Pressable>
+          )}
+        </View>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -1059,6 +1101,12 @@ export default function ProgressScreen({ navigation, route }: Props) {
       </ScrollView>
       {renderWeekDetail()}
       {renderDayPopup()}
+
+      {/* R2: the same exercise sheet the runner, the editor and the picker open. */}
+      <ExerciseSheet
+        exercise={information === null ? null : { name: information }}
+        onClose={() => setInformation(null)}
+      />
     </View>
   );
 }
@@ -1082,6 +1130,18 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     marginTop: spacing.section,
     marginBottom: spacing.card,
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.inline,
+  },
+  historyInfo: {
+    minWidth: touchTarget.icon,
+    minHeight: touchTarget.icon,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   chipRow: {
     flexDirection: 'row',

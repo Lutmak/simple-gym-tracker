@@ -6,6 +6,7 @@ import { useSQLiteContext } from 'expo-sqlite';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
 import AppTextInput, { parseNumericInput } from '../components/AppTextInput';
+import { ExerciseSheet } from '../components/ExerciseSheet';
 import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
 import {
   applyReview,
@@ -49,6 +50,8 @@ export default function CycleReviewScreen({ navigation, route }: Props) {
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState('');
+  /** R2: the exercise whose shared sheet is open. */
+  const [information, setInformation] = useState<{ name: string } | null>(null);
 
   const routineDb: RoutineDatabase = {
     run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
@@ -190,7 +193,14 @@ export default function CycleReviewScreen({ navigation, route }: Props) {
         key={proposal.proposalId}
         style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
       >
-        <Text style={[styles.cardTitle, { color: theme.text }]}>{proposal.exerciseName}</Text>
+        {/* R2: a proposal about an exercise is one tap from what that exercise is. */}
+        <Pressable
+          onPress={() => setInformation({ name: proposal.exerciseName })}
+          accessibilityRole='button'
+          accessibilityLabel={t('exerciseInfoAction')}
+        >
+          <Text style={[styles.cardTitle, { color: theme.text }]}>{proposal.exerciseName}</Text>
+        </Pressable>
         {proposal.isTmProposal && amrapRows.length > 0 && renderAmrapTable(amrapRows)}
         <View style={styles.targetRow}>
           <Text style={[styles.helper, { color: theme.text }]}>
@@ -386,6 +396,12 @@ export default function CycleReviewScreen({ navigation, route }: Props) {
           </>
         )}
       </View>
+
+      {/* R2: the shared exercise sheet. */}
+      <ExerciseSheet
+        exercise={information}
+        onClose={() => setInformation(null)}
+      />
     </View>
   );
 }

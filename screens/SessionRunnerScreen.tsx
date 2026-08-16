@@ -19,6 +19,7 @@ import { useQueueRevision } from '../context/QueueRevision';
 import { Button } from '../components/Button';
 import AppTextInput from '../components/AppTextInput';
 import ExerciseCatalogPicker from '../components/ExerciseCatalogPicker';
+import { ExerciseSheet } from '../components/ExerciseSheet';
 import { Field } from '../components/Field';
 import { NumberStepper } from '../components/NumberStepper';
 import { PlatePicker } from '../components/PlatePicker';
@@ -35,7 +36,7 @@ import {
   barWeightFor,
   canSaveBarProfile,
   composeLoad,
-  defaultBarProfileForEquipment,
+  defaultBarProfileForCatalogRow,
   formatWeight,
   suggestPlates,
   type BarProfileKey,
@@ -70,7 +71,8 @@ import {
 import { buildSessionSummary } from '../utils/sessionSummary';
 import { dayStampOf } from '../utils/today';
 import type { RoutineDatabase, RoutineUnit } from '../utils/routineActions';
-import type { InicioStackParamList } from '../App';
+import type { InicioStackParamList, RootTabParamList } from '../App';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
 type PlannedProps = NativeStackScreenProps<InicioStackParamList, 'StartSession'>;
 type FreeProps = NativeStackScreenProps<InicioStackParamList, 'FreeLogging'>;
@@ -280,6 +282,18 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
     setInformationExercise(exercise);
   };
 
+  /**
+   * R2's link to the full chart. The tab navigator keeps this stack mounted, so the session in
+   * progress is still here when the user comes back — but the sheet closes first, because a sheet
+   * left open over a screen the user has navigated away from is a ghost.
+   */
+  const openExerciseHistory = (exerciseName: string) => {
+    setInformationExercise(null);
+    navigation
+      .getParent<BottomTabNavigationProp<RootTabParamList>>()
+      ?.navigate('Progress', { exercise: exerciseName });
+  };
+
   const addExercise = async (selection: {
     catalogExerciseId: string | null;
     name: string;
@@ -296,11 +310,19 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
     try {
       let barProfile: RunnerExercise['barProfile'] = null;
       if (selection.catalogExerciseId !== null) {
-        const catalogRow = await db.getFirstAsync<{ equipment: string | null }>(
-          'SELECT equipment FROM Catalog_Exercises WHERE exercise_key = ?;',
+        const catalogRow = await db.getFirstAsync<{
+          equipment: string | null;
+          uses_bar: number | null;
+        }>(
+          'SELECT equipment, uses_bar FROM Catalog_Exercises WHERE exercise_key = ?;',
           [selection.catalogExerciseId],
         );
-        barProfile = defaultBarProfileForEquipment(catalogRow?.equipment ?? null);
+        barProfile = defaultBarProfileForCatalogRow(
+          catalogRow?.equipment ?? null,
+          catalogRow?.uses_bar === null || catalogRow?.uses_bar === undefined
+            ? null
+            : catalogRow.uses_bar === 1,
+        );
       }
       const exercise = buildFreeRunnerExercise(
         nextTransientExerciseId.current,
@@ -1006,31 +1028,38 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
         />
       </Sheet>
 
-      <Sheet
-        visible={informationExercise !== null}
-        title={informationExercise?.name}
+      {/* R2: the same sheet every other surface opens, with the runner's own plan line inside it. */}
+      <ExerciseSheet
+        exercise={
+          informationExercise === null ? null : { name: informationExercise.name }
+        }
+        plan={
+          informationExercise === null || informationExercise.isPlanned === false
+            ? null
+            : {
+                role: informationExercise.role,
+                targetSets: informationExercise.targetSets,
+                targetReps: informationExercise.targetReps,
+                isAmrap: informationExercise.isAmrap,
+                line: informationPlanLine ?? undefined,
+              }
+        }
         onClose={() => setInformationExercise(null)}
+        onOpenHistory={openExerciseHistory}
         testID="runner-exercise-information-sheet"
-        >
+      >
         {informationExercise?.isPlanned === false ? (
-          <Text style={[styles.infoPlan, { color: tokens.textPrimary }]}>
+          <Text style={[styles.infoPlan, { color: tokens.textSecondary }]}>
             {t('runnerFreeInfo')}
           </Text>
         ) : (
-          <Section title={t('runnerInfoPlan')} testID="runner-info-plan">
-            <Text
-              style={[styles.infoPlan, { color: tokens.textPrimary }]}
-            >
-              {informationPlanLine}
-            </Text>
-            <Row
-              label={t('runnerInfoWeek')}
-              detail={t('runnerInfoWeekValue', { week: session.weekNumber })}
-              divided
-            />
-          </Section>
+          <Row
+            label={t('runnerInfoWeek')}
+            detail={t('runnerInfoWeekValue', { week: session.weekNumber })}
+            divided
+          />
         )}
-      </Sheet>
+      </ExerciseSheet>
 
       <ExerciseCatalogPicker
         visible={pickerVisible}

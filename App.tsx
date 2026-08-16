@@ -196,7 +196,6 @@ const InicioStackNavigator = createNativeStackNavigator<InicioStackParamList>();
 
 const InicioStack = () => {
   const { theme } = useTheme();
-  const { t } = useTranslation();
   return (
     <InicioStackNavigator.Navigator
       screenOptions={{
@@ -219,7 +218,7 @@ const InicioStack = () => {
       <InicioStackNavigator.Screen
         name="FreeLogging"
         component={FreeLoggingScreen}
-        options={{ title: t('freeLogging') }}
+        options={{ headerShown: false }}
       />
       <InicioStackNavigator.Screen
         name="SessionSummary"

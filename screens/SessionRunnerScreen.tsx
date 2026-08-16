@@ -64,6 +64,7 @@ import {
   buildFreeLogExercises,
   buildFreeRunnerExercise,
   buildFreeRunnerSession,
+  findExerciseIndexByName,
   saveFreeSession,
 } from '../utils/freeLogging';
 import { buildSessionSummary } from '../utils/sessionSummary';
@@ -142,13 +143,27 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
       db.getAllAsync<Record<string, unknown>>(sql, (params ?? []) as never[]),
   };
 
+  const defaultUnitRef = useRef(defaultUnit);
+  const translateRef = useRef(t);
+  useEffect(() => {
+    defaultUnitRef.current = defaultUnit;
+    translateRef.current = t;
+  });
+
+  /**
+   * Loads exactly once per (db, mode, weekSessionId). `defaultUnit` and `t` are
+   * read through refs on purpose: both change identity when the user toggles
+   * kg/lb or the language in Settings, and the runner stays mounted in the
+   * Inicio stack — re-running this would reset `session`/`draft` and silently
+   * throw away every logged set. Do not widen these dependencies.
+   */
   useEffect(() => {
     let cancelled = false;
     if (mode === 'free') {
       const freeSession = buildFreeRunnerSession(
-        t('freeSessionName'),
+        translateRef.current('freeSessionName'),
         dayStampOf(new Date()),
-        defaultUnit,
+        defaultUnitRef.current,
       );
       setSession(freeSession);
       setDraft(buildFreeDraft(freeSession.exercises));
@@ -187,7 +202,7 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
     return () => {
       cancelled = true;
     };
-  }, [db, defaultUnit, mode, t, weekSessionId]);
+  }, [db, mode, weekSessionId]);
 
   const currentExercise = session?.exercises[exerciseIndex];
   const currentSets = draft[exerciseIndex] ?? [];
@@ -272,6 +287,12 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
     if (session === null) {
       return;
     }
+    const existingIndex = findExerciseIndexByName(session.exercises, selection.name);
+    if (existingIndex >= 0) {
+      setExerciseIndex(existingIndex);
+      setPickerVisible(false);
+      return;
+    }
     try {
       let barProfile: RunnerExercise['barProfile'] = null;
       if (selection.catalogExerciseId !== null) {
@@ -284,7 +305,9 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
       const exercise = buildFreeRunnerExercise(
         nextTransientExerciseId.current,
         selection.name,
-        defaultUnit,
+        // A planned session logs one unit (§3.7); only a free session can take
+        // the app's current one.
+        mode === 'planned' ? session.unit : defaultUnit,
         barProfile,
       );
       nextTransientExerciseId.current -= 1;
@@ -1433,12 +1456,14 @@ function RunnerSetEditor({
                 testID="editor-bar-composer"
               />
             )}
-            <Row
-              label={t('runnerMarkNotDone')}
-              onPress={() => onCommit(null)}
-              divided
-              testID="editor-not-done"
-            />
+            {exercise.isPlanned !== false && (
+              <Row
+                label={t('runnerMarkNotDone')}
+                onPress={() => onCommit(null)}
+                divided
+                testID="editor-not-done"
+              />
+            )}
             <Button
               label={t('runnerDone')}
               onPress={commit}

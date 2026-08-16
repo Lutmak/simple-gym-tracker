@@ -7,6 +7,7 @@ import {
   buildFreeRunnerExercise,
   buildFreeRunnerSession,
   buildFreeLogRows,
+  findExerciseIndexByName,
   saveFreeSession,
   type FreeLogExercise,
 } from './freeLogging';
@@ -64,6 +65,31 @@ describe('free runner state', () => {
     const previous = { reps: 8, weight: 60, unit: 'kg' as const };
 
     expect(addFreeSet([previous])).toEqual([previous, previous]);
+  });
+
+  it('does not stack a second empty row on an exercise that has logged nothing', () => {
+    expect(addFreeSet([null])).toEqual([null]);
+  });
+
+  it('adds the first row to an exercise with no rows at all', () => {
+    expect(addFreeSet([])).toEqual([null]);
+  });
+
+  it('finds an exercise the session already carries, by its logged name', () => {
+    const exercises = [
+      buildFreeRunnerExercise(-1, 'Bench Press', 'kg', null),
+      buildFreeRunnerExercise(-2, 'Barbell Full Squat', 'kg', null),
+    ];
+
+    expect(findExerciseIndexByName(exercises, 'Barbell Full Squat')).toBe(1);
+    expect(findExerciseIndexByName(exercises, 'Deadlift')).toBe(-1);
+    expect(findExerciseIndexByName([], 'Bench Press')).toBe(-1);
+  });
+
+  it('matches names the way the history rows do — exactly, case included', () => {
+    const exercises = [buildFreeRunnerExercise(-1, 'Bench Press', 'kg', null)];
+
+    expect(findExerciseIndexByName(exercises, 'bench press')).toBe(-1);
   });
 
   it('keeps a new free runner session separate from any routine plan', () => {

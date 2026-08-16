@@ -82,6 +82,22 @@ export function buildFreeRunnerExercise(
   };
 }
 
+/**
+ * The position of `name` among the runner's exercises, or -1 when it is absent.
+ *
+ * The comparison is exact and case-sensitive because that is how the history
+ * rows behave: SQLite's default BINARY collation groups Logged_Exercises by
+ * `exercise_name` byte for byte (§3.2, `cycleReview`). Adding a second row with
+ * a name the session already carries would merge the two in every history and
+ * progression read, so the runner must reuse the existing exercise instead.
+ */
+export function findExerciseIndexByName(
+  exercises: readonly RunnerExercise[],
+  name: string,
+): number {
+  return exercises.findIndex((exercise) => exercise.name === name);
+}
+
 /** The first row of every targetless exercise is intentionally empty. */
 export function buildFreeDraft(exercises: readonly RunnerExercise[]): RunnerDraft {
   return exercises.map(() => [null]);
@@ -90,7 +106,11 @@ export function buildFreeDraft(exercises: readonly RunnerExercise[]): RunnerDraf
 /** Adds a targetless row, copying the last completed set when one exists. */
 export function addFreeSet(sets: readonly (LoggedSet | null)[]): (LoggedSet | null)[] {
   const previous = sets[sets.length - 1];
-  if (previous === undefined || previous === null) {
+  if (previous === null) {
+    // The last row is still the empty placeholder — a second one logs nothing.
+    return [...sets];
+  }
+  if (previous === undefined) {
     return [...sets, null];
   }
   const copy: LoggedSet = { reps: previous.reps, weight: previous.weight };

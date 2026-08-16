@@ -343,9 +343,6 @@ export function buildLogRows(session: RunnerSession, draft: RunnerDraft): Runner
     const loggedExerciseIndex = loggedExercises.length;
     const isPlanned = exercise.isPlanned !== false;
     const lastSet = sets[sets.length - 1];
-    if (lastSet === undefined) {
-      return;
-    }
     loggedExercises.push({
       exerciseName: exercise.name,
       sets: isPlanned ? exercise.targetSets : sets.length,

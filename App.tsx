@@ -163,8 +163,9 @@ import type { SessionSummary } from './utils/sessionSummary';
     sessionName: string;
     routineName: string;
     workoutDate: number;
+    sessionKind: 'planned' | 'free';
     summary: SessionSummary;
-    finishContext: SessionSummaryFinishContext;
+    finishContext: SessionSummaryFinishContext | null;
   }
 
   export type RootTabParamList = {

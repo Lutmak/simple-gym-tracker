@@ -2,6 +2,10 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { runSchema, type SchemaExecutor } from './schema';
 import { loadDemoData } from './demoData';
 import {
+  addFreeSet,
+  buildFreeDraft,
+  buildFreeRunnerExercise,
+  buildFreeRunnerSession,
   buildFreeLogRows,
   saveFreeSession,
   type FreeLogExercise,
@@ -48,6 +52,29 @@ const SESSION: FreeLogExercise[] = [
     sets: [{ reps: 10, weight: 45 }],
   },
 ];
+
+describe('free runner state', () => {
+  it('starts every new exercise with one empty set', () => {
+    const exercise = buildFreeRunnerExercise(-1, 'Bench Press', 'kg', null);
+
+    expect(buildFreeDraft([exercise])).toEqual([[null]]);
+  });
+
+  it('copies the previous set when adding another free set', () => {
+    const previous = { reps: 8, weight: 60, unit: 'kg' as const };
+
+    expect(addFreeSet([previous])).toEqual([previous, previous]);
+  });
+
+  it('keeps a new free runner session separate from any routine plan', () => {
+    expect(buildFreeRunnerSession('Free session', TODAY, 'lb')).toMatchObject({
+      weekSessionId: 0,
+      progressionRule: 'none',
+      unit: 'lb',
+      exercises: [],
+    });
+  });
+});
 
 describe('buildFreeLogRows — the §3.2 history rows for a routine-less session', () => {
   it('writes one Logged_Exercises row per exercise and one Weight_Log row per set, 1..N, in the exercise unit', () => {
@@ -191,6 +218,30 @@ describe('saveFreeSession — one atomic transaction, no routine bookkeeping', (
       'Free session',
       'Free session #2',
     ]);
+  });
+
+  it('continues the same-day label sequence after `label #2` already exists', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    await executor.run(
+      `INSERT INTO Workout_Log (workout_name, day_name, workout_date)
+       VALUES (?, ?, ?), (?, ?, ?);`,
+      ['Free session', 'Free session', TODAY, 'Free session #2', 'Free session', TODAY],
+    );
+
+    const saved = await saveFreeSession(executor, 'Free session', TODAY, [
+      { name: 'Barbell Full Squat', unit: 'kg', sets: [{ reps: 5, weight: 100 }] },
+    ]);
+
+    expect(saved.workoutName).toBe('Free session #3');
+    const countForLabel = db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM Workout_Log
+         WHERE workout_date = ? AND day_name = ?;`,
+      )
+      .get(TODAY, 'Free session') as { n: number };
+    expect(countForLabel.n).toBe(3);
   });
 
   it('an abandoned session writes nothing', async () => {

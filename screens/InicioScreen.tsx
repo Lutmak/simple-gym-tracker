@@ -594,7 +594,6 @@ export default function InicioScreen({ navigation, route }: Props) {
             })}
           </Text>
         )}
-        <Row label={t('inicioFreeLogging')} onPress={() => navigation.navigate('FreeLogging')} />
       </View>
     );
   };

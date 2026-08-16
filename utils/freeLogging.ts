@@ -21,11 +21,91 @@
  * names the row `label` first and `label #2`, `label #3`, … afterwards.
  */
 
+import type {
+  LoggedSet,
+  RunnerDraft,
+  RunnerExercise,
+  RunnerSession,
+} from './sessionRunner';
 import type { RoutineDatabase, RoutineUnit } from './routineActions';
+
+export const DEFAULT_FREE_REST_SECONDS = 90;
+
+/** Free logging keeps the same one-tap weight corrections as a routine. */
+export const freeRoundingIncrementFor = (unit: RoutineUnit): number =>
+  unit === 'lb' ? 5 : 2.5;
+
+/** A routine-free runner context; it never corresponds to a plan row. */
+export function buildFreeRunnerSession(
+  label: string,
+  workoutDate: number,
+  unit: RoutineUnit,
+): RunnerSession {
+  return {
+    weekSessionId: 0,
+    sessionId: 0,
+    sessionName: label,
+    workoutName: label,
+    workoutDate,
+    weekNumber: 0,
+    unit,
+    progressionRule: 'none',
+    roundingIncrement: freeRoundingIncrementFor(unit),
+    restMainSeconds: DEFAULT_FREE_REST_SECONDS,
+    restAccessorySeconds: DEFAULT_FREE_REST_SECONDS,
+    exercises: [],
+  };
+}
+
+/** A targetless exercise row shared by free logging and planned-session additions. */
+export function buildFreeRunnerExercise(
+  sessionExerciseId: number,
+  name: string,
+  unit: RoutineUnit,
+  barProfile: RunnerExercise['barProfile'] = null,
+): RunnerExercise {
+  return {
+    sessionExerciseId,
+    name,
+    role: 'accessory',
+    targetSets: 0,
+    targetReps: 0,
+    loadSource: 'absolute',
+    absoluteWeight: null,
+    trainingMaxWeight: null,
+    trainingMaxPct: null,
+    unitOverride: unit,
+    isAmrap: false,
+    barProfile,
+    barWeight: null,
+    isPlanned: false,
+  };
+}
+
+/** The first row of every targetless exercise is intentionally empty. */
+export function buildFreeDraft(exercises: readonly RunnerExercise[]): RunnerDraft {
+  return exercises.map(() => [null]);
+}
+
+/** Adds a targetless row, copying the last completed set when one exists. */
+export function addFreeSet(sets: readonly (LoggedSet | null)[]): (LoggedSet | null)[] {
+  const previous = sets[sets.length - 1];
+  if (previous === undefined || previous === null) {
+    return [...sets, null];
+  }
+  const copy: LoggedSet = { reps: previous.reps, weight: previous.weight };
+  if (previous.unit !== undefined) {
+    copy.unit = previous.unit;
+  }
+  return [...sets, copy];
+}
 
 export interface FreeLogSet {
   reps: number;
   weight: number;
+  unit?: RoutineUnit;
+  startedAt?: number;
+  completedAt?: number;
 }
 
 export interface FreeLogExercise {
@@ -44,7 +124,34 @@ export interface FreeLogRows {
     weight: number;
     reps: number;
     unit: RoutineUnit;
+    startedAt: number | null;
+    completedAt: number | null;
   }[];
+}
+
+/** Converts the shared runner draft into the history-only free-log input. */
+export function buildFreeLogExercises(
+  session: RunnerSession,
+  draft: RunnerDraft,
+): FreeLogExercise[] {
+  return session.exercises.flatMap((exercise, exerciseIndex) => {
+    const unit = exercise.unitOverride ?? session.unit;
+    const sets = (draft[exerciseIndex] ?? []).flatMap((set) => {
+      if (set === null || set.weight === null) {
+        return [];
+      }
+      return [
+        {
+          reps: set.reps,
+          weight: set.weight,
+          unit: set.unit ?? unit,
+          startedAt: set.startedAt,
+          completedAt: set.completedAt,
+        },
+      ];
+    });
+    return sets.length === 0 ? [] : [{ name: exercise.name, unit, sets }];
+  });
 }
 
 /**
@@ -78,7 +185,9 @@ export function buildFreeLogRows(
         setNumber: index + 1,
         weight: set.weight,
         reps: set.reps,
-        unit: exercise.unit,
+        unit: set.unit ?? exercise.unit,
+        startedAt: set.startedAt ?? null,
+        completedAt: set.completedAt ?? null,
       });
     });
   });
@@ -118,13 +227,21 @@ export async function saveFreeSession(
 
   await db.run('BEGIN;');
   try {
-    const todayRow = await db.get(
-      `SELECT COUNT(*) AS n FROM Workout_Log
-       WHERE workout_date = ? AND workout_name = ?;`,
-      [workoutDate, label],
-    );
-    const existing = todayRow === undefined ? 0 : Number(todayRow.n);
-    const workoutName = existing === 0 ? label : `${label} #${existing + 1}`;
+    let suffix = 0;
+    let workoutName = label;
+    while (true) {
+      const candidate = suffix === 0 ? label : `${label} #${suffix + 1}`;
+      const existing = await db.get(
+        `SELECT workout_log_id FROM Workout_Log
+         WHERE workout_date = ? AND day_name = ? AND workout_name = ?;`,
+        [workoutDate, label, candidate],
+      );
+      if (existing === undefined) {
+        workoutName = candidate;
+        break;
+      }
+      suffix += 1;
+    }
 
     const rows = buildFreeLogRows(exercises, workoutName, label, workoutDate);
 
@@ -163,8 +280,8 @@ export async function saveFreeSession(
         await db.run(
           `INSERT INTO Weight_Log
              (workout_log_id, logged_exercise_id, exercise_name, set_number,
-              weight_logged, reps_logged, unit)
-           VALUES (?, ?, ?, ?, ?, ?, ?);`,
+              weight_logged, reps_logged, unit, started_at, completed_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);`,
           [
             workoutLogId,
             loggedExerciseId,
@@ -173,6 +290,8 @@ export async function saveFreeSession(
             set.weight,
             set.reps,
             set.unit,
+            set.startedAt ?? null,
+            set.completedAt ?? null,
           ],
         );
       }

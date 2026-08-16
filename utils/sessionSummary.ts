@@ -114,11 +114,24 @@ export function buildSessionSummary(
 
   session.exercises.forEach((exercise, exerciseIndex) => {
     const sets = draft[exerciseIndex] ?? [];
-    const targets = runnerTargetsFor(exercise, session);
     const hasLoggedSet = sets.some((set) => set !== null);
     if (hasLoggedSet) {
       exerciseCount += 1;
     }
+
+    if (exercise.isPlanned === false) {
+      sets.forEach((set) => {
+        if (set === null) {
+          return;
+        }
+        workSetCount += 1;
+        const actual = asSummarySet(set, exercise, session);
+        addVolume(volumes, actual.unit, actual.weight, actual.reps);
+      });
+      return;
+    }
+
+    const targets = runnerTargetsFor(exercise, session);
 
     for (let setIndex = 0; setIndex < targets.length; setIndex += 1) {
       const set = sets[setIndex] ?? null;

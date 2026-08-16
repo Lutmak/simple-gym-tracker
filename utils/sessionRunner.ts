@@ -53,10 +53,13 @@ export interface RunnerExercise {
   isAmrap: boolean;
   barProfile: BarProfileKey | null;
   barWeight: number | null;
+  /** False for a free-log or transient added exercise with no routine target. */
+  isPlanned?: boolean;
 }
 
 /** Everything the runner needs that is not the user's own set results. */
 export interface RunnerSession {
+  /** Zero is the sentinel for a runner session with no WeekSessions row. */
   weekSessionId: number;
   sessionId: number;
   sessionName: string;
@@ -172,10 +175,12 @@ export function runnerTargetsFor(
 /** The session's default draft: the plan is already recorded until the user edits it. */
 export function buildPlannedDraft(session: RunnerSession): RunnerDraft {
   return session.exercises.map((exercise) =>
-    runnerTargetsFor(exercise, session).map((target) => ({
-      reps: target.targetReps,
-      weight: target.targetWeight,
-    })),
+    exercise.isPlanned === false
+      ? [null]
+      : runnerTargetsFor(exercise, session).map((target) => ({
+          reps: target.targetReps,
+          weight: target.targetWeight,
+        })),
   );
 }
 
@@ -230,6 +235,9 @@ export function runnerTargetForSet(
   currentSets: readonly (LoggedSet | null)[],
   setIndex: number,
 ): RunnerTargetSet {
+  if (exercise.isPlanned === false) {
+    return { targetReps: 0, targetWeight: null, isAmrap: false };
+  }
   const planned = runnerTargetsFor(exercise, session)[setIndex];
   if (planned !== undefined) {
     return planned;
@@ -333,10 +341,15 @@ export function buildLogRows(session: RunnerSession, draft: RunnerDraft): Runner
       return;
     }
     const loggedExerciseIndex = loggedExercises.length;
+    const isPlanned = exercise.isPlanned !== false;
+    const lastSet = sets[sets.length - 1];
+    if (lastSet === undefined) {
+      return;
+    }
     loggedExercises.push({
       exerciseName: exercise.name,
-      sets: exercise.targetSets,
-      reps: exercise.targetReps,
+      sets: isPlanned ? exercise.targetSets : sets.length,
+      reps: isPlanned ? exercise.targetReps : lastSet.reps,
     });
     sets.forEach((set, index) => {
       weightLog.push({
@@ -383,6 +396,9 @@ async function applyLearnedBaselines(
   draft: RunnerDraft,
 ): Promise<void> {
   for (const [exerciseIndex, exercise] of session.exercises.entries()) {
+    if (exercise.isPlanned === false) {
+      continue;
+    }
     const column = baselineColumn(exercise.loadSource);
     if (column === null) {
       continue;

@@ -138,6 +138,37 @@ describe('buildSessionSummary', () => {
       volumes: [],
     });
   });
+
+  it('summarizes a targetless added exercise without inventing a plan deviation', () => {
+    const addedExercise: RunnerSession['exercises'][number] = {
+      sessionExerciseId: -1,
+      name: 'Cable Chest Press',
+      role: 'accessory',
+      targetSets: 0,
+      targetReps: 0,
+      loadSource: 'absolute',
+      absoluteWeight: null,
+      trainingMaxWeight: null,
+      trainingMaxPct: null,
+      unitOverride: 'kg',
+      isAmrap: false,
+      barProfile: null,
+      barWeight: null,
+      isPlanned: false,
+    };
+
+    const summary = buildSessionSummary(
+      { ...session, exercises: [addedExercise] },
+      [[{ reps: 12, weight: 30 }]],
+    );
+
+    expect(summary).toMatchObject({
+      exerciseCount: 1,
+      workSetCount: 1,
+      deviations: [],
+      volumes: [{ unit: 'kg', volume: 360 }],
+    });
+  });
 });
 
 describe('stampMissingSetTimes', () => {

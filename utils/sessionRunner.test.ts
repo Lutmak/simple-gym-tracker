@@ -6,6 +6,7 @@ import {
   belowTarget,
   buildPlannedDraft,
   buildLogRows,
+  formatRunnerPlanLine,
   loadRunnerSession,
   nextExtraSet,
   runnerTargetsFor,
@@ -183,6 +184,65 @@ describe('runnerTargetsFor — the runner receives the cycle week', () => {
     const current = buildPlannedDraft(session)[0];
 
     expect(nextExtraSet(exercise, session, current)).toEqual({ reps: 5, weight: 87.5 });
+  });
+});
+
+describe('formatRunnerPlanLine — compact header plan', () => {
+  it('collapses identical reps and loads', () => {
+    expect(
+      formatRunnerPlanLine(
+        [
+          { targetReps: 10, targetWeight: 120, isAmrap: false },
+          { targetReps: 10, targetWeight: 120, isAmrap: false },
+          { targetReps: 10, targetWeight: 120, isAmrap: false },
+        ],
+        {
+          role: 'Accesorio',
+          setsOf: 'series de',
+          maxReps: 'máximas reps',
+          unit: 'lb',
+          missingWeight: 'peso por aprender',
+        },
+      ),
+    ).toBe('Accesorio · 3 series de 10 · 120 lb');
+  });
+
+  it('uses slash reps and a concrete range when wave targets differ', () => {
+    expect(
+      formatRunnerPlanLine(
+        [
+          { targetReps: 5, targetWeight: 75, isAmrap: false },
+          { targetReps: 3, targetWeight: 85, isAmrap: false },
+          { targetReps: 1, targetWeight: 95, isAmrap: true },
+        ],
+        {
+          role: 'Principal',
+          setsOf: 'series de',
+          maxReps: 'máximas reps',
+          unit: 'kg',
+          missingWeight: 'peso por aprender',
+        },
+      ),
+    ).toBe('Principal · 3 series de 5/3/máximas reps · 75-95 kg');
+  });
+
+  it('keeps the AMRAP meaning when all base reps are identical', () => {
+    expect(
+      formatRunnerPlanLine(
+        [
+          { targetReps: 5, targetWeight: 65, isAmrap: false },
+          { targetReps: 5, targetWeight: 75, isAmrap: false },
+          { targetReps: 5, targetWeight: 85, isAmrap: true },
+        ],
+        {
+          role: 'Principal',
+          setsOf: 'series de',
+          maxReps: 'máximas reps',
+          unit: 'kg',
+          missingWeight: 'peso por aprender',
+        },
+      ),
+    ).toBe('Principal · 3 series de 5 + máximas reps · 65-85 kg');
   });
 });
 

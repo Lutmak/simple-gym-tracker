@@ -20,6 +20,7 @@ import {
   buildPlannedDraft,
   loadRunnerSession,
   nextExtraSet,
+  formatRunnerPlanLine,
   runnerTargetForSet,
   runnerTargetsFor,
   saveSessionLog,
@@ -270,12 +271,28 @@ export default function StartSessionScreen({ navigation, route }: Props) {
     );
   }
 
-  const targets = runnerTargetsFor(currentExercise, session);
   const unit = currentExercise.unitOverride ?? session.unit;
   const totalRows = Math.max(currentExercise.targetSets, currentSets.length);
   const isLastExercise = exerciseIndex === session.exercises.length - 1;
   const isWarmupOn = warmupEnabled[exerciseIndex] === true;
   const isWarmupCollapsed = warmupCollapsed.has(exerciseIndex);
+
+  const planLineFor = (exercise: RunnerExercise): string => {
+    const exerciseUnit = exercise.unitOverride ?? session.unit;
+    return formatRunnerPlanLine(runnerTargetsFor(exercise, session), {
+      role: t(exercise.role === 'main' ? 'roleMain' : 'roleAccessory'),
+      setsOf: t('runnerPlanSetsOf'),
+      maxReps: t('runnerMaxReps'),
+      unit: exerciseUnit,
+      missingWeight:
+        exercise.loadSource === 'bodyweight'
+          ? t('loadBodyweight')
+          : t('runnerWeightToLearn'),
+    });
+  };
+  const planLine = planLineFor(currentExercise);
+  const informationPlanLine =
+    informationExercise === null ? null : planLineFor(informationExercise);
 
   const formatTargetLoad = (target: RunnerTargetSet): string => {
     if (target.targetWeight !== null) {
@@ -285,19 +302,6 @@ export default function StartSessionScreen({ navigation, route }: Props) {
       ? t('loadBodyweight')
       : t('runnerWeightToLearn');
   };
-
-  const formatHeaderLoad = (): string => {
-    const loads = targets.map((target) => formatTargetLoad(target));
-    return loads.every((load) => load === loads[0])
-      ? loads[0] ?? t('runnerWeightToLearn')
-      : loads.join(' / ');
-  };
-
-  const repsSummary = targets
-    .map((target) =>
-      target.isAmrap ? t('runnerMaxReps') : `${target.targetReps} ${t('Reps')}`,
-    )
-    .join(' / ');
 
   const formatSetDetail = (target: RunnerTargetSet, logged: LoggedSet): string => {
     const weight =
@@ -421,8 +425,7 @@ export default function StartSessionScreen({ navigation, route }: Props) {
               <Ionicons name="information-circle-outline" size={tabBar.icon} color={tokens.textSecondary} />
             </View>
             <Text style={[styles.planSummary, { color: tokens.textSecondary }]}>
-              {t(currentExercise.role === 'main' ? 'roleMain' : 'roleAccessory')} ·{' '}
-              {targets.length} {t('Sets')} · {repsSummary} · {formatHeaderLoad()}
+              {planLine}
             </Text>
           </Pressable>
         </View>
@@ -613,9 +616,16 @@ export default function StartSessionScreen({ navigation, route }: Props) {
         onClose={() => setInformationExercise(null)}
         testID="runner-exercise-information-sheet"
       >
-        <Text style={[styles.infoPlaceholder, { color: tokens.textSecondary }]}>
-          {t('runnerExerciseInfoComingSoon')}
-        </Text>
+        <Section title={t('runnerInfoPlan')} testID="runner-info-plan">
+          <Text style={[styles.infoPlan, { color: tokens.textPrimary }]}>
+            {informationPlanLine}
+          </Text>
+          <Row
+            label={t('runnerInfoWeek')}
+            detail={t('runnerInfoWeekValue', { week: session.weekNumber })}
+            divided
+          />
+        </Section>
       </Sheet>
     </Screen>
   );
@@ -834,7 +844,7 @@ const styles = StyleSheet.create({
   editorButton: {
     marginTop: spacing.cardGap,
   },
-  infoPlaceholder: {
+  infoPlan: {
     fontSize: fontSize.body,
     marginBottom: spacing.section,
   },

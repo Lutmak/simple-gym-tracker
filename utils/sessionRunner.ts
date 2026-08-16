@@ -110,6 +110,53 @@ export interface RunnerTotals {
 
 export type RunnerTargetSet = PlannedTargetSet;
 
+export interface RunnerPlanLabels {
+  role: string;
+  setsOf: string;
+  maxReps: string;
+  unit: string;
+  missingWeight: string;
+}
+
+const formatPlanWeight = (weight: number): string => String(Number(weight.toFixed(1)));
+
+/** A compact, noun-bearing plan line for the fixed runner header and its interim info sheet. */
+export function formatRunnerPlanLine(
+  targets: readonly RunnerTargetSet[],
+  labels: RunnerPlanLabels,
+): string {
+  const firstTarget = targets[0];
+  if (firstTarget === undefined) {
+    return labels.role;
+  }
+  const firstReps = firstTarget.targetReps;
+  const repsAreUniform = targets.every((target) => target.targetReps === firstReps);
+  const hasAmrap = targets.some((target) => target.isAmrap);
+  const reps = repsAreUniform
+    ? `${firstReps}${hasAmrap ? ` + ${labels.maxReps}` : ''}`
+    : targets
+        .map((target) => (target.isAmrap ? labels.maxReps : String(target.targetReps)))
+        .join('/');
+
+  const weights = targets.map((target) => target.targetWeight);
+  const knownWeights = weights.filter((weight): weight is number => weight !== null);
+  let load: string;
+  if (knownWeights.length !== weights.length || knownWeights.length === 0) {
+    load = labels.missingWeight;
+  } else {
+    const firstWeight = knownWeights[0];
+    if (firstWeight !== undefined && knownWeights.every((weight) => weight === firstWeight)) {
+      load = `${formatPlanWeight(firstWeight)} ${labels.unit}`;
+    } else {
+      load = `${formatPlanWeight(Math.min(...knownWeights))}-${formatPlanWeight(
+        Math.max(...knownWeights),
+      )} ${labels.unit}`;
+    }
+  }
+
+  return `${labels.role} · ${targets.length} ${labels.setsOf} ${reps} · ${load}`;
+}
+
 /** The runner's complete target for each planned work set. */
 export function runnerTargetsFor(
   exercise: RunnerExercise,

@@ -2,6 +2,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { runSchema, type SchemaExecutor } from './schema';
 import { loadDemoData } from './demoData';
 import { buildExerciseSeries } from './exerciseHistory';
+import { buildFreeRunnerExercise } from './freeLogging';
 import {
   belowTarget,
   buildPlannedDraft,
@@ -478,6 +479,69 @@ describe('buildLogRows — the §3.2 history rows', () => {
     const series = buildExerciseSeries(historyRows);
     expect(series.points[0].volume).toBe(47.5 * 5 + 60 * 5 + 72.5 * 5 + 105 * 3 + 107.5);
     expect(series.points[0].volume).toBeGreaterThan(47.5 * 5 + 60 * 5 + 72.5 * 5);
+  });
+
+  it('keeps an exercise added during a planned session in that session log', async () => {
+    const { db, executor } = connect();
+    const session = await fixture(executor);
+    const added = buildFreeRunnerExercise(-1, 'Cable Chest Press', 'kg');
+    const sessionWithAdded: RunnerSession = {
+      ...session,
+      exercises: [...session.exercises, added],
+    };
+    const draft = [...planned(session), [{ reps: 12, weight: 30 }]];
+
+    const rows = buildLogRows(sessionWithAdded, draft);
+
+    expect(rows.workoutLog).toEqual({
+      workoutName: 'Demo Routine',
+      dayName: 'Squat Day',
+      workoutDate: TODAY,
+    });
+    expect(rows.loggedExercises.at(-1)).toEqual({
+      exerciseName: 'Cable Chest Press',
+      sets: 1,
+      reps: 12,
+    });
+    expect(rows.weightLog.at(-1)).toMatchObject({
+      loggedExerciseIndex: 4,
+      setNumber: 1,
+      weight: 30,
+      reps: 12,
+      unit: 'kg',
+    });
+
+    const saved = await saveSessionLog(
+      executor,
+      session.weekSessionId,
+      sessionWithAdded,
+      draft,
+    );
+    const addedRows = db
+      .prepare(
+        `SELECT le.exercise_name, le.sets, le.reps, wl.weight_logged, wl.reps_logged, wl.unit
+         FROM Logged_Exercises le
+         JOIN Weight_Log wl ON wl.logged_exercise_id = le.logged_exercise_id
+         WHERE le.workout_log_id = ? AND le.exercise_name = ?;`,
+      )
+      .all(saved.workoutLogId, 'Cable Chest Press') as {
+      exercise_name: string;
+      sets: number;
+      reps: number;
+      weight_logged: number;
+      reps_logged: number;
+      unit: string;
+    }[];
+    expect(addedRows).toEqual([
+      {
+        exercise_name: 'Cable Chest Press',
+        sets: 1,
+        reps: 12,
+        weight_logged: 30,
+        reps_logged: 12,
+        unit: 'kg',
+      },
+    ]);
   });
 
   it('writes the per-set timing columns from the draft (§3.9)', async () => {

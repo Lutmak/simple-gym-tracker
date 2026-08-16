@@ -293,10 +293,6 @@ export default function ProgressScreen({ navigation, route }: Props) {
     }
   };
 
-  const goToFreeLogging = () => {
-    navigation.navigate('Inicio', { screen: 'FreeLogging' });
-  };
-
   const chartLabels = (points: readonly MainLiftPoint[]): string[] => {
     const max = 6;
     if (points.length <= max) {
@@ -1040,20 +1036,6 @@ export default function ProgressScreen({ navigation, route }: Props) {
                     </Text>
                     {series.map(renderLiftChart)}
 
-                    <Pressable
-                      style={({ pressed }) => [
-                        styles.secondaryButton,
-                        styles.freeLoggingButton,
-                        { borderColor: theme.border },
-                        pressed && styles.pressed,
-                      ]}
-                      onPress={goToFreeLogging}
-                      accessibilityRole="button"
-                    >
-                      <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
-                        {t('freeLogging')}
-                      </Text>
-                    </Pressable>
                   </>
                 )}
               </>
@@ -1063,19 +1045,6 @@ export default function ProgressScreen({ navigation, route }: Props) {
               <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
                 <Text style={[styles.cardTitle, { color: theme.text }]}>{t('progress')}</Text>
                 <Text style={[styles.helper, { color: theme.text }]}>{t('progressNoRoutines')}</Text>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.primaryButton,
-                    { backgroundColor: theme.buttonBackground },
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={goToFreeLogging}
-                  accessibilityRole="button"
-                >
-                  <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-                    {t('freeLogging')}
-                  </Text>
-                </Pressable>
               </View>
             )}
 
@@ -1239,9 +1208,6 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     fontSize: fontSize.button,
     fontWeight: '600',
-  },
-  freeLoggingButton: {
-    marginTop: spacing.card,
   },
   modalContainer: {
     flex: 1,

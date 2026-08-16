@@ -163,8 +163,9 @@ import type { SessionSummary } from './utils/sessionSummary';
     sessionName: string;
     routineName: string;
     workoutDate: number;
+    sessionKind: 'planned' | 'free';
     summary: SessionSummary;
-    finishContext: SessionSummaryFinishContext;
+    finishContext: SessionSummaryFinishContext | null;
   }
 
   export type RootTabParamList = {
@@ -195,7 +196,6 @@ const InicioStackNavigator = createNativeStackNavigator<InicioStackParamList>();
 
 const InicioStack = () => {
   const { theme } = useTheme();
-  const { t } = useTranslation();
   return (
     <InicioStackNavigator.Navigator
       screenOptions={{
@@ -218,7 +218,7 @@ const InicioStack = () => {
       <InicioStackNavigator.Screen
         name="FreeLogging"
         component={FreeLoggingScreen}
-        options={{ title: t('freeLogging') }}
+        options={{ headerShown: false }}
       />
       <InicioStackNavigator.Screen
         name="SessionSummary"

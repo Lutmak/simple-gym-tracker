@@ -52,7 +52,7 @@ const formatSetValue = (
 export default function SessionSummaryScreen({ navigation, route }: Props) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
-  const { sessionName, routineName, workoutDate, summary, finishContext } = route.params;
+  const { sessionName, routineName, workoutDate, sessionKind, summary, finishContext } = route.params;
   const date = datePartsOfStamp(workoutDate);
   const dateLabel = t('inicioDate', {
     weekday: t(WEEKDAY_KEYS[date.weekday]),
@@ -71,6 +71,9 @@ export default function SessionSummaryScreen({ navigation, route }: Props) {
   const close = () => navigation.popToTop();
 
   const openProgress = () => {
+    if (finishContext === null) {
+      return;
+    }
     const parent = navigation.getParent<NavigationProp<RootTabParamList>>();
     navigation.popToTop();
     parent?.navigate('Progress', {
@@ -83,6 +86,9 @@ export default function SessionSummaryScreen({ navigation, route }: Props) {
   };
 
   const openReview = () => {
+    if (finishContext === null) {
+      return;
+    }
     const parent = navigation.getParent<NavigationProp<RootTabParamList>>();
     navigation.popToTop();
     parent?.navigate('Routines', {
@@ -147,13 +153,30 @@ export default function SessionSummaryScreen({ navigation, route }: Props) {
     <Screen scroll testID="session-summary">
       <View style={styles.header}>
         <Text style={[styles.title, { color: tokens.textPrimary }]}>{t('sessionSavedTitle')}</Text>
-        <Text style={[styles.savedLine, { color: tokens.textSecondary }]}>
-          {t('sessionSummarySavedLine', {
-            session: sessionName,
-            routine: routineName,
-            date: dateLabel,
-          })}
-        </Text>
+        {sessionKind === 'free' ? (
+          <>
+            <Text
+              style={[styles.savedLine, { color: tokens.textSecondary }]}
+            >
+              {t('freeSessionSavedLine', { session: sessionName, date: dateLabel })}
+            </Text>
+            <Text
+              style={[styles.savedLine, { color: tokens.textSecondary }]}
+            >
+              {t('freeSessionNoRoutine')}
+            </Text>
+          </>
+        ) : (
+          <Text
+            style={[styles.savedLine, { color: tokens.textSecondary }]}
+          >
+            {t('sessionSummarySavedLine', {
+              session: sessionName,
+              routine: routineName,
+              date: dateLabel,
+            })}
+          </Text>
+        )}
       </View>
 
       <View style={styles.stats} testID="session-summary-stats">
@@ -201,7 +224,7 @@ export default function SessionSummaryScreen({ navigation, route }: Props) {
         </Section>
       )}
 
-      {finishContext.reviewAvailable && (
+      {sessionKind === 'planned' && finishContext !== null && finishContext.reviewAvailable && (
         <Section
           title={t('sessionSummaryNext')}
           hint={t('sessionSummaryNextHint')}
@@ -216,11 +239,13 @@ export default function SessionSummaryScreen({ navigation, route }: Props) {
       )}
 
       <Section testID="session-summary-actions">
-        <Button
-          label={t('sessionSavedSeeProgress')}
-          onPress={openProgress}
-          testID="session-summary-progress"
-        />
+        {sessionKind === 'planned' && (
+          <Button
+            label={t('sessionSavedSeeProgress')}
+            onPress={openProgress}
+            testID="session-summary-progress"
+          />
+        )}
         <Row
           label={t('sessionSummaryClose')}
           onPress={close}

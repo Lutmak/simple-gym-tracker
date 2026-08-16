@@ -1,15 +1,5 @@
 import React, { useState } from 'react';
-import {
-  Alert,
-  Linking,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
@@ -21,21 +11,38 @@ import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { useSettings } from '../context/SettingsContext';
 import { useTheme } from '../context/ThemeContext';
-import { fontSize, radius, spacing } from '../utils/scale';
+import { Field } from '../components/Field';
+import { Row } from '../components/Row';
+import { Screen } from '../components/Screen';
+import { Section } from '../components/Section';
+import { SegmentedControl } from '../components/SegmentedControl';
+import { Switch } from '../components/Switch';
+import { fontSize, spacing, tabBar } from '../utils/scale';
 import { useNotifications } from '../utils/useNotifications';
 import { replaceDatabaseFile } from '../utils/databaseImport';
 import { DatabaseImportValidationError } from '../utils/databaseSchema';
 import { loadDemoData, removeDemoData, type DemoDatabase } from '../utils/demoData';
+import type { BarProfileKey } from '../utils/barProfiles';
 import {
   ImagePackValidationError,
   IMAGE_PACK_RELEASE_URL,
   installImagePackFromUri,
 } from '../utils/imagePackInstaller';
+import {
+  LANGUAGE_OPTIONS,
+  WEIGHT_FORMAT_OPTIONS,
+  barProfileOptions,
+  dateFormatOptions,
+  firstWeekdayOptions,
+  formatTimeOfDay,
+  roundingIncrementOptions,
+  routineUnitFor,
+  timeFormatOptions,
+  type SettingOption,
+} from '../utils/settingsOptions';
 
-const LANGUAGES = [
-  { code: 'en', label: 'English' },
-  { code: 'es', label: 'Español' },
-] as const;
+const ISSUES_URL = 'https://github.com/Lutmak/simple-gym-tracker/issues';
+const REPOSITORY_URL = 'https://github.com/Lutmak/simple-gym-tracker';
 
 const IMAGE_PACK_PICKER_TYPES = [
   'application/zip',
@@ -63,6 +70,10 @@ export default function Settings() {
     setTimeFormat,
     weightFormat,
     setWeightFormat,
+    roundingIncrement,
+    setRoundingIncrement,
+    barProfile,
+    setBarProfile,
     firstWeekday,
     setFirstWeekday,
     language,
@@ -72,7 +83,7 @@ export default function Settings() {
     notificationTime,
     setNotificationTime,
   } = useSettings();
-  const { theme, toggleTheme } = useTheme();
+  const { theme, tokens, toggleTheme } = useTheme();
   const { t } = useTranslation();
   const db = useSQLiteContext();
   const {
@@ -81,8 +92,19 @@ export default function Settings() {
     scheduleDailyReminder,
   } = useNotifications();
 
-  const [languageDropdownVisible, setLanguageDropdownVisible] = useState(false);
   const [showTimePicker, setShowTimePicker] = useState(false);
+
+  const unit = routineUnitFor(weightFormat);
+
+  // The one place an option descriptor becomes words. Everything about WHICH options exist and
+  // what they are called lives in utils/settingsOptions.ts; this screen only translates.
+  const segments = <T extends string>(
+    options: readonly SettingOption<T>[],
+  ): { value: T; label: string }[] =>
+    options.map((option) => ({
+      value: option.value,
+      label: t(option.labelKey, option.labelParams),
+    }));
 
   const demoDb: DemoDatabase = {
     run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
@@ -150,20 +172,6 @@ export default function Settings() {
         { cancelable: true },
       );
     }
-  };
-
-  const formatTime = (time: string): string => {
-    const [hours, minutes] = time.split(':').map(Number);
-    if (timeFormat === 'AM/PM') {
-      const date = new Date();
-      date.setHours(hours, minutes, 0, 0);
-      return date.toLocaleString('en-US', {
-        hour: 'numeric',
-        minute: 'numeric',
-        hour12: true,
-      });
-    }
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
   };
 
   const handleNotificationTimeChange = (
@@ -352,476 +360,199 @@ export default function Settings() {
     }
   };
 
-  const renderChoice = (
-    label: string,
-    active: boolean,
-    onPress: () => void,
-  ) => (
-    <Pressable
-      style={({ pressed }) => [
-        styles.choiceButton,
-        {
-          borderColor: theme.border,
-          backgroundColor: active ? theme.buttonBackground : theme.card,
-        },
-        pressed && styles.pressed,
-      ]}
-      onPress={onPress}
-    >
-      <Text
-        style={[
-          styles.choiceButtonText,
-          { color: active ? theme.buttonText : theme.text },
-        ]}
-      >
-        {label}
-      </Text>
-      {active && (
-        <Ionicons
-          name='checkmark'
-          size={16}
-          color={theme.buttonText}
-          style={styles.choiceTick}
-        />
-      )}
-    </Pressable>
-  );
-
-  const renderChoiceGroup = (
-    choices: { label: string; active: boolean; onPress: () => void }[],
-  ) => (
-    <View style={styles.choiceGroup}>
-      {choices.map((choice, index) => (
-        <View key={choice.label} style={styles.choiceSlot}>
-          {renderChoice(choice.label, choice.active, choice.onPress)}
-        </View>
-      ))}
-    </View>
-  );
-
-  const renderSectionTitle = (label: string) => (
-    <Text style={[styles.sectionTitle, { color: theme.text }]}>{label}</Text>
-  );
-
-  const renderSettingLabel = (label: string) => (
-    <Text style={[styles.settingLabel, { color: theme.text }]}>{label}</Text>
-  );
-
-  const renderDivider = () => (
-    <View style={[styles.settingDivider, { backgroundColor: theme.border }]} />
-  );
-
-  const renderActionRow = (
-    icon: React.ComponentProps<typeof Ionicons>['name'],
-    label: string,
-    onPress: () => void,
-    hint?: string,
-  ) => (
-    <Pressable
-      style={({ pressed }) => [
-        styles.actionRow,
-        { borderColor: theme.border, backgroundColor: theme.card },
-        pressed && styles.pressed,
-      ]}
-      onPress={onPress}
-    >
-      <Ionicons name={icon} size={20} color={theme.text} />
-      <View style={styles.actionRowText}>
-        <Text style={[styles.actionRowLabel, { color: theme.text }]}>
-          {label}
-        </Text>
-        {hint !== undefined && (
-          <Text style={[styles.actionRowHint, { color: theme.text }]}>
-            {hint}
-          </Text>
-        )}
-      </View>
-    </Pressable>
+  const chevron = (
+    <Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />
   );
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.content}
-      >
-        <Text style={[styles.title, { color: theme.text }]}>
-          {t('settingsTitle')}
-        </Text>
+    <Screen scroll testID="settings-screen">
+      <Text style={[styles.title, { color: tokens.textPrimary }]}>{t('settingsTitle')}</Text>
 
-        {renderSectionTitle(t('settingsAppearance'))}
-
-        <View style={styles.card}>
-          {renderSettingLabel(t('settingsLanguage'))}
-          <Pressable
-            style={({ pressed }) => [
-              styles.dropdownButton,
-              { borderColor: theme.border, backgroundColor: theme.card },
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setLanguageDropdownVisible((visible) => !visible)}
-          >
-            <Text style={[styles.dropdownButtonText, { color: theme.text }]}>
-              {LANGUAGES.find((lang) => lang.code === language)?.label ??
-                language}
-            </Text>
-            <Ionicons
-              name={languageDropdownVisible ? 'chevron-up' : 'chevron-down'}
-              size={16}
-              color={theme.text}
+      <Section title={t('settingsAppearance')} testID="settings-appearance">
+        <Row
+          label={t('settingsDarkMode')}
+          right={
+            <Switch
+              value={theme.type === 'dark'}
+              onValueChange={toggleTheme}
+              testID="settings-dark-mode"
             />
-          </Pressable>
-          {languageDropdownVisible && (
-            <View style={[styles.dropdownList, { borderColor: theme.border }]}>
-              {LANGUAGES.map((item) => (
-                <Pressable
-                  key={item.code}
-                  style={({ pressed }) => [
-                    styles.dropdownItem,
-                    language === item.code && {
-                      backgroundColor: theme.buttonBackground,
-                    },
-                    pressed && styles.pressed,
-                  ]}
-                  onPress={() => {
-                    setLanguage(item.code);
-                    setLanguageDropdownVisible(false);
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownItemText,
-                      {
-                        color:
-                          language === item.code
-                            ? theme.buttonText
-                            : theme.text,
-                      },
-                    ]}
-                  >
-                    {item.label}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          )}
+          }
+          divided
+        />
+        <Field label={t('settingsLanguage')}>
+          <SegmentedControl
+            options={segments(LANGUAGE_OPTIONS)}
+            value={language}
+            onChange={setLanguage}
+            testID="settings-language"
+          />
+        </Field>
+      </Section>
 
-          {renderDivider()}
-
-          {renderSettingLabel(t('settingsTheme'))}
-          {renderChoice(
-            theme.type === 'light' ? t('settingsSwitchDark') : t('settingsSwitchLight'),
-            false,
-            toggleTheme,
-          )}
-
-          {renderDivider()}
-
-          {renderSettingLabel(t('settingsWeightFormat'))}
-          {renderChoiceGroup([
-            { label: 'kg', active: weightFormat === 'kg', onPress: () => setWeightFormat('kg') },
-            { label: 'lbs', active: weightFormat === 'lbs', onPress: () => setWeightFormat('lbs') },
-          ])}
-
-          {renderDivider()}
-
-          {renderSettingLabel(t('settingsDateFormat'))}
-          {renderChoiceGroup([
-            {
-              label: 'dd-mm-yyyy',
-              active: dateFormat === 'dd-mm-yyyy',
-              onPress: () => setDateFormat('dd-mm-yyyy'),
-            },
-            {
-              label: 'mm-dd-yyyy',
-              active: dateFormat === 'mm-dd-yyyy',
-              onPress: () => setDateFormat('mm-dd-yyyy'),
-            },
-          ])}
-
-          {renderDivider()}
-
-          {renderSettingLabel(t('settingsTimeFormat'))}
-          {renderChoiceGroup([
-            {
-              label: '24h',
-              active: timeFormat === '24h',
-              onPress: () => setTimeFormat('24h'),
-            },
-            {
-              label: 'AM/PM',
-              active: timeFormat === 'AM/PM',
-              onPress: () => setTimeFormat('AM/PM'),
-            },
-          ])}
-
-          {renderDivider()}
-
-          {renderSettingLabel(t('settingsFirstWeekday'))}
-          {renderChoiceGroup([
-            {
-              label: t('Monday'),
-              active: firstWeekday === 'Monday',
-              onPress: () => setFirstWeekday('Monday'),
-            },
-            {
-              label: t('Sunday'),
-              active: firstWeekday === 'Sunday',
-              onPress: () => setFirstWeekday('Sunday'),
-            },
-          ])}
+      <Section title={t('settingsGroupUnits')} testID="settings-units">
+        <View>
+          <Field label={t('settingsWeightUnit')} hint={t('settingsWeightUnitHint')}>
+            <SegmentedControl
+              options={segments(WEIGHT_FORMAT_OPTIONS)}
+              value={weightFormat}
+              onChange={setWeightFormat}
+              testID="settings-weight-unit"
+            />
+          </Field>
+          <Field
+            label={t('settingsRoundingIncrement')}
+            hint={t('settingsRoundingIncrementHint')}
+          >
+            <SegmentedControl
+              options={segments(roundingIncrementOptions(unit))}
+              value={String(roundingIncrement)}
+              onChange={(value) => setRoundingIncrement(Number(value))}
+              testID="settings-rounding-increment"
+            />
+          </Field>
+          <Field label={t('settingsBarProfile')} hint={t('settingsBarProfileHint')}>
+            <SegmentedControl<BarProfileKey>
+              options={segments(barProfileOptions(unit))}
+              value={barProfile}
+              onChange={setBarProfile}
+              wrap
+              testID="settings-bar-profile"
+            />
+          </Field>
+          <Field label={t('settingsDateFormat')} hint={t('settingsDateFormatHint')}>
+            <SegmentedControl
+              options={segments(dateFormatOptions())}
+              value={dateFormat}
+              onChange={setDateFormat}
+              testID="settings-date-format"
+            />
+          </Field>
+          <Field label={t('settingsTimeFormat')} hint={t('settingsTimeFormatHint')}>
+            <SegmentedControl
+              options={segments(timeFormatOptions())}
+              value={timeFormat}
+              onChange={setTimeFormat}
+              testID="settings-time-format"
+            />
+          </Field>
+          <Field label={t('settingsFirstWeekday')} hint={t('settingsFirstWeekdayHint')}>
+            <SegmentedControl
+              options={segments(firstWeekdayOptions())}
+              value={firstWeekday}
+              onChange={setFirstWeekday}
+              testID="settings-first-weekday"
+            />
+          </Field>
         </View>
+      </Section>
 
-        {renderSectionTitle(t('notifications'))}
-
-        <View style={styles.card}>
-          <View style={styles.toggleRow}>
-            <Text style={[styles.toggleText, { color: theme.text }]}>
-              {t('remindScheduledWorkouts')}
-            </Text>
+      <Section title={t('notifications')} testID="settings-notifications">
+        <Row
+          label={t('remindScheduledWorkouts')}
+          right={
             <Switch
               value={notificationPermissionGranted}
               onValueChange={handleNotificationToggle}
-              trackColor={{ false: theme.border, true: theme.buttonBackground }}
-              thumbColor={theme.buttonText}
+              testID="settings-notifications-toggle"
             />
-          </View>
-          {notificationPermissionGranted && (
-            <Pressable
-              style={({ pressed }) => [
-                styles.timeRow,
-                { borderColor: theme.border, backgroundColor: theme.card },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setShowTimePicker(true)}
-            >
-              <Ionicons name='time-outline' size={20} color={theme.text} />
-              <Text style={[styles.timeRowLabel, { color: theme.text }]}>
-                {t('notificationTime')}
-              </Text>
-              <Text style={[styles.timeRowValue, { color: theme.text }]}>
-                {formatTime(notificationTime)}
-              </Text>
-            </Pressable>
-          )}
-          {showTimePicker && (
-            <DateTimePicker
-              value={(() => {
-                const [hours, minutes] = notificationTime.split(':').map(Number);
-                const date = new Date();
-                date.setHours(hours, minutes, 0, 0);
-                return date;
-              })()}
-              mode='time'
-              is24Hour={timeFormat === '24h'}
-              display='default'
-              onChange={handleNotificationTimeChange}
-            />
-          )}
-        </View>
+          }
+          divided={notificationPermissionGranted}
+        />
+        {notificationPermissionGranted && (
+          <Row
+            label={t('notificationTime')}
+            detail={formatTimeOfDay(notificationTime, timeFormat)}
+            right={chevron}
+            onPress={() => setShowTimePicker(true)}
+            testID="settings-notification-time"
+          />
+        )}
+        {showTimePicker && (
+          <DateTimePicker
+            value={(() => {
+              const [hours, minutes] = notificationTime.split(':').map(Number);
+              const date = new Date();
+              date.setHours(hours, minutes, 0, 0);
+              return date;
+            })()}
+            mode="time"
+            is24Hour={timeFormat === '24h'}
+            display="default"
+            onChange={handleNotificationTimeChange}
+          />
+        )}
+      </Section>
 
-        {renderSectionTitle(t('dataManagement'))}
+      <Section title={t('dataManagement')} testID="settings-data">
+        <Row
+          label={t('exportDatabase')}
+          right={chevron}
+          onPress={exportDatabase}
+          divided
+          testID="settings-export"
+        />
+        <Row
+          label={t('restoreFromBackup')}
+          right={chevron}
+          onPress={importDatabase}
+          divided
+          testID="settings-import"
+        />
+        <Row
+          label={t('loadDemoData')}
+          onPress={handleLoadDemoData}
+          divided
+          testID="settings-load-demo"
+        />
+        <Row
+          label={t('removeDemoData')}
+          detail={t('removeDemoDataConfirm')}
+          detailBelow
+          onPress={handleRemoveDemoData}
+          divided
+          testID="settings-remove-demo"
+        />
+        <Row
+          label={t('downloadImagePack')}
+          detail={t('imagePackDownloadHint')}
+          detailBelow
+          right={chevron}
+          onPress={downloadImagePack}
+          divided
+          testID="settings-download-image-pack"
+        />
+        <Row
+          label={t('installImagePack')}
+          right={chevron}
+          onPress={installImagePack}
+          testID="settings-install-image-pack"
+        />
+      </Section>
 
-        <View style={styles.card}>
-          {renderActionRow('share-outline', t('exportDatabase'), exportDatabase)}
-          {renderActionRow('download-outline', t('restoreFromBackup'), importDatabase)}
-          {renderActionRow('flask-outline', t('loadDemoData'), handleLoadDemoData)}
-          {renderActionRow(
-            'trash-outline',
-            t('removeDemoData'),
-            handleRemoveDemoData,
-            t('removeDemoDataConfirm'),
-          )}
-        </View>
-
-        <View style={styles.card}>
-          <Text style={[styles.cardTitle, { color: theme.text }]}>
-            {t('imagePackTitle')}
-          </Text>
-          <Text style={[styles.cardHint, { color: theme.text }]}>
-            {t('imagePackDownloadHint')}
-          </Text>
-          {renderActionRow('open-outline', t('downloadImagePack'), downloadImagePack)}
-          {renderActionRow('file-tray-full-outline', t('installImagePack'), installImagePack)}
-        </View>
-
-        {renderSectionTitle(t('settingsAbout'))}
-
-        <View style={styles.card}>
-          {renderActionRow(
-            'bug',
-            t('reportIssue'),
-            () =>
-              Linking.openURL(
-                'https://github.com/Lutmak/simple-gym-tracker/issues',
-              ),
-          )}
-          {renderActionRow('logo-github', t('GitHub'), () =>
-            Linking.openURL('https://github.com/Lutmak/simple-gym-tracker'),
-          )}
-        </View>
-      </ScrollView>
-    </View>
+      <Section title={t('settingsAbout')} testID="settings-about">
+        <Row
+          label={t('reportIssue')}
+          right={chevron}
+          onPress={() => Linking.openURL(ISSUES_URL)}
+          divided
+          testID="settings-report-issue"
+        />
+        <Row
+          label={t('GitHub')}
+          right={chevron}
+          onPress={() => Linking.openURL(REPOSITORY_URL)}
+          testID="settings-github"
+        />
+      </Section>
+    </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    padding: spacing.gutter,
-    paddingBottom: spacing.section * 2,
-  },
   title: {
     fontSize: fontSize.screenTitle,
-    fontWeight: '900',
-    textAlign: 'center',
+    fontWeight: '700',
     marginBottom: spacing.section,
-  },
-  sectionTitle: {
-    fontSize: fontSize.sectionTitle,
-    fontWeight: '900',
-    marginTop: spacing.section,
-    marginBottom: spacing.card,
-  },
-  card: {
-    borderWidth: 1,
-    borderRadius: radius.card,
-    padding: spacing.card,
-    marginBottom: spacing.cardGap,
-  },
-  cardTitle: {
-    fontSize: fontSize.cardTitle,
-    fontWeight: '700',
-  },
-  cardHint: {
-    fontSize: fontSize.helper,
-    opacity: 0.7,
-    marginTop: spacing.label,
-    marginBottom: spacing.card,
-  },
-  settingLabel: {
-    fontSize: fontSize.body,
-    fontWeight: '600',
-    marginBottom: spacing.label,
-  },
-  settingDivider: {
-    height: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.1)',
-    marginVertical: spacing.card,
-    opacity: 0.4,
-  },
-  dropdownButton: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: radius.control,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.label,
-    minHeight: 44,
-  },
-  dropdownButtonText: {
-    fontSize: fontSize.button,
-    fontWeight: '600',
-  },
-  dropdownList: {
-    marginTop: spacing.label,
-    borderWidth: 1,
-    borderRadius: radius.control,
-    overflow: 'hidden',
-  },
-  dropdownItem: {
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.card,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  dropdownItemText: {
-    fontSize: fontSize.button,
-    fontWeight: '600',
-  },
-  choiceGroup: {
-    flexDirection: 'row',
-    gap: spacing.inline,
-  },
-  choiceSlot: {
-    flex: 1,
-  },
-  choiceButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderRadius: radius.control,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.label,
-    minHeight: 44,
-  },
-  choiceButtonText: {
-    fontSize: fontSize.button,
-    fontWeight: '600',
-  },
-  choiceTick: {
-    marginLeft: spacing.label,
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    minHeight: 44,
-  },
-  toggleText: {
-    fontSize: fontSize.body,
-    fontWeight: '600',
-    flex: 1,
-    marginRight: spacing.card,
-  },
-  timeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: radius.control,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.label,
-    minHeight: 44,
-    marginTop: spacing.card,
-  },
-  timeRowLabel: {
-    fontSize: fontSize.body,
-    fontWeight: '600',
-    marginLeft: spacing.label,
-    flex: 1,
-  },
-  timeRowValue: {
-    fontSize: fontSize.body,
-    fontWeight: '700',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: radius.control,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.card,
-    minHeight: 46,
-    marginBottom: spacing.cardGap,
-  },
-  actionRowText: {
-    flex: 1,
-    marginLeft: spacing.card,
-  },
-  actionRowLabel: {
-    fontSize: fontSize.button,
-    fontWeight: '600',
-  },
-  actionRowHint: {
-    fontSize: fontSize.helper,
-    opacity: 0.7,
-    marginTop: spacing.label,
-  },
-  pressed: {
-    opacity: 0.7,
   },
 });

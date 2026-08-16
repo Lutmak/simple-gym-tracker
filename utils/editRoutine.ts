@@ -46,6 +46,8 @@ export interface EditExercise {
   barProfile?: BarProfileKey | null;
   /** The custom bar weight, in the exercise's unit. */
   barWeight?: number | null;
+  /** The per-exercise warm-up answer (§3.6); null/omitted keeps the role default. */
+  warmupsEnabled?: boolean | null;
 }
 
 export interface EditSession {
@@ -66,6 +68,16 @@ export interface EditRoutine {
   /** Planned jokers (§3.4); omitted means the current value is kept. */
   plannedJokers?: number;
 }
+
+/**
+ * What an exercise added in the editor starts as. Three sets of ten is the
+ * conventional accessory prescription, and it is also what the app falls back
+ * to when the user clears the field — R3's rule is that no save is ever
+ * blocked by a missing number, which means every number needs a value the app
+ * can supply on its own.
+ */
+export const DEFAULT_TARGET_SETS = 3;
+export const DEFAULT_TARGET_REPS = 10;
 
 export type EditRoutineError =
   | { code: 'routineNameRequired' }
@@ -119,12 +131,17 @@ export interface EditRoutineRows {
     sortOrder: number;
     barProfile: BarProfileKey | null;
     barWeight: number | null;
+    warmupsEnabled: boolean | null;
   }[];
 }
 
 const fail = (detail: EditRoutineError): never => {
   throw new EditRoutineValidationError(detail);
 };
+
+/** SQLite has no boolean; null stays null so "never said" survives a save (§3.6). */
+const toFlag = (value: boolean | null): number | null =>
+  value === null ? null : value ? 1 : 0;
 
 /**
  * Normalizes the weight fields per load source, mirroring the SessionExercises
@@ -228,6 +245,7 @@ export function buildEditRows(draft: EditRoutine): EditRoutineRows {
         barProfile:
           exercise.barProfile ?? defaultBarProfileForEquipment(exercise.equipment ?? null),
         barWeight: exercise.barWeight ?? null,
+        warmupsEnabled: exercise.warmupsEnabled ?? null,
       };
     }),
   );
@@ -354,8 +372,9 @@ export async function saveRoutineEdit(
             `INSERT INTO SessionExercises
                (session_id, catalog_exercise_id, exercise_name, role, target_sets,
                 target_reps, load_source, training_max_pct, training_max_weight,
-                absolute_weight, unit_override, is_amrap, sort_order, bar_profile, bar_weight)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+                absolute_weight, unit_override, is_amrap, sort_order, bar_profile,
+                bar_weight, warmups_enabled)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
             [
               sessionId,
               exercise.catalogExerciseId,
@@ -372,6 +391,7 @@ export async function saveRoutineEdit(
               exercise.sortOrder,
               exercise.barProfile,
               exercise.barWeight,
+              toFlag(exercise.warmupsEnabled),
             ],
           );
           const exerciseIdRow = await db.get('SELECT last_insert_rowid() AS id;', []);
@@ -386,7 +406,8 @@ export async function saveRoutineEdit(
                    target_sets = ?, target_reps = ?, load_source = ?,
                    training_max_pct = ?, training_max_weight = ?,
                    absolute_weight = ?, unit_override = ?, is_amrap = ?,
-                   sort_order = ?, bar_profile = ?, bar_weight = ?
+                   sort_order = ?, bar_profile = ?, bar_weight = ?,
+                   warmups_enabled = ?
              WHERE session_exercise_id = ? AND session_id = ?;`,
             [
               exercise.catalogExerciseId,
@@ -403,6 +424,7 @@ export async function saveRoutineEdit(
               exercise.sortOrder,
               exercise.barProfile,
               exercise.barWeight,
+              toFlag(exercise.warmupsEnabled),
               exercise.exerciseId,
               sessionId,
             ],

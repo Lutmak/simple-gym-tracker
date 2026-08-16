@@ -182,6 +182,9 @@ CREATE TABLE IF NOT EXISTS SessionExercises (
     sort_order INTEGER NOT NULL CHECK (sort_order > 0),
     bar_profile TEXT CHECK (bar_profile IS NULL OR bar_profile IN ('olympic', 'semi-olympic', 'smith', 'ez', 'custom')),
     bar_weight REAL,
+    -- R3/§3.6: NULL means "whatever this role does by default" — on for a main
+    -- lift, off for an accessory. 0/1 is the user overriding that per exercise.
+    warmups_enabled INTEGER CHECK (warmups_enabled IS NULL OR warmups_enabled IN (0, 1)),
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
     UNIQUE (session_id, sort_order),

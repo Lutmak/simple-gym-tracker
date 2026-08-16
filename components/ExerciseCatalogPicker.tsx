@@ -50,11 +50,28 @@ import type { RoutineDatabase } from '../utils/routineActions';
 const ALL_BODY_PARTS = 'all';
 type BodyPartFilter = BodyPartKey | typeof ALL_BODY_PARTS;
 
+/**
+ * What the picker hands back. It carries the catalog facts the caller would
+ * otherwise have to re-query — equipment and the bar answer decide the bar
+ * profile of the exercise being added (§3.5), and the primary muscles decide
+ * whether a 5/3/1 day is an upper or a lower day. The picker has all three in
+ * memory already; making the caller ask the database again is how those two
+ * defaults ended up not being applied at all.
+ */
+export interface ExercisePickerSelection {
+  catalogExerciseId: string | null;
+  name: string;
+  equipment: string | null;
+  /** The user's own answer for a custom exercise; null when equipment decides. */
+  usesBar: boolean | null;
+  primaryMuscles: readonly string[];
+}
+
 type Props = {
   visible: boolean;
   /** The tapped exercise's catalog id; null opens the whole catalog. */
   catalogExerciseId: string | null;
-  onSelect: (exercise: { catalogExerciseId: string | null; name: string }) => void;
+  onSelect: (exercise: ExercisePickerSelection) => void;
   onClose: () => void;
 };
 
@@ -152,7 +169,13 @@ export default function ExerciseCatalogPicker({
         draft,
         new Set(exercises.map((exercise) => exercise.exerciseKey)),
       );
-      onSelect({ catalogExerciseId: created.exerciseKey, name: created.name });
+      onSelect({
+        catalogExerciseId: created.exerciseKey,
+        name: created.name,
+        equipment: created.equipment,
+        usesBar: created.usesBar,
+        primaryMuscles: created.primaryMuscles,
+      });
     } catch (error: unknown) {
       console.error('Error creating a custom exercise:', error);
       setProblem(t('pickerCustom_save-failed'));
@@ -326,7 +349,13 @@ export default function ExerciseCatalogPicker({
               }
               detailBelow
               onPress={() =>
-                onSelect({ catalogExerciseId: item.exerciseKey, name: item.name })
+                onSelect({
+                  catalogExerciseId: item.exerciseKey,
+                  name: item.name,
+                  equipment: item.equipment,
+                  usesBar: item.usesBar,
+                  primaryMuscles: item.primaryMuscles,
+                })
               }
               right={
                 <Pressable

@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -7,9 +7,14 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
-import { fontSize, spacing } from '../utils/scale';
-import WeekdayIndicator from '../components/WeekdayIndicator';
+import { Button } from '../components/Button';
+import { Row } from '../components/Row';
+import { Screen } from '../components/Screen';
+import { ScreenTitle } from '../components/ScreenTitle';
+import { Section } from '../components/Section';
 import { ExerciseSheet } from '../components/ExerciseSheet';
+import { RoutineActionsSheet } from '../components/RoutineActionsSheet';
+import { fontSize, spacing, tabBar } from '../utils/scale';
 import {
   activatePresetRoutine,
   activateRoutineById,
@@ -18,12 +23,17 @@ import {
   getActiveRoutine,
   loadPresetRoutineSource,
   loadRoutineSourceById,
-  routineNeedsWeights,
   type ExerciseSource,
   type RoutineDatabase,
   type RoutineSourceBundle,
   type RoutineUnit,
 } from '../utils/routineActions';
+import {
+  planActivation,
+  weekdaySequence,
+  type ActivationTarget,
+  type ActiveRoutineRef,
+} from '../utils/routineLibrary';
 import type { RoutinesStackParamList } from '../App';
 
 type Props = NativeStackScreenProps<RoutinesStackParamList, 'RoutineDetails'>;
@@ -43,8 +53,26 @@ const formatRest = (seconds: number): string =>
 
 const formatWeight = (value: number): string => String(Number(value.toFixed(1)));
 
+/**
+ * R1 — one routine, read (SPECS.md R1, §3.2).
+ *
+ * The same screen shows a preset and one of the user's own routines, because they are the same
+ * thing at different moments: a preset is what a routine looks like before it is copied. Two
+ * behaviours changed here and both are the acceptance criterion:
+ *
+ * - **Activation never asks for a number.** It used to branch — a `wave` preset pushed the 5/3/1
+ *   setup wizard, any other preset pushed a screen that demanded a weight per exercise and refused
+ *   to activate without one ("Faltan valores"). Both branches are gone with the screen that
+ *   collected them; activation is now one call with an empty weight map, which writes every load
+ *   as NULL for the first logged session to learn (§3.2, `utils/learnedWeights.ts`).
+ * - **The four bespoke action buttons are gone**, replaced by the shared `RoutineActionsSheet` —
+ *   the same sheet the Rutinas list opens.
+ *
+ * The 5/3/1 builder is still reachable, from `+ Nueva rutina`, where building a program is what
+ * the user asked for. It is not on the path of activating a routine.
+ */
 export default function RoutineDetailsScreen({ navigation, route }: Props) {
-  const { theme } = useTheme();
+  const { tokens } = useTheme();
   const { t } = useTranslation();
   const { weightFormat, firstWeekday } = useSettings();
   const db = useSQLiteContext();
@@ -53,20 +81,20 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
   const routineDb: RoutineDatabase = {
     run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
     get: async (sql, params) =>
-      (await db.getFirstAsync<Record<string, unknown>>(
-        sql,
-        (params ?? []) as never[],
-      )) ?? undefined,
+      (await db.getFirstAsync<Record<string, unknown>>(sql, (params ?? []) as never[])) ?? undefined,
     getAll: async (sql, params) =>
       db.getAllAsync<Record<string, unknown>>(sql, (params ?? []) as never[]),
   };
 
   const [source, setSource] = useState<RoutineSourceBundle | null>(null);
+  const [active, setActive] = useState<ActiveRoutineRef | null>(null);
+  /** The preset's copy in the library, when it has one — what activation reactivates. */
+  const [copyRoutineId, setCopyRoutineId] = useState<number | null>(null);
+  const [actionsFor, setActionsFor] = useState<ActivationTarget | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   /** R2: the exercise whose shared sheet is open. */
   const [information, setInformation] = useState<ExerciseSource | null>(null);
-
-  const isPreset = presetKey !== undefined;
 
   useFocusEffect(
     useCallback(() => {
@@ -77,27 +105,46 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
               ? await loadPresetRoutineSource(routineDb, presetKey)
               : await loadRoutineSourceById(routineDb, routineId as number);
           setSource(loaded);
-          navigation.setOptions({ title: loaded.routine.name });
-        } catch (error) {
-          console.error('Error loading routine:', error);
+          setActive(await getActiveRoutine(routineDb));
+          if (presetKey !== undefined) {
+            const copy = await routineDb.get(
+              'SELECT routine_id FROM Routines WHERE routine_key = ?;',
+              [presetKey],
+            );
+            setCopyRoutineId(copy === undefined ? null : Number(copy.routine_id));
+          }
+        } catch {
+          setError(t('routineLibraryError'));
         }
       };
-      load();
-    }, [db, routineId, presetKey, navigation]),
+      void load();
+    }, [db, routineId, presetKey, t]),
   );
 
-  if (!source) {
-    return <View style={[styles.container, { backgroundColor: theme.background }]} />;
+  if (source === null) {
+    return (
+      <Screen testID="routine-details-screen">
+        <ActivityIndicator color={tokens.accent} />
+        {error !== null && <Text style={[styles.error, { color: tokens.warning }]}>{error}</Text>}
+      </Screen>
+    );
   }
 
   const { routine, sessions, exercises } = source;
-  const isActive = routine.isActive;
   const unit: RoutineUnit = routine.unit ?? (weightFormat === 'lbs' ? 'lb' : 'kg');
-  const weekdays = sessions.map((session) => session.weekday);
 
-  const weekStart = firstWeekday === 'Monday' ? 1 : 0;
-  const orderedSessions = [...sessions].sort(
-    (a, b) => ((a.weekday - weekStart + 7) % 7) - ((b.weekday - weekStart + 7) % 7),
+  const target: ActivationTarget =
+    presetKey !== undefined
+      ? { kind: 'preset', routineKey: presetKey, name: routine.name, copyRoutineId }
+      : { kind: 'routine', routineId: routineId as number, name: routine.name };
+  const plan = planActivation(target, active);
+
+  const orderedWeekdays = weekdaySequence(
+    sessions.map((session) => session.weekday),
+    firstWeekday,
+  );
+  const orderedSessions = orderedWeekdays.flatMap((weekday) =>
+    sessions.filter((session) => session.weekday === weekday),
   );
 
   const progressionText =
@@ -118,7 +165,7 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
             weight: formatWeight(exercise.absoluteWeight),
             unit: exerciseUnit,
           })
-        : t('weightAtActivation');
+        : t('weightLearnedOnFirstSession');
     }
     if (exercise.trainingMaxWeight !== null) {
       return t('loadTrainingMaxValue', {
@@ -126,265 +173,160 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
         unit: exerciseUnit,
       });
     }
-    const pct = exercise.trainingMaxPct !== null ? Math.round(exercise.trainingMaxPct * 100) : 90;
-    return t('loadTrainingMax', { pct });
+    return t('weightLearnedOnFirstSession');
   };
 
-  const confirmAndActivate = (proceed: () => void) => {
-    getActiveRoutine(routineDb).then((active) => {
-      if (active) {
-        Alert.alert(
-          t('switchRoutineTitle'),
-          t('switchRoutineMessage', { name: active.name }),
-          [
-            { text: t('Cancel'), style: 'cancel' },
-            { text: t('confirm'), onPress: proceed },
-          ],
-        );
-      } else {
-        proceed();
-      }
-    });
-  };
-
-  const finishActivation = () => {
-    setBusy(false);
-    Alert.alert(
-      t('routineActivated'),
-      t('routineActivatedMessage', { name: routine.name }),
-      [{ text: t('ok'), onPress: () => navigation.popToTop() }],
-    );
-  };
-
-  const activateNow = async () => {
+  const runAction = async (action: () => Promise<unknown>, message: string) => {
     setBusy(true);
+    setError(null);
     try {
-      if (presetKey !== undefined) {
-        await activatePresetRoutine(routineDb, presetKey, unit, new Map());
-      } else {
-        await activateRoutineById(routineDb, routineId as number);
-      }
-      finishActivation();
-    } catch (error) {
-      console.error('Error activating routine:', error);
+      await action();
+      setActionsFor(null);
+      navigation.popToTop();
+    } catch {
+      setError(message);
       setBusy(false);
-      Alert.alert(t('errorTitle'), t('errorActivatingRoutine'));
     }
   };
 
-  const handleActivate = () => {
-    if (presetKey !== undefined && routine.progressionRule === 'wave') {
-      confirmAndActivate(() => navigation.navigate('FiveThreeOneSetup', { presetKey }));
-    } else if (presetKey !== undefined && routineNeedsWeights(source)) {
-      confirmAndActivate(() => navigation.navigate('ActivateRoutine', { presetKey }));
-    } else {
-      confirmAndActivate(activateNow);
-    }
-  };
-
-  const handleDuplicate = () => {
-    setBusy(true);
-    duplicateRoutine(routineDb, routineId as number)
-      .then(() => {
-        setBusy(false);
-        Alert.alert(
-          t('routineDuplicated'),
-          t('routineDuplicatedMessage', { name: routine.name }),
-          [{ text: t('ok'), onPress: () => navigation.popToTop() }],
-        );
-      })
-      .catch((error: unknown) => {
-        console.error('Error duplicating routine:', error);
-        setBusy(false);
-        Alert.alert(t('errorTitle'), t('errorDuplicatingRoutine'));
-      });
-  };
-
-  const handleDelete = () => {
-    Alert.alert(
-      t('deleteRoutineTitle'),
-      isActive
-        ? t('deleteRoutineActiveMessage', { name: routine.name })
-        : t('deleteRoutineMessage', { name: routine.name }),
-      [
-        { text: t('Cancel'), style: 'cancel' },
-        {
-          text: t('Delete'),
-          style: 'destructive',
-          onPress: () => {
-            setBusy(true);
-            deleteRoutine(routineDb, routineId as number)
-              .then(() => {
-                setBusy(false);
-                navigation.popToTop();
-              })
-              .catch((error: unknown) => {
-                console.error('Error deleting routine:', error);
-                setBusy(false);
-                Alert.alert(t('errorTitle'), t('errorDeletingRoutine'));
-              });
-          },
-        },
-      ],
+  /**
+   * Zero numeric input, in one place: the weight map is always empty. A preset copies with every
+   * load NULL; a routine already in the library is simply made active.
+   */
+  const activate = (activationTarget: ActivationTarget) =>
+    runAction(
+      () =>
+        activationTarget.kind === 'preset'
+          ? activatePresetRoutine(routineDb, activationTarget.routineKey, unit, new Map())
+          : activateRoutineById(routineDb, activationTarget.routineId),
+      t('errorActivatingRoutine'),
     );
+
+  /** Nothing becomes inactive, so there is nothing to confirm — activate on the one tap (§7.5). */
+  const primaryAction = () => {
+    if (plan.outcome === 'activate' && plan.deactivating === null) {
+      void activate(target);
+      return;
+    }
+    setActionsFor(target);
   };
+
+  // A preset has one action; one of the user's routines has four, and they live in the sheet.
+  const presetIsActive = target.kind === 'preset' && plan.outcome === 'alreadyActive';
+  const primaryLabel =
+    target.kind === 'routine'
+      ? t('routineActionsButton')
+      : presetIsActive
+        ? t('activeRoutine')
+        : t('activate');
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <View style={styles.titleRow}>
-          <Text style={[styles.title, { color: theme.text }]}>{routine.name}</Text>
-          {isActive && (
-            <View style={[styles.activeBadge, { backgroundColor: theme.buttonBackground }]}>
-              <Text
-                style={[styles.activeBadgeText, { color: theme.buttonText }]}
-                maxFontSizeMultiplier={1.5}
-              >
-                {t('activeRoutine')}
-              </Text>
-            </View>
-          )}
-        </View>
+    <>
+      <Screen scroll testID="routine-details-screen">
+        <ScreenTitle
+          title={routine.name}
+          overline={plan.outcome === 'alreadyActive' ? t('routineActiveSection') : undefined}
+          onBack={() => navigation.goBack()}
+          testID="routine-details-title"
+        />
 
         {routine.description !== null && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('description')}</Text>
-            <Text style={[styles.body, { color: theme.text }]}>{routine.description}</Text>
-          </View>
+          <Section title={t('description')}>
+            <Text style={[styles.body, { color: tokens.textSecondary }]}>{routine.description}</Text>
+          </Section>
         )}
 
         {routine.philosophy !== null && (
-          <View style={styles.section}>
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('philosophy')}</Text>
-            <Text style={[styles.body, { color: theme.text }]}>{routine.philosophy}</Text>
-          </View>
+          <Section title={t('philosophy')}>
+            <Text style={[styles.body, { color: tokens.textSecondary }]}>{routine.philosophy}</Text>
+          </Section>
         )}
 
-        <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-          <View style={styles.statRow}>
-            <Text style={[styles.statLabel, { color: theme.text }]}>{t('recommendedDays')}</Text>
-            <Text style={[styles.statValue, { color: theme.text }]}>
-              {routine.recommendedDays ?? sessions.length}
-            </Text>
-          </View>
-          <View style={styles.weekdayRow}>
-            <WeekdayIndicator weekdays={weekdays} />
-          </View>
-          <View style={styles.statRow}>
-            <Text style={[styles.statLabel, { color: theme.text }]}>
-              {t('sessionCount', { count: sessions.length })}
-            </Text>
-          </View>
-          <View style={styles.statRow}>
-            <Text style={[styles.statLabel, { color: theme.text }]}>{t('restMainLabel')}</Text>
-            <Text style={[styles.statValue, { color: theme.text }]}>
-              {formatRest(routine.restMainSeconds)}
-            </Text>
-          </View>
-          <View style={styles.statRow}>
-            <Text style={[styles.statLabel, { color: theme.text }]}>{t('restAccessoryLabel')}</Text>
-            <Text style={[styles.statValue, { color: theme.text }]}>
-              {formatRest(routine.restAccessorySeconds)}
-            </Text>
-          </View>
-          <View style={styles.statRow}>
-            <Text style={[styles.statLabel, { color: theme.text }]}>{t('progressionRule')}</Text>
-            <Text style={[styles.statValue, { color: theme.text }]}>{progressionText}</Text>
-          </View>
-        </View>
+        <Section title={t('routineSummarySection')} testID="routine-summary">
+          <Row
+            label={t('sessionCount', { count: sessions.length })}
+            detail={orderedWeekdays.map((weekday) => t(WEEKDAY_FULL_KEYS[weekday])).join(' · ')}
+            detailBelow
+            divided
+          />
+          <Row label={t('restMainLabel')} detail={formatRest(routine.restMainSeconds)} divided />
+          <Row
+            label={t('restAccessoryLabel')}
+            detail={formatRest(routine.restAccessorySeconds)}
+            divided
+          />
+          <Row label={t('progressionRule')} detail={progressionText} detailBelow divided />
+        </Section>
 
-        <Text style={[styles.sectionTitle, { color: theme.text }]}>{t('weekOverview')}</Text>
-        {orderedSessions.map((session) => {
-          const sessionExercises = exercises.filter(
-            (exercise) => exercise.sessionId === session.sessionId,
-          );
-          return (
-            <View
-              key={session.sessionId}
-              style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-            >
-              <Text style={[styles.dayTitle, { color: theme.text }]}>
+        <Section title={t('weekOverview')} testID="routine-week">
+          {orderedSessions.map((session) => (
+            <View key={session.sessionId}>
+              <Text style={[styles.dayTitle, { color: tokens.textPrimary }]}>
                 {t(WEEKDAY_FULL_KEYS[session.weekday])} · {session.name}
               </Text>
-              {sessionExercises.map((exercise) => (
-                // R2: every exercise in the app is one tap from its full description.
-                <Pressable
-                  key={exercise.exerciseId}
-                  style={({ pressed }) => [styles.exerciseRow, pressed && styles.pressed]}
-                  onPress={() => setInformation(exercise)}
-                  accessibilityRole='button'
-                  accessibilityLabel={t('exerciseInfoAction')}
-                >
-                  <Text style={[styles.exerciseName, { color: theme.text }]} numberOfLines={1}>
-                    {exercise.name}
-                  </Text>
-                  <Text
-                    style={[styles.exerciseDetail, { color: theme.text }]}
-                    maxFontSizeMultiplier={1.5}
-                  >
-                    {exercise.targetSets}×{exercise.targetReps} · {loadLabel(exercise)}
-                  </Text>
-                </Pressable>
-              ))}
+              {exercises
+                .filter((exercise) => exercise.sessionId === session.sessionId)
+                .map((exercise) => (
+                  // R2: every exercise in the app is one tap from its full description.
+                  <Row
+                    key={exercise.exerciseId}
+                    label={exercise.name}
+                    detail={`${t('routineSetsByReps', {
+                      sets: exercise.targetSets,
+                      reps: exercise.isAmrap ? `${exercise.targetReps}+` : exercise.targetReps,
+                    })} · ${loadLabel(exercise)}`}
+                    detailBelow
+                    right={
+                      <Ionicons
+                        name="information-circle-outline"
+                        size={tabBar.icon}
+                        color={tokens.textSecondary}
+                      />
+                    }
+                    onPress={() => setInformation(exercise)}
+                    divided
+                  />
+                ))}
             </View>
-          );
-        })}
-      </ScrollView>
+          ))}
+        </Section>
 
-      <View style={[styles.actionBar, { backgroundColor: theme.card, borderColor: theme.border }]}>
-        {isActive ? (
-          <View style={[styles.actionBadge, { backgroundColor: theme.buttonBackground }]}>
-            <Text style={[styles.actionBadgeText, { color: theme.buttonText }]}>
-              {t('activeRoutine')}
-            </Text>
-          </View>
-        ) : (
-          <ActionButton
-            label={t('activate')}
-            icon='play'
-            primary
-            disabled={busy}
-            onPress={handleActivate}
-            theme={theme}
-          />
-        )}
-        {!isPreset && (
-          <>
-            <ActionButton
-              label={t('edit')}
-              icon='create-outline'
-              disabled={busy}
-              onPress={() => navigation.navigate('EditRoutine', { routineId: routineId as number })}
-              theme={theme}
-            />
-            <ActionButton
-              label={t('duplicate')}
-              icon='copy-outline'
-              disabled={busy}
-              onPress={handleDuplicate}
-              theme={theme}
-            />
-            <ActionButton
-              label={t('delete')}
-              icon='trash-outline'
-              danger
-              disabled={busy}
-              onPress={handleDelete}
-              theme={theme}
-            />
-          </>
-        )}
-      </View>
+        <Button
+          label={primaryLabel}
+          onPress={primaryAction}
+          disabled={busy || presetIsActive}
+          style={styles.primary}
+          testID="routine-primary-action"
+        />
+
+        {error !== null && <Text style={[styles.error, { color: tokens.warning }]}>{error}</Text>}
+      </Screen>
+
+      <RoutineActionsSheet
+        target={actionsFor}
+        active={active}
+        busy={busy}
+        onClose={() => setActionsFor(null)}
+        onActivate={(activationTarget) => void activate(activationTarget)}
+        onEdit={(id) => {
+          setActionsFor(null);
+          navigation.navigate('EditRoutine', { routineId: id });
+        }}
+        onDuplicate={(id) =>
+          void runAction(() => duplicateRoutine(routineDb, id), t('errorDuplicatingRoutine'))
+        }
+        onDelete={(id) =>
+          void runAction(() => deleteRoutine(routineDb, id), t('errorDeletingRoutine'))
+        }
+        testID="routine-details-actions-sheet"
+      />
 
       {/* R2: the shared exercise sheet, the same one every other surface opens. */}
       <ExerciseSheet
         exercise={
           information === null
             ? null
-            : {
-                name: information.name,
-                catalogExerciseId: information.catalogExerciseId,
-              }
+            : { name: information.name, catalogExerciseId: information.catalogExerciseId }
         }
         plan={
           information === null
@@ -398,180 +340,26 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
         }
         onClose={() => setInformation(null)}
       />
-    </View>
+    </>
   );
 }
 
-type Theme = ReturnType<typeof useTheme>['theme'];
-
-type ActionButtonProps = {
-  label: string;
-  icon: string;
-  disabled?: boolean;
-  primary?: boolean;
-  danger?: boolean;
-  onPress: () => void;
-  theme: Theme;
-};
-
-const ActionButton = ({
-  label,
-  icon,
-  disabled,
-  primary,
-  danger,
-  onPress,
-  theme,
-}: ActionButtonProps) => {
-  const color = primary ? theme.buttonText : danger ? '#B00020' : theme.text;
-  return (
-    <Pressable
-      disabled={disabled}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.actionButton,
-        primary && { backgroundColor: theme.buttonBackground },
-        danger && { borderColor: '#B00020' },
-        pressed && styles.actionPressed,
-        disabled && styles.actionDisabled,
-      ]}
-    >
-      <Ionicons name={icon as never} size={20} color={color} />
-      <Text
-        style={[styles.actionLabel, { color }]}
-        maxFontSizeMultiplier={1.5}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-};
-
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    padding: spacing.gutter,
-    paddingBottom: spacing.section,
-  },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.inline,
-    marginBottom: spacing.section,
-  },
-  title: {
-    fontSize: fontSize.screenTitle,
-    fontWeight: '900',
-    flexShrink: 1,
-  },
-  activeBadge: {
-    borderRadius: 100,
-    paddingHorizontal: spacing.card,
-    paddingVertical: 2,
-  },
-  activeBadgeText: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-  },
-  section: {
-    marginBottom: spacing.section,
-  },
-  sectionTitle: {
-    fontSize: fontSize.sectionTitle,
-    fontWeight: '900',
-    marginBottom: spacing.card,
-  },
   body: {
     fontSize: fontSize.body,
     lineHeight: 20,
-    opacity: 0.85,
-  },
-  card: {
-    borderWidth: 1,
-    borderRadius: 10,
-    padding: spacing.card,
-    marginBottom: spacing.cardGap,
-  },
-  statRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacing.card,
-    marginBottom: spacing.label,
-  },
-  statLabel: {
-    fontSize: fontSize.body,
-    fontWeight: '600',
-  },
-  statValue: {
-    fontSize: fontSize.body,
-    flexShrink: 1,
-    textAlign: 'right',
-  },
-  weekdayRow: {
-    marginBottom: spacing.card,
   },
   dayTitle: {
     fontSize: fontSize.cardTitle,
     fontWeight: '700',
-    marginBottom: spacing.card,
+    marginTop: spacing.card,
+    marginBottom: spacing.label,
   },
-  exerciseRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: spacing.card,
-    paddingVertical: spacing.label,
+  primary: {
+    alignSelf: 'stretch',
   },
-  pressed: {
-    opacity: 0.7,
-  },
-  exerciseName: {
-    fontSize: fontSize.body,
-    flexShrink: 1,
-  },
-  exerciseDetail: {
-    fontSize: fontSize.caption,
-    opacity: 0.7,
-  },
-  actionBar: {
-    flexDirection: 'row',
-    borderTopWidth: 1,
-    padding: spacing.card,
-    gap: spacing.cardGap,
-  },
-  actionButton: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    borderRadius: 10,
-    paddingVertical: spacing.label,
-  },
-  actionLabel: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  actionPressed: {
-    opacity: 0.7,
-  },
-  actionDisabled: {
-    opacity: 0.4,
-  },
-  actionBadge: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-    minHeight: 48,
-  },
-  actionBadgeText: {
-    fontSize: fontSize.button,
-    fontWeight: '700',
+  error: {
+    fontSize: fontSize.helper,
+    marginTop: spacing.cardGap,
   },
 });

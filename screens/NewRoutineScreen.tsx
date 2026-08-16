@@ -1,0 +1,207 @@
+import React, { useCallback, useState } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSQLiteContext } from 'expo-sqlite';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import { useTranslation } from 'react-i18next';
+import { useTheme } from '../context/ThemeContext';
+import { useSettings } from '../context/SettingsContext';
+import { Row } from '../components/Row';
+import { Screen } from '../components/Screen';
+import { ScreenTitle } from '../components/ScreenTitle';
+import { Section } from '../components/Section';
+import { fontSize, spacing, tabBar } from '../utils/scale';
+import { createBlankRoutine, type RoutineDatabase, type RoutineUnit } from '../utils/routineActions';
+import {
+  blankRoutineDraft,
+  loadPresetLibrary,
+  loadRoutineLibrary,
+  weekdaySequence,
+  type PresetEntry,
+  type PresetLevelGroup,
+  type RoutineLevel,
+} from '../utils/routineLibrary';
+import type { RoutinesStackParamList } from '../App';
+
+type Props = NativeStackScreenProps<RoutinesStackParamList, 'NewRoutine'>;
+
+const WEEKDAY_SHORT_KEYS = [
+  'weekdayShortSun',
+  'weekdayShortMon',
+  'weekdayShortTue',
+  'weekdayShortWed',
+  'weekdayShortThu',
+  'weekdayShortFri',
+  'weekdayShortSat',
+] as const;
+
+/** The 5/3/1 preset is the headline feature's own door; the builder starts from it. */
+const WAVE_PRESET_KEY = '531';
+
+/**
+ * R1 — the one door to a new routine (SPECS.md R1).
+ *
+ * The 22 presets used to sit in the Rutinas tab competing with the user's own. They live here
+ * instead, behind `+ Nueva rutina`, alongside the two other ways a routine can start: from scratch
+ * and as a 5/3/1 program. Choosing a level is an **in-place accordion**, not a screen — picking a
+ * difficulty is not going somewhere, and making it a push would put a transition between the user
+ * and a list they are skimming (§7.5).
+ *
+ * Nothing on this screen asks for a number, and neither does anything it opens: a preset leads to
+ * its description and a single Activar, which copies the routine with its weights left NULL for
+ * the first session to learn (§3.2).
+ */
+export default function NewRoutineScreen({ navigation }: Props) {
+  const { tokens } = useTheme();
+  const { t } = useTranslation();
+  const { weightFormat, firstWeekday } = useSettings();
+  const db = useSQLiteContext();
+
+  const unit: RoutineUnit = weightFormat === 'lbs' ? 'lb' : 'kg';
+
+  const [groups, setGroups] = useState<PresetLevelGroup[]>([]);
+  const [openLevel, setOpenLevel] = useState<RoutineLevel | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const routineDb: RoutineDatabase = {
+    run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
+    get: async (sql, params) =>
+      (await db.getFirstAsync<Record<string, unknown>>(sql, (params ?? []) as never[])) ?? undefined,
+    getAll: async (sql, params) =>
+      db.getAllAsync<Record<string, unknown>>(sql, (params ?? []) as never[]),
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      const load = async () => {
+        try {
+          const library = await loadRoutineLibrary(routineDb);
+          setGroups(await loadPresetLibrary(routineDb, library));
+        } catch {
+          setError(t('routineLibraryError'));
+        }
+      };
+      void load();
+    }, [db, t]),
+  );
+
+  const startFromScratch = async () => {
+    if (busy) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const routineId = await createBlankRoutine(
+        routineDb,
+        blankRoutineDraft(t('routineNewDefaultName'), unit),
+      );
+      navigation.replace('EditRoutine', { routineId });
+    } catch {
+      setError(t('errorCreatingRoutine'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const presetDetail = (entry: PresetEntry): string => {
+    const days = weekdaySequence(entry.weekdays, firstWeekday).map((weekday) =>
+      t(WEEKDAY_SHORT_KEYS[weekday]),
+    );
+    const plan = `${t('sessionCount', { count: days.length })} · ${days.join(' · ')}`;
+    return entry.copyRoutineId === null
+      ? `${plan}\n${entry.description}`
+      : `${plan} · ${t('presetAlreadyInLibrary')}\n${entry.description}`;
+  };
+
+  const chevron = (name: string) => (
+    <Ionicons name={name} size={tabBar.icon} color={tokens.textSecondary} />
+  );
+
+  return (
+    <Screen scroll testID="new-routine-screen">
+      <ScreenTitle title={t('newRoutineTitle')} onBack={() => navigation.goBack()} />
+
+      <Section title={t('newRoutineBuildSection')} testID="new-routine-build">
+        <Row
+          label={t('newRoutineScratch')}
+          detail={t('newRoutineScratchDetail')}
+          detailBelow
+          right={chevron('chevron-forward')}
+          onPress={() => void startFromScratch()}
+          disabled={busy}
+          divided
+          testID="new-routine-scratch"
+        />
+        <Row
+          label={t('newRoutineWave')}
+          detail={t('newRoutineWaveDetail')}
+          detailBelow
+          right={chevron('chevron-forward')}
+          onPress={() =>
+            navigation.navigate('FiveThreeOneSetup', { presetKey: WAVE_PRESET_KEY })
+          }
+          disabled={busy}
+          divided
+          testID="new-routine-wave"
+        />
+      </Section>
+
+      <Section
+        title={t('newRoutinePresetSection')}
+        hint={t('newRoutinePresetHint')}
+        testID="new-routine-presets"
+      >
+        {groups.map((group) => {
+          const open = openLevel === group.level;
+          return (
+            <View key={group.level}>
+              <Row
+                label={t(group.level)}
+                detail={t('presetLevelCount', { count: group.entries.length })}
+                right={chevron(open ? 'chevron-up' : 'chevron-down')}
+                onPress={() => setOpenLevel(open ? null : group.level)}
+                divided
+                testID={`preset-level-${group.level}`}
+              />
+              {open && (
+                // The indent is the only thing saying these belong to the level above them —
+                // a filled surface would be a card inside a screen (§3.5).
+                <View style={styles.levelBody} testID={`preset-level-body-${group.level}`}>
+                  {group.entries.map((entry) => (
+                    <Row
+                      key={entry.routineKey}
+                      label={entry.name}
+                      detail={presetDetail(entry)}
+                      detailBelow
+                      right={chevron('chevron-forward')}
+                      onPress={() =>
+                        navigation.navigate('RoutineDetails', { presetKey: entry.routineKey })
+                      }
+                      divided
+                      testID={`preset-${entry.routineKey}`}
+                    />
+                  ))}
+                </View>
+              )}
+            </View>
+          );
+        })}
+      </Section>
+
+      {error !== null && <Text style={[styles.error, { color: tokens.warning }]}>{error}</Text>}
+    </Screen>
+  );
+}
+
+const styles = StyleSheet.create({
+  levelBody: {
+    paddingLeft: spacing.gutter,
+  },
+  error: {
+    fontSize: fontSize.helper,
+    marginTop: spacing.cardGap,
+  },
+});

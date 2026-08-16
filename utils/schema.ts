@@ -178,6 +178,9 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     sort_order INTEGER NOT NULL CHECK (sort_order > 0),
     bar_profile TEXT CHECK (bar_profile IS NULL OR bar_profile IN ('olympic', 'semi-olympic', 'smith', 'ez', 'custom')),
     bar_weight REAL,
+    -- R3/§3.6: NULL means "whatever this role does by default" — on for a main
+    -- lift, off for an accessory. 0/1 is the user overriding that per exercise.
+    warmups_enabled INTEGER CHECK (warmups_enabled IS NULL OR warmups_enabled IN (0, 1)),
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
     UNIQUE (session_id, sort_order),
@@ -343,13 +346,22 @@ export async function ensureWeightLogTimingColumns(
   }
 }
 
-/** The M2 SessionExercises columns (bar profile + custom bar weight). */
+/**
+ * The M2 SessionExercises columns (bar profile + custom bar weight) and R3's
+ * per-exercise warm-up answer (§3.6).
+ */
 export async function ensureSessionExercisesColumns(
   executor: SchemaExecutor,
 ): Promise<void> {
   const columns = await executor.getAll<{ name: string }>(
     'PRAGMA table_info(SessionExercises);',
   );
+  if (!columns.some((column) => column.name === 'warmups_enabled')) {
+    await executor.exec(
+      `ALTER TABLE SessionExercises ADD COLUMN warmups_enabled INTEGER
+       CHECK (warmups_enabled IS NULL OR warmups_enabled IN (0, 1));`,
+    );
+  }
   if (!columns.some((column) => column.name === 'bar_profile')) {
     await executor.exec(
       `ALTER TABLE SessionExercises ADD COLUMN bar_profile TEXT

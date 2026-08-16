@@ -13,10 +13,14 @@
  * one is already stored. The thin edges load source rows, build the copy, and
  * write it in one transaction. The same transaction clears any other active
  * routine, which is what the partial unique index `Routines_single_active`
- * enforces.
+ * enforces, and — when the routine becomes the active one — seeds its cycle
+ * through `ensureActiveCycle` (utils/cycleSeed.ts). A routine without a cycle
+ * has no week sessions, so the queue offers nothing; activation and its first
+ * cycle are therefore one atomic step, never two.
  */
 
 import { defaultBarProfileForEquipment, type BarProfileKey } from './barProfiles';
+import { ensureActiveCycle } from './cycleSeed';
 import { usableWeight } from './learnedWeights';
 
 export type RoutineUnit = 'kg' | 'lb';
@@ -24,6 +28,21 @@ export type RoutineLoadSource = 'training_max_pct' | 'absolute' | 'bodyweight';
 export type RoutineProgressionRule = 'wave' | 'linear' | 'none';
 export type RoutineRole = 'main' | 'accessory';
 export type RoutineOrigin = 'catalog' | 'user';
+
+/**
+ * §3.6 — warm-ups belong to the main lift: on for the main exercise, off for
+ * accessories, unless the user said otherwise for this exercise. The stored
+ * `warmups_enabled` column is deliberately nullable so "I never said" and "I
+ * said off" stay distinguishable: an accessory promoted to main lift then
+ * gets warm-ups, which is what the user meant, while an accessory the user
+ * explicitly gave warm-ups to keeps them.
+ */
+export function warmupsEnabledFor(
+  role: RoutineRole,
+  stored: boolean | null | undefined,
+): boolean {
+  return stored ?? role === 'main';
+}
 
 export interface RoutineSource {
   routineKey: string | null;
@@ -72,6 +91,8 @@ export interface ExerciseSource {
   /** A bar profile already stored on the row (user routines). */
   barProfile: BarProfileKey | null;
   barWeight: number | null;
+  /** The user's per-exercise warm-up answer; null = the role's default (§3.6). */
+  warmupsEnabled: boolean | null;
 }
 
 export interface RoutineSourceBundle {
@@ -116,6 +137,7 @@ export interface RoutineCopyRows {
     sortOrder: number;
     barProfile: BarProfileKey | null;
     barWeight: number | null;
+    warmupsEnabled: boolean | null;
   }[];
 }
 
@@ -180,6 +202,7 @@ export function buildRoutineCopyRows(
       barProfile:
         exercise.barProfile ?? defaultBarProfileForEquipment(exercise.equipment),
       barWeight: exercise.barWeight,
+      warmupsEnabled: exercise.warmupsEnabled,
     };
   });
 
@@ -211,10 +234,6 @@ export function buildRoutineCopyRows(
   };
 }
 
-export function routineNeedsWeights(source: RoutineSourceBundle): boolean {
-  return source.exercises.some((exercise) => exercise.loadSource !== 'bodyweight');
-}
-
 export interface RoutineDatabase {
   run(sql: string, params?: readonly unknown[]): Promise<unknown> | unknown;
   get(
@@ -233,6 +252,8 @@ const nullableStr = (value: unknown): string | null =>
   value === null || value === undefined ? null : String(value);
 const nullableNum = (value: unknown): number | null =>
   value === null || value === undefined ? null : Number(value);
+const nullableBool = (value: unknown): boolean | null =>
+  value === null || value === undefined ? null : Number(value) === 1;
 
 const toSessionSource = (row: Record<string, unknown>): SessionSource => ({
   sessionId: num(row.session_id),
@@ -259,6 +280,7 @@ const toExerciseSource = (row: Record<string, unknown>): ExerciseSource => ({
   equipment: nullableStr(row.equipment),
   barProfile: nullableStr(row.bar_profile) as BarProfileKey | null,
   barWeight: nullableNum(row.bar_weight),
+  warmupsEnabled: nullableBool(row.warmups_enabled),
 });
 
 export async function loadPresetRoutineSource(
@@ -284,7 +306,7 @@ export async function loadPresetRoutineSource(
     `SELECT e.preset_session_exercise_id AS exercise_id, e.preset_session_id AS session_id,
             e.catalog_exercise_id, e.exercise_name AS name, e.role, e.target_sets,
             e.target_reps, e.load_source, e.training_max_pct, e.is_amrap, e.sort_order,
-            c.equipment
+            c.equipment, NULL AS warmups_enabled
      FROM Preset_SessionExercises e
      JOIN Preset_Sessions s ON s.preset_session_id = e.preset_session_id
      LEFT JOIN Catalog_Exercises c ON c.exercise_key = e.catalog_exercise_id
@@ -337,7 +359,8 @@ export async function loadRoutineSourceById(
     `SELECT e.session_exercise_id AS exercise_id, e.session_id, e.catalog_exercise_id,
             e.exercise_name AS name, e.role, e.target_sets, e.target_reps, e.load_source,
             e.training_max_pct, e.training_max_weight, e.absolute_weight, e.unit_override,
-            e.is_amrap, e.sort_order, e.bar_profile, e.bar_weight, NULL AS equipment
+            e.is_amrap, e.sort_order, e.bar_profile, e.bar_weight, e.warmups_enabled,
+            NULL AS equipment
      FROM SessionExercises e
      JOIN Sessions s ON s.session_id = e.session_id
      WHERE s.routine_id = ? ORDER BY s.sort_order, e.sort_order;`,
@@ -418,8 +441,8 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
         `INSERT INTO SessionExercises
            (session_id, catalog_exercise_id, exercise_name, role, target_sets, target_reps,
             load_source, training_max_pct, training_max_weight, absolute_weight,
-            unit_override, is_amrap, sort_order, bar_profile, bar_weight)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+            unit_override, is_amrap, sort_order, bar_profile, bar_weight, warmups_enabled)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           sessionId,
           exercise.catalogExerciseId,
@@ -436,8 +459,16 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
           exercise.sortOrder,
           exercise.barProfile,
           exercise.barWeight,
+          exercise.warmupsEnabled === null ? null : exercise.warmupsEnabled ? 1 : 0,
         ],
       );
+    }
+
+    // An active copy is trainable from the moment it is written: the cycle is
+    // part of the same transaction. A duplicate is not active and gets none —
+    // it is a plan the user has not started, and a cycle would date it now.
+    if (rows.routine.isActive) {
+      await ensureActiveCycle(db, routineId, Math.floor(Date.now() / 1000));
     }
 
     await db.run('COMMIT;');
@@ -474,11 +505,58 @@ export async function activatePresetRoutine(
   return { routineId, copied: true };
 }
 
+/**
+ * The routine "from scratch" starts as (R1): one `Routines` row with no sessions and no
+ * exercises. It is inactive — an empty plan has nothing to train — and it is deliberately not
+ * validated against anything, because there is nothing to validate: the editor adds the days.
+ * The defaults come from `blankRoutineDraft` (utils/routineLibrary.ts), which is where the
+ * decision of what the app can decide for the user lives.
+ */
+export async function createBlankRoutine(
+  db: RoutineDatabase,
+  draft: {
+    name: string;
+    unit: RoutineUnit;
+    roundingIncrement: number;
+    restMainSeconds: number;
+    restAccessorySeconds: number;
+    progressionRule: RoutineProgressionRule;
+  },
+): Promise<number> {
+  await db.run(
+    `INSERT INTO Routines
+       (routine_key, name, origin, progression_rule, unit, rounding_increment,
+        rest_main_seconds, rest_accessory_seconds, is_active, created_at, planned_jokers)
+     VALUES (NULL, ?, 'user', ?, ?, ?, ?, ?, 0, ?, 0);`,
+    [
+      draft.name,
+      draft.progressionRule,
+      draft.unit,
+      draft.roundingIncrement,
+      draft.restMainSeconds,
+      draft.restAccessorySeconds,
+      Date.now(),
+    ],
+  );
+  const row = await db.get('SELECT last_insert_rowid() AS id;', []);
+  if (!row) {
+    throw new Error('Could not read the new routine id');
+  }
+  return num(row.id);
+}
+
+/**
+ * Makes a saved routine the active one and guarantees it has a cycle to
+ * train, in one transaction. Re-activating a routine that already has an
+ * unfinished cycle resumes it untouched — `ensureActiveCycle` never
+ * duplicates a cycle and never rewrites a logged session (utils/cycleSeed.ts).
+ */
 export async function activateRoutineById(db: RoutineDatabase, routineId: number): Promise<void> {
   await db.run('BEGIN;');
   try {
     await db.run('UPDATE Routines SET is_active = 0 WHERE is_active = 1;');
     await db.run('UPDATE Routines SET is_active = 1 WHERE routine_id = ?;', [routineId]);
+    await ensureActiveCycle(db, routineId, Math.floor(Date.now() / 1000));
     await db.run('COMMIT;');
   } catch (error) {
     await db.run('ROLLBACK;');

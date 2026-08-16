@@ -3,8 +3,12 @@ import { runSchema, type SchemaExecutor } from './schema';
 import {
   ASSISTANCE_BIAS_DEFAULTS,
   buildWaveRoutineRows,
+  defaultRoundingIncrement,
   derivedCategory,
   estimateTrainingMax,
+  isRecommendedWaveAdvanced,
+  recommendedWaveAdvanced,
+  ROUNDING_INCREMENT_OPTIONS,
   warmupRampFor,
   WaveSetupValidationError,
   WAVE_REST_ACCESSORY_SECONDS,
@@ -15,7 +19,7 @@ import {
   type WaveSetupDraft,
 } from './waveSetup';
 import { loadDemoData } from './demoData';
-import type { RoutineDatabase } from './routineActions';
+import { warmupsEnabledFor, type RoutineDatabase } from './routineActions';
 
 type TestExecutor = SchemaExecutor & {
   get: RoutineDatabase['get'];
@@ -452,5 +456,113 @@ describe('writeWaveRoutine — one transaction, single active routine', () => {
     ).rejects.toThrow(WaveSetupValidationError);
 
     expect(count(db, 'Routines')).toBe(routinesBefore);
+  });
+});
+
+describe('R3 — the advanced block, and warm-ups per exercise', () => {
+  it('recommends Wendler defaults, per unit', () => {
+    expect(recommendedWaveAdvanced('kg')).toEqual({
+      tmPercentage: 0.9,
+      roundingDirection: 'nearest',
+      upperTmIncrement: 2.5,
+      lowerTmIncrement: 5,
+      assistanceBias: 'hybrid',
+      plannedJokers: 0,
+    });
+    expect(recommendedWaveAdvanced('lb').upperTmIncrement).toBe(5);
+    expect(recommendedWaveAdvanced('lb').lowerTmIncrement).toBe(10);
+  });
+
+  it('recognises an untouched advanced block, and a touched one', () => {
+    const recommended = recommendedWaveAdvanced('kg');
+    expect(isRecommendedWaveAdvanced(recommended, 'kg')).toBe(true);
+    expect(isRecommendedWaveAdvanced({ ...recommended, plannedJokers: 2 }, 'kg')).toBe(false);
+    expect(isRecommendedWaveAdvanced({ ...recommended, tmPercentage: 0.85 }, 'kg')).toBe(false);
+    // The same values in the other unit are no longer the recommendation.
+    expect(isRecommendedWaveAdvanced(recommended, 'lb')).toBe(false);
+  });
+
+  it('offers only increments a gym\'s plates can make', () => {
+    expect(ROUNDING_INCREMENT_OPTIONS.kg).toContain(defaultRoundingIncrement('kg'));
+    expect(ROUNDING_INCREMENT_OPTIONS.lb).toContain(defaultRoundingIncrement('lb'));
+  });
+
+  it('builds a routine from the recommendations alone, with no weight anywhere', () => {
+    const recommended = recommendedWaveAdvanced('kg');
+    const rows = buildWaveRoutineRows(
+      draft({
+        roundingIncrement: defaultRoundingIncrement('kg'),
+        roundingDirection: recommended.roundingDirection,
+        tmPercentage: recommended.tmPercentage,
+        upperTmIncrement: recommended.upperTmIncrement,
+        lowerTmIncrement: recommended.lowerTmIncrement,
+        assistanceBias: recommended.assistanceBias,
+        plannedJokers: recommended.plannedJokers,
+        days: [
+          day({ key: 'd1', weekday: 1, trainingMax: null, assistanceStartWeight: null }),
+          day({
+            key: 'd2',
+            weekday: 3,
+            liftName: 'Bench Press',
+            category: 'upper',
+            trainingMax: null,
+            assistanceStartWeight: null,
+            assistance: [assistance('Chin-Up', 4, 8)],
+          }),
+        ],
+      }),
+    );
+    expect(rows.routine.plannedJokers).toBe(0);
+    expect(rows.exercises).toHaveLength(3);
+    expect(
+      rows.exercises.every(
+        (exercise) => exercise.trainingMaxWeight === null && exercise.absoluteWeight === null,
+      ),
+    ).toBe(true);
+  });
+
+  it('gives the main lift warm-ups and the accessories none (§3.6)', () => {
+    const rows = buildWaveRoutineRows(
+      draft({
+        days: [
+          day({
+            key: 'd1',
+            weekday: 1,
+            assistance: [assistance('Chin-Up', 4, 8)],
+          }),
+        ],
+      }),
+    );
+    // Null is "the role decides", which for a main lift is on and for an
+    // accessory is off — the runner resolves it through warmupsEnabledFor.
+    expect(rows.exercises[0].warmupsEnabled).toBeNull();
+    expect(warmupsEnabledFor(rows.exercises[0].role, rows.exercises[0].warmupsEnabled)).toBe(true);
+    expect(rows.exercises[1].warmupsEnabled).toBeNull();
+    expect(warmupsEnabledFor(rows.exercises[1].role, rows.exercises[1].warmupsEnabled)).toBe(false);
+  });
+
+  it('records the program warm-up switch being turned off on the main lift', () => {
+    const rows = buildWaveRoutineRows(draft({ warmupsEnabled: false }));
+    expect(rows.exercises[0].warmupsEnabled).toBe(false);
+    expect(warmupsEnabledFor('main', rows.exercises[0].warmupsEnabled)).toBe(false);
+  });
+
+  it('lets one accessory be given warm-ups without touching the others', () => {
+    const rows = buildWaveRoutineRows(
+      draft({
+        days: [
+          day({
+            key: 'd1',
+            weekday: 1,
+            assistance: [
+              { ...assistance('Chin-Up', 4, 8), warmupsEnabled: true },
+              assistance('Face Pull', 4, 8),
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(warmupsEnabledFor('accessory', rows.exercises[1].warmupsEnabled)).toBe(true);
+    expect(warmupsEnabledFor('accessory', rows.exercises[2].warmupsEnabled)).toBe(false);
   });
 });

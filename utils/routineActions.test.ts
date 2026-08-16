@@ -9,7 +9,6 @@ import {
   getActiveRoutine,
   loadPresetRoutineSource,
   loadRoutineSourceById,
-  routineNeedsWeights,
   type RoutineDatabase,
   type RoutineSourceBundle,
   type RoutineWeightInputs,
@@ -90,6 +89,7 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         equipment: 'dumbbell',
         barProfile: null,
         barWeight: null,
+        warmupsEnabled: null,
       },
       {
         exerciseId: 102,
@@ -109,6 +109,7 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         equipment: 'dumbbell',
         barProfile: null,
         barWeight: null,
+        warmupsEnabled: null,
       },
       {
         exerciseId: 103,
@@ -128,6 +129,7 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         equipment: 'body only',
         barProfile: null,
         barWeight: null,
+        warmupsEnabled: null,
       },
     ],
   });
@@ -562,19 +564,8 @@ describe('deleteRoutine — cascading removal', () => {
   });
 });
 
-describe('routineNeedsWeights', () => {
-  it('is true only when an exercise carries a weight load', async () => {
-    const { executor } = connect();
-    await runSchema(executor);
-
-    const bodyweight = await loadPresetRoutineSource(executor, 'home-alone');
-    expect(routineNeedsWeights(bodyweight)).toBe(false);
-
-    const barbell = await loadPresetRoutineSource(executor, '531');
-    expect(routineNeedsWeights(barbell)).toBe(true);
-  });
-
-  it('loadRoutineSourceById exposes the routine for display', async () => {
+describe('loadRoutineSourceById', () => {
+  it('exposes the routine for display', async () => {
     const { executor } = connect();
     await runSchema(executor);
 

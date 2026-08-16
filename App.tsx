@@ -25,7 +25,7 @@ import {
   import FreeLoggingScreen from './screens/FreeLoggingScreen';
   import RoutinesListScreen from './screens/RoutinesListScreen';
   import RoutineDetailsScreen from './screens/RoutineDetailsScreen';
-  import ActivateRoutineScreen from './screens/ActivateRoutineScreen';
+  import NewRoutineScreen from './screens/NewRoutineScreen';
   import EditRoutineScreen from './screens/EditRoutineScreen';
   import FiveThreeOneSetupScreen from './screens/FiveThreeOneSetupScreen';
 import CycleReviewScreen from './screens/CycleReviewScreen';
@@ -144,8 +144,9 @@ import type { SessionSummary } from './utils/sessionSummary';
 
   export type RoutinesStackParamList = {
     RoutinesList: undefined;
+    /** R1: the one door to a new routine — from scratch, from a preset, or 5/3/1. */
+    NewRoutine: undefined;
     RoutineDetails: { routineId?: number; presetKey?: string };
-    ActivateRoutine: { presetKey: string };
     EditRoutine: { routineId: number };
     FiveThreeOneSetup: { presetKey: string };
     CycleReview: { routineId: number; cycleId: number };
@@ -250,24 +251,24 @@ const RoutinesStack = () => {
         options={{ headerShown: false }}
       />
       <RoutinesStackNavigator.Screen
-        name="RoutineDetails"
-        component={RoutineDetailsScreen}
-        options={{ title: t('routines') }}
+        name="NewRoutine"
+        component={NewRoutineScreen}
+        options={{ headerShown: false }}
       />
       <RoutinesStackNavigator.Screen
-        name="ActivateRoutine"
-        component={ActivateRoutineScreen}
-        options={{ title: t('setStartingWeights') }}
+        name="RoutineDetails"
+        component={RoutineDetailsScreen}
+        options={{ headerShown: false }}
       />
       <RoutinesStackNavigator.Screen
         name="EditRoutine"
         component={EditRoutineScreen}
-        options={{ title: t('editRoutineTitle') }}
+        options={{ headerShown: false }}
       />
       <RoutinesStackNavigator.Screen
         name="FiveThreeOneSetup"
         component={FiveThreeOneSetupScreen}
-        options={{ title: t('fiveThreeOneSetupTitle') }}
+        options={{ headerShown: false }}
       />
       <RoutinesStackNavigator.Screen
         name="CycleReview"

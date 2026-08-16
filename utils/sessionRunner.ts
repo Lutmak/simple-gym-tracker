@@ -53,6 +53,8 @@ export interface RunnerExercise {
   isAmrap: boolean;
   barProfile: BarProfileKey | null;
   barWeight: number | null;
+  /** The routine's per-exercise warm-up answer; null = the role's default (§3.6). */
+  warmupsEnabled?: boolean | null;
   /** False for a free-log or transient added exercise with no routine target. */
   isPlanned?: boolean;
 }
@@ -582,7 +584,7 @@ export async function loadRunnerSession(
   const exerciseRows = await db.getAll(
     `SELECT session_exercise_id, exercise_name, role, target_sets, target_reps,
             load_source, absolute_weight, training_max_weight, training_max_pct,
-            unit_override, is_amrap, bar_profile, bar_weight
+            unit_override, is_amrap, bar_profile, bar_weight, warmups_enabled
      FROM SessionExercises
      WHERE session_id = ? ORDER BY sort_order;`,
     [Number(row.session_id)],
@@ -624,6 +626,10 @@ export async function loadRunnerSession(
       isAmrap: num(exercise.is_amrap) === 1,
       barProfile: nullableStr(exercise.bar_profile) as BarProfileKey | null,
       barWeight: nullableNum(exercise.bar_weight),
+      warmupsEnabled:
+        exercise.warmups_enabled === null || exercise.warmups_enabled === undefined
+          ? null
+          : num(exercise.warmups_enabled) === 1,
     })),
   };
 }

@@ -5,6 +5,7 @@ import { saveFreeSession } from './freeLogging';
 import { hasChartableSeries } from './routineProgress';
 import {
   buildExerciseSeries,
+  filterExerciseSummaries,
   loadExerciseSeries,
   loadExercisesWithHistory,
   type ExerciseHistoryRow,
@@ -48,6 +49,28 @@ const setupDemo = async (): Promise<{ db: DatabaseSync; executor: TestExecutor }
   await loadDemoData(demoDb(db));
   return { db, executor };
 };
+
+describe('the search field of Progreso', () => {
+  const summaries = [
+    { name: 'Barbell Full Squat', lastDate: 3 },
+    { name: 'Barbell Bench Press - Medium Grip', lastDate: 2 },
+    { name: 'Hack Squat', lastDate: 1 },
+  ];
+
+  it('matches anywhere in the name, ignoring case, keeping recency order', () => {
+    expect(filterExerciseSummaries(summaries, 'squat').map((entry) => entry.name)).toEqual([
+      'Barbell Full Squat',
+      'Hack Squat',
+    ]);
+    expect(filterExerciseSummaries(summaries, 'BENCH')).toHaveLength(1);
+    expect(filterExerciseSummaries(summaries, 'deadlift')).toEqual([]);
+  });
+
+  it('shows nothing until something is typed', () => {
+    expect(filterExerciseSummaries(summaries, '')).toEqual([]);
+    expect(filterExerciseSummaries(summaries, '   ')).toEqual([]);
+  });
+});
 
 describe('pure core', () => {
   it('builds one point per session with top weight, session-max 1RM and volume', () => {

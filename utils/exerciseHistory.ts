@@ -124,6 +124,24 @@ export function buildExerciseSeries(
   };
 }
 
+/**
+ * P1's search field: the exercises whose name contains what was typed, in the
+ * order they were loaded (most recently logged first). An empty query matches
+ * nothing rather than everything — the field sits above a screen about the
+ * routine, and dropping a 900-row list onto it the moment it is focused is the
+ * friction P1 exists to remove.
+ */
+export function filterExerciseSummaries(
+  summaries: readonly ExerciseSummary[],
+  query: string,
+): ExerciseSummary[] {
+  const needle = query.trim().toLowerCase();
+  if (needle === '') {
+    return [];
+  }
+  return summaries.filter((entry) => entry.name.toLowerCase().includes(needle));
+}
+
 const num = (value: unknown): number => Number(value);
 const str = (value: unknown): string => String(value);
 

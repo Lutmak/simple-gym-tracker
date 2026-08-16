@@ -2,18 +2,20 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { runSchema, type SchemaExecutor } from './schema';
 import { loadDemoData, type DemoDatabase } from './demoData';
 import {
-  buildCalendarMarkers,
   buildCycleWeeks,
   buildLiftSeries,
   computeWeekAdherence,
+  cycleAdherence,
   hasChartableSeries,
   hasProgressFocus,
-  loadCalendarLogs,
+  loadFreeLogDetail,
   loadMainLiftSeries,
   loadProgressRoutines,
   loadRoutineProgress,
   loadWeekDetail,
-  logsOnDate,
+  sessionDetailsOfWeek,
+  sessionExercises,
+  weekSessionsDone,
 } from './routineProgress';
 import type { RoutineDatabase } from './routineActions';
 
@@ -73,6 +75,7 @@ describe('pure core', () => {
             weeks: 4,
             status: 'active' as const,
             currentWeek: 3,
+            completedAt: null,
           },
           weeks: [
             {
@@ -189,18 +192,79 @@ describe('pure core', () => {
     ).toBe(true);
   });
 
-  it('builds calendar markers and lists the logs of one day', () => {
-    const rows = [
-      { workoutLogId: 1, workoutName: 'Demo Routine', dayName: 'Squat Day', date: 10 },
-      { workoutLogId: 2, workoutName: 'Free', dayName: 'Free session', date: 10 },
-      { workoutLogId: 3, workoutName: 'Demo Routine', dayName: 'Bench Day', date: 12 },
-    ];
-    const markers = buildCalendarMarkers(rows);
-    expect(markers.get(10)).toBe(2);
-    expect(markers.get(12)).toBe(1);
-    expect(logsOnDate(rows, 10).map((row) => row.workoutLogId)).toEqual([1, 2]);
-    expect(logsOnDate(rows, 99)).toEqual([]);
+  it('counts a moved session as done and a discarded one as not done', () => {
+    expect(
+      weekSessionsDone({ planned: 4, completed: 2, moved: 1, discarded: 1, pending: 0 }),
+    ).toBe(3);
+    expect(
+      weekSessionsDone({ planned: 3, completed: 0, moved: 0, discarded: 0, pending: 3 }),
+    ).toBe(0);
   });
+
+  it('adds a cycle adherence that never divides by zero', () => {
+    const weeks = buildCycleWeeks({ status: 'complete', currentWeek: 4 }, 2, [
+      { weekNumber: 1, status: 'completed' },
+      { weekNumber: 1, status: 'moved' },
+      { weekNumber: 2, status: 'completed' },
+      { weekNumber: 2, status: 'discarded' },
+    ]);
+    expect(cycleAdherence(weeks)).toEqual({ done: 3, planned: 4, percent: 75 });
+    expect(cycleAdherence([])).toEqual({ done: 0, planned: 0, percent: 0 });
+    expect(
+      cycleAdherence(buildCycleWeeks({ status: 'planned', currentWeek: 1 }, 3, [])),
+    ).toEqual({ done: 0, planned: 0, percent: 0 });
+  });
+
+  it('lists a session as its plan first and anything extra that was logged after', () => {
+    const views = sessionExercises({
+      sessionId: 1,
+      name: 'Squat Day',
+      status: 'completed',
+      date: 10,
+      planned: [
+        {
+          sessionExerciseId: 1,
+          name: 'Squat',
+          role: 'main',
+          targetSets: 3,
+          targetReps: 5,
+          targetWeight: 100,
+          unit: 'kg',
+          isAmrap: false,
+        },
+        {
+          sessionExerciseId: 2,
+          name: 'Plank',
+          role: 'accessory',
+          targetSets: 3,
+          targetReps: 60,
+          targetWeight: null,
+          unit: 'kg',
+          isAmrap: false,
+        },
+      ],
+      logged: [
+        {
+          exerciseName: 'Curl',
+          sets: [{ weightLogId: 3, setNumber: 1, weight: 20, reps: 12, unit: 'kg' }],
+        },
+        {
+          exerciseName: 'Squat',
+          sets: [{ weightLogId: 1, setNumber: 1, weight: 100, reps: 5, unit: 'kg' }],
+        },
+      ],
+    });
+
+    expect(views.map((view) => view.name)).toEqual(['Squat', 'Plank', 'Curl']);
+    expect(views[0]?.planned?.targetWeight).toBe(100);
+    expect(views[0]?.sets).toHaveLength(1);
+    // Planned but not logged: the plan still shows, with nothing under it.
+    expect(views[1]?.sets).toEqual([]);
+    // Logged but not planned: an exercise added during the session (§3.4).
+    expect(views[2]?.planned).toBeNull();
+    expect(views[2]?.sets).toHaveLength(1);
+  });
+
 });
 
 describe('demo data through the db edges', () => {
@@ -309,19 +373,6 @@ describe('demo data through the db edges', () => {
     expect(series.some((entry) => entry.exerciseName.includes('Lat'))).toBe(false);
   });
 
-  it('returns every demo log date as a calendar marker', async () => {
-    const { executor } = await setupDemo();
-    const rows = await loadCalendarLogs(executor);
-    expect(rows).toHaveLength(119);
-    const markers = buildCalendarMarkers(rows);
-    expect(markers.size).toBe(119);
-    for (const count of markers.values()) {
-      expect(count).toBe(1);
-    }
-    expect(markers.get(epoch('2026-04-04'))).toBe(1);
-    expect(markers.get(epoch('2026-06-20'))).toBe(1);
-    expect(logsOnDate(rows, epoch('2026-04-04'))).toHaveLength(1);
-  });
 
   it('opens a resolved week with planned targets and logged sets side by side', async () => {
     const { executor } = await setupDemo();
@@ -364,11 +415,20 @@ describe('demo data through the db edges', () => {
       'Wide-Grip Lat Pulldown',
     ]);
     const latPulldown = pressLogged?.exercises[3];
-    expect(latPulldown?.sets).toEqual([
+    expect(
+      latPulldown?.sets.map(({ setNumber, weight, reps, unit }) => ({
+        setNumber,
+        weight,
+        reps,
+        unit,
+      })),
+    ).toEqual([
       { setNumber: 1, weight: 110, reps: 10, unit: 'lb' },
       { setNumber: 2, weight: 110, reps: 10, unit: 'lb' },
       { setNumber: 3, weight: 110, reps: 10, unit: 'lb' },
     ]);
+    // Every logged set carries the Weight_Log row an edit writes to (P1).
+    expect(latPulldown?.sets.every((set) => Number.isInteger(set.weightLogId))).toBe(true);
   });
 
   it('shows a discarded session in the plan with no logged side', async () => {
@@ -380,6 +440,67 @@ describe('demo data through the db edges', () => {
       false,
     );
     expect(week.logged).toHaveLength(3);
+  });
+
+  it('records when a completed cycle was finished, so the tile can say so', async () => {
+    const { executor } = await setupDemo();
+    const { cycles } = await loadRoutineProgress(executor, 1);
+    expect(cycles[0]?.cycle.status).toBe('complete');
+    expect(typeof cycles[0]?.cycle.completedAt).toBe('number');
+    expect(cycles[5]?.cycle.status).toBe('active');
+    expect(cycles[5]?.cycle.completedAt).toBeNull();
+  });
+
+  it('turns a week into one detail per session, dated, planned beside logged', async () => {
+    const { executor } = await setupDemo();
+    const details = sessionDetailsOfWeek(await loadWeekDetail(executor, 1, 2, 1));
+
+    expect(details.map((detail) => detail.status)).toEqual([
+      'completed',
+      'completed',
+      'moved',
+      'completed',
+    ]);
+    expect(details[0]?.name).toBe('Squat Day');
+    expect(details.every((detail) => detail.planned.length > 0)).toBe(true);
+    expect(details.every((detail) => detail.logged.length > 0)).toBe(true);
+
+    // The moved session sits on the day it landed on — Thursday to Saturday.
+    const moved = details[2];
+    expect(moved?.date).toBe(epoch('2026-04-04'));
+    expect(moved?.date).not.toBe(epoch('2026-04-02'));
+  });
+
+  it('dates a discarded session on the day that counts as not done, with nothing logged', async () => {
+    const { executor } = await setupDemo();
+    const details = sessionDetailsOfWeek(await loadWeekDetail(executor, 1, 2, 2));
+    const discarded = details.find((detail) => detail.status === 'discarded');
+    expect(discarded?.logged).toEqual([]);
+    expect(discarded?.planned.length).toBeGreaterThan(0);
+    expect(typeof discarded?.date).toBe('number');
+  });
+
+  it('opens a free-logging session with what was logged and no plan', async () => {
+    const { executor } = await setupDemo();
+    const logRow = await executor.get(
+      `SELECT workout_log_id FROM Workout_Log
+       WHERE workout_log_id NOT IN (
+         SELECT completed_log_id FROM WeekSessions WHERE completed_log_id IS NOT NULL
+       );`,
+      [],
+    );
+    const detail = await loadFreeLogDetail(executor, Number(logRow?.workout_log_id));
+
+    expect(detail).not.toBeNull();
+    expect(detail?.status).toBe('free');
+    expect(detail?.date).toBe(epoch('2026-06-20'));
+    expect(detail?.planned).toEqual([]);
+    expect(detail?.logged.map((exercise) => exercise.exerciseName)).toEqual([
+      'Hack Squat',
+      'Cable Crossover',
+    ]);
+    expect(detail?.logged[0]?.sets).toHaveLength(3);
+    expect(await loadFreeLogDetail(executor, 99999)).toBeNull();
   });
 
   it('leaves the current week partially resolved: three logged sessions, one pending', async () => {

@@ -7,9 +7,13 @@
  * the current week marked, per-week adherence from WeekSessions statuses, and
  * the trend of each main-role exercise as its top logged weight per session.
  * Charts render the weight_logged value with the row's own unit (§3.7 —
- * nothing is ever converted; the unit travels with the log row). The calendar
- * markers come from Workout_Log dates alone — the calendar is a historical
- * view, never a scheduler.
+ * nothing is ever converted; the unit travels with the log row).
+ *
+ * P1 added what a week opens into: `sessionDetailsOfWeek` and
+ * `sessionExercises` turn a week into the sessions and exercises one sheet
+ * shows, and `cycleAdherence` states a cycle in the numbers the tiles read.
+ * The calendar's own model moved to `utils/progressCalendar.ts` when it stopped
+ * being "a dot per log" and became a day state (P2).
  */
 
 import type {
@@ -17,7 +21,7 @@ import type {
   RoutineLoadSource,
   RoutineUnit,
 } from './routineActions';
-import { targetWeightFor } from './today';
+import { nominalSessionStamp, targetWeightFor } from './today';
 
 export type WeekSessionStatus = 'pending' | 'completed' | 'moved' | 'discarded';
 export type CycleStatus = 'planned' | 'active' | 'complete';
@@ -36,6 +40,8 @@ export interface ProgressCycle {
   weeks: number;
   status: CycleStatus;
   currentWeek: number;
+  /** The day the cycle was completed — what "Ciclo 1 · completado el 12 de marzo" reads from. */
+  completedAt: number | null;
 }
 
 export interface WeekAdherence {
@@ -81,14 +87,6 @@ export interface MainLiftSeries {
   points: MainLiftPoint[];
 }
 
-export interface CalendarLogRow {
-  workoutLogId: number;
-  workoutName: string;
-  dayName: string;
-  /** Whole UTC day (noon) stamp. */
-  date: number;
-}
-
 export interface PlannedExercise {
   sessionExerciseId: number;
   name: string;
@@ -109,6 +107,8 @@ export interface PlannedSession {
 }
 
 export interface LoggedSet {
+  /** The `Weight_Log` row behind this set — what an edit writes to (P1). */
+  weightLogId: number;
   setNumber: number;
   weight: number;
   reps: number;
@@ -137,10 +137,27 @@ export interface WeekDetailData {
   routineName: string;
   cycleId: number;
   cycleNumber: number;
+  /** The cycle's first day — the origin every nominal session date is measured from. */
+  cycleStartedAt: number | null;
+  /** The routine's step, so a correction is −/+ one increment rather than a keyboard (§3.5). */
+  roundingIncrement: number;
   weekNumber: number;
   sessionStatuses: WeekSessionView[];
   planned: PlannedSession[];
   logged: LoggedSession[];
+}
+
+/** A session as one surface shows it: the plan, what was logged, and its state. */
+export type SessionDetailStatus = WeekSessionStatus | 'free';
+
+export interface SessionDetail {
+  sessionId: number | null;
+  name: string;
+  status: SessionDetailStatus;
+  /** The day the session sits on; null when its cycle has not started. */
+  date: number | null;
+  planned: PlannedExercise[];
+  logged: LoggedExercise[];
 }
 
 export interface RoutineProgressData {
@@ -184,6 +201,37 @@ export function computeWeekAdherence(
     adherence[row.status] += 1;
   }
   return adherence;
+}
+
+/**
+ * Sessions of the week that actually happened. A moved session was done, on
+ * another day (§3.1) — it counts, which is why moving never breaks a streak and
+ * discarding does (§3.7).
+ */
+export function weekSessionsDone(adherence: WeekAdherence): number {
+  return adherence.completed + adherence.moved;
+}
+
+export interface CycleAdherence {
+  done: number;
+  planned: number;
+  /** Whole per cent, 0 when the cycle plans nothing — never NaN on screen. */
+  percent: number;
+}
+
+/** Adherence over a whole cycle: sessions done out of sessions planned (§3.7). */
+export function cycleAdherence(weeks: readonly ProgressWeek[]): CycleAdherence {
+  let done = 0;
+  let planned = 0;
+  for (const week of weeks) {
+    done += weekSessionsDone(week.adherence);
+    planned += week.adherence.planned;
+  }
+  return {
+    done,
+    planned,
+    percent: planned === 0 ? 0 : Math.round((done / planned) * 100),
+  };
 }
 
 /** Weeks 1..N in ascending order; the active cycle's current week is marked. */
@@ -238,23 +286,76 @@ export function hasChartableSeries(points: readonly MainLiftPoint[]): boolean {
   return points.length >= 2;
 }
 
-/** Day stamp → number of logged sessions that day. */
-export function buildCalendarMarkers(rows: readonly CalendarLogRow[]): Map<number, number> {
-  const markers = new Map<number, number>();
-  for (const row of rows) {
-    markers.set(row.date, (markers.get(row.date) ?? 0) + 1);
-  }
-  return markers;
+/**
+ * One week's sessions as the sheet shows them: the plan, what was logged
+ * against it, the state it ended in and the day it sits on. Only sessions the
+ * week actually contains appear — a session added to the routine afterwards has
+ * no week row and is not part of a past week (§3.2 keeps history untouched).
+ *
+ * The date follows the same rule as the queue and the calendar: the day the
+ * session was resolved onto when it has one, its nominal cycle day otherwise.
+ */
+export function sessionDetailsOfWeek(week: WeekDetailData): SessionDetail[] {
+  const plannedById = new Map(week.planned.map((session) => [session.sessionId, session]));
+  const loggedById = new Map(week.logged.map((session) => [session.sessionId, session]));
+  const order = new Map(week.planned.map((session, index) => [session.sessionId, index]));
+
+  return [...week.sessionStatuses]
+    .sort(
+      (a, b) =>
+        (order.get(a.sessionId) ?? Number.MAX_SAFE_INTEGER) -
+          (order.get(b.sessionId) ?? Number.MAX_SAFE_INTEGER) ||
+        a.sessionId - b.sessionId,
+    )
+    .map((status) => {
+      const planned = plannedById.get(status.sessionId);
+      const logged = loggedById.get(status.sessionId);
+      const nominal =
+        planned === undefined || week.cycleStartedAt === null
+          ? null
+          : nominalSessionStamp(week.cycleStartedAt, week.weekNumber, planned.weekday);
+      return {
+        sessionId: status.sessionId,
+        name: planned?.name ?? '',
+        status: status.status,
+        date: status.resolvedOnDate ?? logged?.date ?? nominal,
+        planned: planned?.exercises ?? [],
+        logged: logged?.exercises ?? [],
+      };
+    });
 }
 
-/** The logs performed on one day stamp, in log order. */
-export function logsOnDate(
-  rows: readonly CalendarLogRow[],
-  date: number,
-): CalendarLogRow[] {
-  return rows
-    .filter((row) => row.date === date)
-    .sort((a, b) => a.workoutLogId - b.workoutLogId);
+/** One exercise of a session: what was planned for it, and what was logged. */
+export interface SessionExerciseView {
+  name: string;
+  /** Null for an exercise added during the session, and for a free log. */
+  planned: PlannedExercise | null;
+  sets: LoggedSet[];
+}
+
+/**
+ * A session as a list of exercises rather than two lists side by side. The plan
+ * leads, in its own order; anything logged that the plan did not contain — an
+ * exercise added mid-session (§3.4), or every exercise of a free log — follows
+ * in the order it was logged. Matching is by name, which is the same key
+ * history is written with (§3.2).
+ */
+export function sessionExercises(detail: SessionDetail): SessionExerciseView[] {
+  const setsByName = new Map(
+    detail.logged.map((exercise) => [exercise.exerciseName, exercise.sets]),
+  );
+  const views: SessionExerciseView[] = detail.planned.map((planned) => ({
+    name: planned.name,
+    planned,
+    sets: setsByName.get(planned.name) ?? [],
+  }));
+  const plannedNames = new Set(detail.planned.map((planned) => planned.name));
+  for (const exercise of detail.logged) {
+    if (!plannedNames.has(exercise.exerciseName)) {
+      views.push({ name: exercise.exerciseName, planned: null, sets: exercise.sets });
+    }
+  }
+  return views;
 }
 
 const num = (value: unknown): number => Number(value);
@@ -278,6 +379,7 @@ const toCycle = (row: Record<string, unknown>): ProgressCycle => ({
   weeks: num(row.weeks),
   status: str(row.status) as CycleStatus,
   currentWeek: num(row.current_week),
+  completedAt: nullableNum(row.completed_at),
 });
 
 /** Every routine, active first — the selector's list. */
@@ -311,7 +413,7 @@ export async function loadRoutineProgress(
   const routine = toRoutine(routineRow);
 
   const cycleRows = await db.getAll(
-    `SELECT cycle_id, cycle_number, weeks, status, current_week
+    `SELECT cycle_id, cycle_number, weeks, status, current_week, completed_at
      FROM Cycles WHERE routine_id = ? ORDER BY cycle_number;`,
     [routineId],
   );
@@ -394,23 +496,6 @@ export async function loadMainLiftSeries(
   });
 }
 
-/** Every log in the database — the calendar's raw material. */
-export async function loadCalendarLogs(
-  db: RoutineDatabase,
-): Promise<CalendarLogRow[]> {
-  const rows = await db.getAll(
-    `SELECT workout_log_id, workout_name, day_name, workout_date AS date
-     FROM Workout_Log ORDER BY workout_date;`,
-    [],
-  );
-  return rows.map((row) => ({
-    workoutLogId: num(row.workout_log_id),
-    workoutName: str(row.workout_name),
-    dayName: str(row.day_name),
-    date: num(row.date),
-  }));
-}
-
 interface PlanExerciseRow {
   sessionId: number;
   weekday: number;
@@ -433,6 +518,7 @@ interface LoggedRow {
   sessionId: number;
   date: number;
   exerciseName: string;
+  weightLogId: number;
   setNumber: number;
   weight: number;
   reps: number;
@@ -453,7 +539,7 @@ export async function loadWeekDetail(
   weekNumber: number,
 ): Promise<WeekDetailData> {
   const routineRow = await db.get(
-    `SELECT r.name, r.unit, r.rounding_increment, c.cycle_number
+    `SELECT r.name, r.unit, r.rounding_increment, c.cycle_number, c.started_at
      FROM Routines r JOIN Cycles c ON c.routine_id = r.routine_id
      WHERE r.routine_id = ? AND c.cycle_id = ?;`,
     [routineId, cycleId],
@@ -512,7 +598,7 @@ export async function loadWeekDetail(
   const loggedRows: LoggedRow[] = (
     await db.getAll(
       `SELECT ws.session_id, wol.workout_date AS date, le.exercise_name,
-              wl.set_number, wl.weight_logged, wl.reps_logged, wl.unit
+              wl.weight_log_id, wl.set_number, wl.weight_logged, wl.reps_logged, wl.unit
        FROM WeekSessions ws
        JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
        JOIN Workout_Log wol ON wol.workout_log_id = ws.completed_log_id
@@ -527,6 +613,7 @@ export async function loadWeekDetail(
     sessionId: num(row.session_id),
     date: num(row.date),
     exerciseName: str(row.exercise_name),
+    weightLogId: num(row.weight_log_id),
     setNumber: num(row.set_number),
     weight: num(row.weight_logged),
     reps: num(row.reps_logged),
@@ -577,6 +664,7 @@ export async function loadWeekDetail(
       session.exercises.push(exercise);
     }
     exercise.sets.push({
+      weightLogId: row.weightLogId,
       setNumber: row.setNumber,
       weight: row.weight,
       reps: row.reps,
@@ -589,9 +677,68 @@ export async function loadWeekDetail(
     routineName: str(routineRow.name),
     cycleId,
     cycleNumber: num(routineRow.cycle_number),
+    cycleStartedAt: nullableNum(routineRow.started_at),
+    roundingIncrement,
     weekNumber,
     sessionStatuses,
     planned,
+    logged,
+  };
+}
+
+/**
+ * One free-logging session (H6), read the same way a planned one is: it has no
+ * plan to compare against, so the sheet shows what was logged and says what it
+ * was. Keyed on the log rather than on a week session, because a free session
+ * belongs to no routine's plan by definition.
+ */
+export async function loadFreeLogDetail(
+  db: RoutineDatabase,
+  workoutLogId: number,
+): Promise<SessionDetail | null> {
+  const logRow = await db.get(
+    `SELECT workout_name, workout_date AS date FROM Workout_Log WHERE workout_log_id = ?;`,
+    [workoutLogId],
+  );
+  if (logRow === undefined) {
+    return null;
+  }
+
+  const setRows = await db.getAll(
+    `SELECT le.exercise_name, wl.weight_log_id, wl.set_number, wl.weight_logged,
+            wl.reps_logged, wl.unit
+     FROM Logged_Exercises le
+     JOIN Weight_Log wl ON wl.logged_exercise_id = le.logged_exercise_id
+     WHERE le.workout_log_id = ?
+     ORDER BY le.logged_exercise_id, wl.set_number;`,
+    [workoutLogId],
+  );
+
+  const logged: LoggedExercise[] = [];
+  const byName = new Map<string, LoggedExercise>();
+  for (const row of setRows) {
+    const name = str(row.exercise_name);
+    let exercise = byName.get(name);
+    if (exercise === undefined) {
+      exercise = { exerciseName: name, sets: [] };
+      byName.set(name, exercise);
+      logged.push(exercise);
+    }
+    exercise.sets.push({
+      weightLogId: num(row.weight_log_id),
+      setNumber: num(row.set_number),
+      weight: num(row.weight_logged),
+      reps: num(row.reps_logged),
+      unit: str(row.unit) as RoutineUnit,
+    });
+  }
+
+  return {
+    sessionId: null,
+    name: str(logRow.workout_name),
+    status: 'free',
+    date: num(logRow.date),
+    planned: [],
     logged,
   };
 }

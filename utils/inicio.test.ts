@@ -139,6 +139,65 @@ describe('Inicio streak', () => {
 
     expect(streak).toEqual({ weeks: 1, current: { planned: 3, completed: 1 } });
   });
+
+  /**
+   * P2 shows this same streak on Progreso, so the rule is pinned here once: a
+   * week counts when every session **the routine planned** was done. A two-day
+   * routine that trains twice a week is a complete week, not a 2/7 failure.
+   */
+  it('measures a two-day routine against its own two planned days', () => {
+    const twoDayInput = (
+      weekSessions: InicioInput['weekSessions'],
+    ): InicioInput => ({
+      routine: { routineId: 1, name: 'Two days', unit: 'kg', roundingIncrement: 2.5 },
+      cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStamp('2026-08-10') }],
+      sessions: [
+        { sessionId: 1, weekday: 1, name: 'Upper', sortOrder: 1 },
+        { sessionId: 2, weekday: 4, name: 'Lower', sortOrder: 2 },
+      ],
+      exercises: [],
+      weekSessions,
+    });
+    const row = (
+      weekSessionId: number,
+      weekNumber: number,
+      sessionId: number,
+      status: 'completed' | 'moved' | 'discarded' | 'pending',
+      resolvedOnDate: number | null,
+    ) => ({ weekSessionId, cycleId: 1, weekNumber, sessionId, status, resolvedOnDate });
+
+    // Week 1 done as planned; week 2 done with one session moved inside the week;
+    // week 3 done as planned. Three complete weeks, no discard anywhere.
+    const unbroken = computeInicioStreak(
+      twoDayInput([
+        row(1, 1, 1, 'completed', dayStamp('2026-08-10')),
+        row(2, 1, 2, 'completed', dayStamp('2026-08-13')),
+        row(3, 2, 1, 'completed', dayStamp('2026-08-17')),
+        row(4, 2, 2, 'moved', dayStamp('2026-08-22')),
+        row(5, 3, 1, 'completed', dayStamp('2026-08-24')),
+        row(6, 3, 2, 'completed', dayStamp('2026-08-27')),
+      ]),
+      dayStamp('2026-08-31'),
+      'Monday',
+    );
+    expect(unbroken.weeks).toBe(3);
+    expect(unbroken.current.planned).toBe(2);
+
+    // The same history with week 2's second session discarded instead of moved.
+    const broken = computeInicioStreak(
+      twoDayInput([
+        row(1, 1, 1, 'completed', dayStamp('2026-08-10')),
+        row(2, 1, 2, 'completed', dayStamp('2026-08-13')),
+        row(3, 2, 1, 'completed', dayStamp('2026-08-17')),
+        row(4, 2, 2, 'discarded', dayStamp('2026-08-20')),
+        row(5, 3, 1, 'completed', dayStamp('2026-08-24')),
+        row(6, 3, 2, 'completed', dayStamp('2026-08-27')),
+      ]),
+      dayStamp('2026-08-31'),
+      'Monday',
+    );
+    expect(broken.weeks).toBe(1);
+  });
 });
 
 describe('Inicio session estimate', () => {

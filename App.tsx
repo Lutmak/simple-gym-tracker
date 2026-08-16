@@ -263,12 +263,12 @@ const RoutinesStack = () => {
       <RoutinesStackNavigator.Screen
         name="EditRoutine"
         component={EditRoutineScreen}
-        options={{ title: t('editRoutineTitle') }}
+        options={{ headerShown: false }}
       />
       <RoutinesStackNavigator.Screen
         name="FiveThreeOneSetup"
         component={FiveThreeOneSetupScreen}
-        options={{ title: t('fiveThreeOneSetupTitle') }}
+        options={{ headerShown: false }}
       />
       <RoutinesStackNavigator.Screen
         name="CycleReview"

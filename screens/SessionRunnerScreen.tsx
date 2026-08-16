@@ -70,6 +70,7 @@ import {
 } from '../utils/freeLogging';
 import { buildSessionSummary } from '../utils/sessionSummary';
 import { dayStampOf } from '../utils/today';
+import { warmupsEnabledFor } from '../utils/routineActions';
 import type { RoutineDatabase, RoutineUnit } from '../utils/routineActions';
 import type { InicioStackParamList, RootTabParamList } from '../App';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
@@ -191,7 +192,11 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
         }
         setSession(loaded);
         setDraft(buildPlannedDraft(loaded));
-        setWarmupEnabled(loaded.exercises.map((exercise) => exercise.role === 'main'));
+        setWarmupEnabled(
+          loaded.exercises.map((exercise) =>
+            warmupsEnabledFor(exercise.role, exercise.warmupsEnabled),
+          ),
+        );
         setWarmupDone(new Set());
         setWarmupCollapsed(new Set());
       })

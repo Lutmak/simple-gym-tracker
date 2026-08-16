@@ -801,3 +801,41 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
     expect(count(db, 'Progression_Proposal')).toBe(planBefore.proposals);
   });
 });
+
+describe('R3 — the per-exercise warm-up answer survives an edit (§3.6)', () => {
+  it('stores on, off and "never said" distinctly, and never rewrites history', async () => {
+    const { db, executor } = connect();
+    const base = await demoRoutineDraft(executor);
+    const historyBefore = count(db, 'Weight_Log');
+
+    const [first, ...rest] = base.sessions;
+    const [main, second, ...others] = first.exercises;
+    await saveRoutineEdit(executor, 1, {
+      ...base,
+      sessions: [
+        {
+          ...first,
+          exercises: [
+            { ...main, warmupsEnabled: false },
+            { ...second, warmupsEnabled: true },
+            ...others,
+          ],
+        },
+        ...rest,
+      ],
+    });
+
+    const reloaded = await loadRoutineSourceById(executor, 1);
+    const stored = (name: string): boolean | null => {
+      const exercise = reloaded.exercises.find((row) => row.name === name);
+      if (exercise === undefined) {
+        throw new Error(`Missing exercise ${name}`);
+      }
+      return exercise.warmupsEnabled;
+    };
+    expect(stored(main.name)).toBe(false);
+    expect(stored(second.name)).toBe(true);
+    expect(stored(others[0].name)).toBeNull();
+    expect(count(db, 'Weight_Log')).toBe(historyBefore);
+  });
+});

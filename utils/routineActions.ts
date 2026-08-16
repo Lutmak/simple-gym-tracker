@@ -29,6 +29,21 @@ export type RoutineProgressionRule = 'wave' | 'linear' | 'none';
 export type RoutineRole = 'main' | 'accessory';
 export type RoutineOrigin = 'catalog' | 'user';
 
+/**
+ * §3.6 — warm-ups belong to the main lift: on for the main exercise, off for
+ * accessories, unless the user said otherwise for this exercise. The stored
+ * `warmups_enabled` column is deliberately nullable so "I never said" and "I
+ * said off" stay distinguishable: an accessory promoted to main lift then
+ * gets warm-ups, which is what the user meant, while an accessory the user
+ * explicitly gave warm-ups to keeps them.
+ */
+export function warmupsEnabledFor(
+  role: RoutineRole,
+  stored: boolean | null | undefined,
+): boolean {
+  return stored ?? role === 'main';
+}
+
 export interface RoutineSource {
   routineKey: string | null;
   name: string;
@@ -76,6 +91,8 @@ export interface ExerciseSource {
   /** A bar profile already stored on the row (user routines). */
   barProfile: BarProfileKey | null;
   barWeight: number | null;
+  /** The user's per-exercise warm-up answer; null = the role's default (§3.6). */
+  warmupsEnabled: boolean | null;
 }
 
 export interface RoutineSourceBundle {
@@ -120,6 +137,7 @@ export interface RoutineCopyRows {
     sortOrder: number;
     barProfile: BarProfileKey | null;
     barWeight: number | null;
+    warmupsEnabled: boolean | null;
   }[];
 }
 
@@ -184,6 +202,7 @@ export function buildRoutineCopyRows(
       barProfile:
         exercise.barProfile ?? defaultBarProfileForEquipment(exercise.equipment),
       barWeight: exercise.barWeight,
+      warmupsEnabled: exercise.warmupsEnabled,
     };
   });
 
@@ -233,6 +252,8 @@ const nullableStr = (value: unknown): string | null =>
   value === null || value === undefined ? null : String(value);
 const nullableNum = (value: unknown): number | null =>
   value === null || value === undefined ? null : Number(value);
+const nullableBool = (value: unknown): boolean | null =>
+  value === null || value === undefined ? null : Number(value) === 1;
 
 const toSessionSource = (row: Record<string, unknown>): SessionSource => ({
   sessionId: num(row.session_id),
@@ -259,6 +280,7 @@ const toExerciseSource = (row: Record<string, unknown>): ExerciseSource => ({
   equipment: nullableStr(row.equipment),
   barProfile: nullableStr(row.bar_profile) as BarProfileKey | null,
   barWeight: nullableNum(row.bar_weight),
+  warmupsEnabled: nullableBool(row.warmups_enabled),
 });
 
 export async function loadPresetRoutineSource(
@@ -284,7 +306,7 @@ export async function loadPresetRoutineSource(
     `SELECT e.preset_session_exercise_id AS exercise_id, e.preset_session_id AS session_id,
             e.catalog_exercise_id, e.exercise_name AS name, e.role, e.target_sets,
             e.target_reps, e.load_source, e.training_max_pct, e.is_amrap, e.sort_order,
-            c.equipment
+            c.equipment, NULL AS warmups_enabled
      FROM Preset_SessionExercises e
      JOIN Preset_Sessions s ON s.preset_session_id = e.preset_session_id
      LEFT JOIN Catalog_Exercises c ON c.exercise_key = e.catalog_exercise_id
@@ -337,7 +359,8 @@ export async function loadRoutineSourceById(
     `SELECT e.session_exercise_id AS exercise_id, e.session_id, e.catalog_exercise_id,
             e.exercise_name AS name, e.role, e.target_sets, e.target_reps, e.load_source,
             e.training_max_pct, e.training_max_weight, e.absolute_weight, e.unit_override,
-            e.is_amrap, e.sort_order, e.bar_profile, e.bar_weight, NULL AS equipment
+            e.is_amrap, e.sort_order, e.bar_profile, e.bar_weight, e.warmups_enabled,
+            NULL AS equipment
      FROM SessionExercises e
      JOIN Sessions s ON s.session_id = e.session_id
      WHERE s.routine_id = ? ORDER BY s.sort_order, e.sort_order;`,
@@ -418,8 +441,8 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
         `INSERT INTO SessionExercises
            (session_id, catalog_exercise_id, exercise_name, role, target_sets, target_reps,
             load_source, training_max_pct, training_max_weight, absolute_weight,
-            unit_override, is_amrap, sort_order, bar_profile, bar_weight)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+            unit_override, is_amrap, sort_order, bar_profile, bar_weight, warmups_enabled)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           sessionId,
           exercise.catalogExerciseId,
@@ -436,6 +459,7 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
           exercise.sortOrder,
           exercise.barProfile,
           exercise.barWeight,
+          exercise.warmupsEnabled === null ? null : exercise.warmupsEnabled ? 1 : 0,
         ],
       );
     }

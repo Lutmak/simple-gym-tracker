@@ -89,6 +89,7 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         equipment: 'dumbbell',
         barProfile: null,
         barWeight: null,
+        warmupsEnabled: null,
       },
       {
         exerciseId: 102,
@@ -108,6 +109,7 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         equipment: 'dumbbell',
         barProfile: null,
         barWeight: null,
+        warmupsEnabled: null,
       },
       {
         exerciseId: 103,
@@ -127,6 +129,7 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         equipment: 'body only',
         barProfile: null,
         barWeight: null,
+        warmupsEnabled: null,
       },
     ],
   });

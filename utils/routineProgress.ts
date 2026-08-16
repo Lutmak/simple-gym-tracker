@@ -148,6 +148,27 @@ export interface RoutineProgressData {
   cycles: ProgressCycleView[];
 }
 
+/** The smallest deep-link target needed to reopen a saved routine week. */
+export interface ProgressFocus {
+  routineId: number;
+  cycleId: number;
+  weekNumber: number;
+}
+
+export function hasProgressFocus(
+  data: RoutineProgressData,
+  focus: ProgressFocus,
+): boolean {
+  if (data.routine.routineId !== focus.routineId) {
+    return false;
+  }
+  return data.cycles.some(
+    (cycleView) =>
+      cycleView.cycle.cycleId === focus.cycleId &&
+      cycleView.weeks.some((week) => week.weekNumber === focus.weekNumber),
+  );
+}
+
 /** Adherence from one week's WeekSessions statuses (§3.6 statuses). */
 export function computeWeekAdherence(
   rows: readonly { status: WeekSessionStatus }[],

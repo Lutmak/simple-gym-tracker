@@ -9,7 +9,8 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
-import { useFocusEffect, useNavigation, type NavigationProp, type ParamListBase } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
+import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useTranslation } from 'react-i18next';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -26,6 +27,7 @@ import {
   loadProgressRoutines,
   loadRoutineProgress,
   loadWeekDetail,
+  hasProgressFocus,
   logsOnDate,
   type CalendarLogRow,
   type MainLiftPoint,
@@ -34,6 +36,7 @@ import {
   type ProgressRoutine,
   type ProgressWeek,
   type RoutineProgressData,
+  type ProgressFocus,
   type WeekDetailData,
 } from '../utils/routineProgress';
 import {
@@ -44,6 +47,7 @@ import {
   type ExerciseSummary,
 } from '../utils/exerciseHistory';
 import type { RoutineDatabase } from '../utils/routineActions';
+import type { RootTabParamList } from '../App';
 
 const MONTH_KEYS = [
   'January',
@@ -73,18 +77,21 @@ const WEEKDAY_SHORT_KEYS = [
 const formatWeight = (value: number): string => String(Number(value.toFixed(1)));
 
 interface SelectedWeek {
+  routineId: number;
   cycleId: number;
   cycleNumber: number;
   weekNumber: number;
 }
 
-export default function ProgressScreen() {
+type Props = BottomTabScreenProps<RootTabParamList, 'Progress'>;
+
+export default function ProgressScreen({ navigation, route }: Props) {
   const { theme } = useTheme();
   const { t } = useTranslation();
   const { dateFormat, firstWeekday } = useSettings();
   const { width } = useWindowDimensions();
   const db = useSQLiteContext();
-  const navigation = useNavigation<NavigationProp<ParamListBase>>();
+  const requestedFocus: ProgressFocus | undefined = route.params?.focus;
 
   const [routines, setRoutines] = useState<ProgressRoutine[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -118,6 +125,7 @@ export default function ProgressScreen() {
     useCallback(() => {
       let cancelled = false;
       const load = async () => {
+        const focus = requestedFocus;
         const [loaded, logs, summaries] = await Promise.all([
           loadProgressRoutines(routineDb),
           loadCalendarLogs(routineDb),
@@ -130,7 +138,9 @@ export default function ProgressScreen() {
         setCalendarLogs(logs);
         setExerciseSummaries(summaries);
         const preferred =
-          selectedId !== null && loaded.some((routine) => routine.routineId === selectedId)
+          focus !== undefined && loaded.some((routine) => routine.routineId === focus.routineId)
+            ? focus.routineId
+            : selectedId !== null && loaded.some((routine) => routine.routineId === selectedId)
             ? selectedId
             : (loaded.find((routine) => routine.isActive)?.routineId ??
               loaded[0]?.routineId ??
@@ -147,6 +157,10 @@ export default function ProgressScreen() {
         if (preferred === null) {
           setRoutineData(null);
           setSeries([]);
+          setWeekDetail(null);
+          if (focus !== undefined) {
+            navigation.setParams({ focus: undefined });
+          }
           return;
         }
         const [data, liftSeries] = await Promise.all([
@@ -156,6 +170,22 @@ export default function ProgressScreen() {
         if (!cancelled) {
           setRoutineData(data);
           setSeries(liftSeries);
+          if (focus !== undefined && hasProgressFocus(data, focus)) {
+            setView('routine');
+            setWeekData(null);
+            const focusedCycle = data.cycles.find(
+              (cycleView) => cycleView.cycle.cycleId === focus.cycleId,
+            );
+            if (focusedCycle !== undefined) {
+              setWeekDetail({
+                ...focus,
+                cycleNumber: focusedCycle.cycle.cycleNumber,
+              });
+            }
+          }
+          if (focus !== undefined) {
+            navigation.setParams({ focus: undefined });
+          }
         }
       };
       load().catch((error) => {
@@ -165,12 +195,15 @@ export default function ProgressScreen() {
           setSeries([]);
           setCalendarLogs([]);
           setExerciseSummaries([]);
+          if (requestedFocus !== undefined) {
+            navigation.setParams({ focus: undefined });
+          }
         }
       });
       return () => {
         cancelled = true;
       };
-    }, [db, selectedId, selectedExercise]),
+    }, [db, navigation, requestedFocus, selectedId, selectedExercise]),
   );
 
   React.useEffect(() => {
@@ -213,17 +246,25 @@ export default function ProgressScreen() {
   };
 
   const openWeekDetail = (cycle: ProgressCycle, week: ProgressWeek) => {
+    if (selectedId === null) {
+      return;
+    }
     setWeekData(null);
-    setWeekDetail({ cycleId: cycle.cycleId, cycleNumber: cycle.cycleNumber, weekNumber: week.weekNumber });
+    setWeekDetail({
+      routineId: selectedId,
+      cycleId: cycle.cycleId,
+      cycleNumber: cycle.cycleNumber,
+      weekNumber: week.weekNumber,
+    });
   };
 
   React.useEffect(() => {
-    if (weekDetail === null || selectedId === null) {
+    if (weekDetail === null) {
       setWeekData(null);
       return;
     }
     let cancelled = false;
-    loadWeekDetail(routineDb, selectedId, weekDetail.cycleId, weekDetail.weekNumber)
+    loadWeekDetail(routineDb, weekDetail.routineId, weekDetail.cycleId, weekDetail.weekNumber)
       .then((data) => {
         if (!cancelled) {
           setWeekData(data);
@@ -238,7 +279,7 @@ export default function ProgressScreen() {
     return () => {
       cancelled = true;
     };
-  }, [db, weekDetail, selectedId]);
+  }, [db, weekDetail]);
 
   const goToEditRoutine = () => {
     const routineId = weekData?.routineId ?? routineData?.routine.routineId;

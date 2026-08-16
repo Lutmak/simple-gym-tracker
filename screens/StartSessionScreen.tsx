@@ -47,6 +47,7 @@ import {
   runnerTargetsFor,
   saveRunnerBarProfile,
   saveSessionLog,
+  stampMissingSetTimes,
   type LoggedSet,
   type RunnerExercise,
   type RunnerSession,
@@ -54,6 +55,7 @@ import {
   type RunnerDraft,
   warmupSetsFor,
 } from '../utils/sessionRunner';
+import { buildSessionSummary } from '../utils/sessionSummary';
 import { dayStampOf } from '../utils/today';
 import type { RoutineDatabase, RoutineUnit } from '../utils/routineActions';
 import type { InicioStackParamList } from '../App';
@@ -107,6 +109,8 @@ export default function StartSessionScreen({ navigation, route }: Props) {
   const [rest, setRest] = useState<RestState | null>(null);
   const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [finishSheetVisible, setFinishSheetVisible] = useState(false);
+  const [runnerStartedAt] = useState(() => Date.now());
 
   const routineDb: RoutineDatabase = {
     run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
@@ -220,10 +224,19 @@ export default function StartSessionScreen({ navigation, route }: Props) {
       return;
     }
     const { exerciseIndex: selectedExercise, setIndex } = editing;
+    const completedAt = Date.now();
+    const timestampedValue =
+      value === null
+        ? null
+        : {
+            ...value,
+            startedAt: value.startedAt ?? completedAt,
+            completedAt: value.completedAt ?? completedAt,
+          };
     setDraft((current) => {
       const next = current.map((sets) => [...sets]);
       const exerciseSets = next[selectedExercise] ?? [];
-      exerciseSets[setIndex] = value;
+      exerciseSets[setIndex] = timestampedValue;
       next[selectedExercise] = exerciseSets;
       return next;
     });
@@ -305,11 +318,26 @@ export default function StartSessionScreen({ navigation, route }: Props) {
     if (session === null || saving) {
       return;
     }
+    setFinishSheetVisible(false);
     setSaving(true);
     try {
-      await saveSessionLog(routineDb, weekSessionId, session, draft);
+      const completedAt = Date.now();
+      const finalDraft = stampMissingSetTimes(draft, runnerStartedAt, completedAt);
+      const summary = buildSessionSummary(session, finalDraft);
+      const saved = await saveSessionLog(routineDb, weekSessionId, session, finalDraft);
       bump();
-      navigation.getParent()?.navigate('Progress');
+      navigation.navigate('SessionSummary', {
+        sessionName: session.sessionName,
+        routineName: session.workoutName,
+        workoutDate: session.workoutDate,
+        summary,
+        finishContext: {
+          routineId: saved.finishContext.routineId,
+          cycleId: saved.finishContext.cycleId,
+          weekNumber: saved.finishContext.weekNumber,
+          reviewAvailable: saved.finishContext.reviewAvailable,
+        },
+      });
     } catch (error) {
       console.error('Error saving session:', error);
       setSaving(false);
@@ -344,6 +372,23 @@ export default function StartSessionScreen({ navigation, route }: Props) {
   const isLastExercise = exerciseIndex === session.exercises.length - 1;
   const isWarmupOn = warmupEnabled[exerciseIndex] === true;
   const isWarmupCollapsed = warmupCollapsed.has(exerciseIndex);
+  const confirmationSummary = buildSessionSummary(
+    session,
+    stampMissingSetTimes(draft, runnerStartedAt, Date.now()),
+  );
+  const confirmationDuration =
+    confirmationSummary.durationSeconds === null
+      ? t('sessionSummaryTimingUnavailable')
+      : confirmationSummary.durationSeconds < 60
+        ? t('sessionSummaryLessThanMinute')
+        : t('sessionSummaryMinutes', {
+            count: Math.max(1, Math.round(confirmationSummary.durationSeconds / 60)),
+          });
+  const confirmationStats = t('finishConfirmStats', {
+    exercises: t('runnerExercisesCount', { count: confirmationSummary.exerciseCount }),
+    sets: t('runnerSetsCount', { count: confirmationSummary.workSetCount }),
+    duration: confirmationDuration,
+  });
 
   const planLineFor = (exercise: RunnerExercise): string => {
     const exerciseUnit = exercise.unitOverride ?? session.unit;
@@ -636,10 +681,10 @@ export default function StartSessionScreen({ navigation, route }: Props) {
           <Button
             label={isLastExercise ? t('finishSession') : t('runnerNextExercise')}
             onPress={() => {
-              startRest(currentExercise.role);
               if (isLastExercise) {
-                void finishSession();
+                setFinishSheetVisible(true);
               } else {
+                startRest(currentExercise.role);
                 setExerciseIndex((current) => current + 1);
               }
             }}
@@ -690,6 +735,34 @@ export default function StartSessionScreen({ navigation, route }: Props) {
           }
         />
       )}
+
+      <Sheet
+        visible={finishSheetVisible}
+        title={t('runnerFinishConfirmTitle', { session: session.sessionName })}
+        onClose={() => setFinishSheetVisible(false)}
+        testID="runner-finish-confirmation"
+      >
+        <Text style={[styles.finishSummaryLine, { color: tokens.textPrimary }]}>
+          {confirmationStats}
+        </Text>
+        {confirmationSummary.notDoneSets > 0 && (
+          <Text style={[styles.finishInfo, { color: tokens.textSecondary }]}>
+            {t('sessionSummaryNotDone', { count: confirmationSummary.notDoneSets })}
+          </Text>
+        )}
+        <Button
+          label={t('finishSession')}
+          onPress={() => void finishSession()}
+          disabled={saving}
+          testID="runner-finish-confirm"
+        />
+        <Row
+          label={t('finishStay')}
+          onPress={() => setFinishSheetVisible(false)}
+          divided
+          testID="runner-finish-stay"
+        />
+      </Sheet>
 
       <Sheet
         visible={informationExercise !== null}
@@ -890,6 +963,8 @@ function RunnerSetEditor({
       reps,
       weight: canEditWeight ? weight : null,
       unit: canEditWeight ? unit : undefined,
+      startedAt: initial.startedAt,
+      completedAt: initial.completedAt,
     });
   };
 
@@ -1324,6 +1399,14 @@ const styles = StyleSheet.create({
   infoPlan: {
     fontSize: fontSize.body,
     marginBottom: spacing.section,
+  },
+  finishSummaryLine: {
+    fontSize: fontSize.body,
+    marginBottom: spacing.cardGap,
+  },
+  finishInfo: {
+    fontSize: fontSize.helper,
+    marginBottom: spacing.cardGap,
   },
   pressed: {
     opacity: 0.7,

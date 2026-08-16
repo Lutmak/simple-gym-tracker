@@ -1,8 +1,20 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import i18n from './i18n'; // Import i18n
+import i18n from './i18n';
+import { expoWeekday, type TrainingDayReminder } from './notificationSchedule';
 
-// Configure the notification handler to show alerts when received
+/**
+ * The only place a reminder reaches the OS (S3). Everything about *what* should
+ * be scheduled is decided by `utils/notificationSchedule.ts`, which is pure and
+ * tested; this file just carries the result across the boundary.
+ *
+ * Reminders are **local** notifications, one weekly trigger per training day.
+ * Remote push does not exist in this app — it is impossible offline, and it was
+ * removed from Expo Go in SDK 53 (`utils/suppressExpoGoLogs.ts`).
+ */
+
+export const WORKOUT_CHANNEL_ID = 'workout-reminders';
+
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowBanner: true,
@@ -12,17 +24,9 @@ Notifications.setNotificationHandler({
   }),
 });
 
-// Request permission for notifications
 export const requestNotificationPermissions = async (): Promise<boolean> => {
-  // Remove or comment out this condition to allow emulator testing
-  // if (!Device.isDevice) {
-  //   console.log('Cannot request notifications on simulator/emulator');
-  //   return false;
-  // }
-
-  // Create notification channel for Android
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('workout-reminders', {
+    await Notifications.setNotificationChannelAsync(WORKOUT_CHANNEL_ID, {
       name: 'Workout Reminders',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
@@ -30,140 +34,68 @@ export const requestNotificationPermissions = async (): Promise<boolean> => {
     });
   }
 
-  // Request permission
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
-  let finalStatus = existingStatus;
-  
-  if (existingStatus !== 'granted') {
-    const { status } = await Notifications.requestPermissionsAsync();
-    finalStatus = status;
-  }
-  
-  return finalStatus === 'granted';
-};
-
-// Interface for scheduling a workout notification
-interface ScheduleWorkoutNotificationProps {
-  workoutName: string;
-  dayName: string;
-  scheduledDate: Date;
-  notificationTime: Date; // Time to receive notification on the workout day
-}
-
-// Schedule a notification for an upcoming workout
-export const scheduleWorkoutNotification = async ({
-  workoutName,
-  dayName,
-  scheduledDate,
-  notificationTime,
-}: ScheduleWorkoutNotificationProps): Promise<string | null> => {
-  try {
-    // Ensure we have permission
-    const hasPermission = await requestNotificationPermissions();
-    if (!hasPermission) {
-      console.log('Notification permission not granted');
-      return null;
-    }
-
-    // Create a Date object for the notification
-    const triggerDate = new Date(scheduledDate);
-    triggerDate.setHours(
-      notificationTime.getHours(),
-      notificationTime.getMinutes(),
-      0,
-      0
-    );
-
-    // Don't schedule if the time is in the past
-    if (triggerDate <= new Date()) {
-      console.log('Cannot schedule notification for past time');
-      return null;
-    }
-
-    // Schedule the notification with translations
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: i18n.t('workoutReminderTitle', { workoutName: workoutName }),
-        body: i18n.t('workoutReminderBody', { dayName: dayName }),
-        data: { 
-          workoutName, 
-          dayName, 
-          scheduledDate: scheduledDate.toISOString(),
-          }
-      },
-      trigger: {
-        date: triggerDate,
-        type: Notifications.SchedulableTriggerInputTypes.DATE
-      },
-    });
-
-    console.log(`Scheduled notification: ${notificationId} for ${triggerDate.toLocaleString()}`);
-    return notificationId;
-  } catch (error) {
-    console.error('Error scheduling notification:', error);
-    return null;
-  }
-};
-
-// Schedule a daily reminder at the global notification time
-export const scheduleDailyWorkoutReminder = async (
-  hour: number,
-  minute: number,
-): Promise<string | null> => {
-  try {
-    // Ensure we have permission
-    const hasPermission = await requestNotificationPermissions();
-    if (!hasPermission) {
-      console.log('Notification permission not granted');
-      return null;
-    }
-
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: i18n.t('dailyReminderTitle'),
-        body: i18n.t('dailyReminderBody'),
-        data: { kind: 'daily-reminder' },
-      },
-      trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.DAILY,
-        hour,
-        minute,
-      },
-    });
-
-    console.log(`Scheduled daily reminder: ${notificationId}`);
-    return notificationId;
-  } catch (error) {
-    console.error('Error scheduling daily reminder:', error);
-    return null;
-  }
-};
-
-// Cancel a scheduled notification
-export const cancelWorkoutNotification = async (notificationId: string): Promise<boolean> => {
-  try {
-    await Notifications.cancelScheduledNotificationAsync(notificationId);
-    console.log(`Cancelled notification: ${notificationId}`);
+  if (existingStatus === 'granted') {
     return true;
-  } catch (error) {
-    console.error('Error cancelling notification:', error);
-    return false;
   }
+
+  const { status } = await Notifications.requestPermissionsAsync();
+  return status === 'granted';
 };
 
-// Get all scheduled notifications
-export const getAllScheduledNotifications = async (): Promise<Notifications.NotificationRequest[]> => {
-  return await Notifications.getAllScheduledNotificationsAsync();
+export const cancelAllReminders = async (): Promise<void> => {
+  await Notifications.cancelAllScheduledNotificationsAsync();
 };
 
+/**
+ * Makes the device's scheduled reminders equal to `reminders`, and nothing else.
+ * Everything is cancelled first, so turning reminders off (an empty schedule)
+ * and changing one day's time both go through this one path and neither can
+ * leave a stale alarm behind. Returns how many were scheduled.
+ */
+export const applyTrainingDayReminders = async (
+  reminders: readonly TrainingDayReminder[],
+): Promise<number> => {
+  await cancelAllReminders();
 
+  if (reminders.length === 0) {
+    return 0;
+  }
+
+  const granted = await requestNotificationPermissions();
+  if (!granted) {
+    return 0;
+  }
+
+  for (const reminder of reminders) {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: i18n.t('workoutReminderTitle', { workoutName: reminder.sessionName }),
+        body: i18n.t('dailyReminderBody'),
+        data: { kind: 'training-day-reminder', weekday: reminder.weekday },
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+        weekday: expoWeekday(reminder.weekday),
+        hour: reminder.hour,
+        minute: reminder.minute,
+        channelId: WORKOUT_CHANNEL_ID,
+      },
+    });
+  }
+
+  return reminders.length;
+};
+
+/**
+ * Permission revoked in system settings must turn the app's own switch off, or
+ * Ajustes would claim reminders the device will never deliver.
+ */
 export const checkAndSyncPermissions = async (
   setNotificationPermissionGranted: (granted: boolean) => void,
 ) => {
   const { status } = await Notifications.getPermissionsAsync();
-  console.log('status', status);
-  const hasPermission = status === 'granted';
-  if (!hasPermission) {
+  if (status !== 'granted') {
     setNotificationPermissionGranted(false);
   }
 };

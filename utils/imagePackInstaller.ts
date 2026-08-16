@@ -25,6 +25,36 @@ import { strFromU8, unzipSync } from 'fflate';
 export const IMAGE_PACK_RELEASE_URL =
   'https://github.com/Lutmak/simple-gym-tracker/releases';
 
+/**
+ * **No image pack has been published yet** (SPECS.md S4). The mechanism is
+ * finished and the release page is real, but it is empty, so "Download" opens a
+ * page with nothing on it. The screen says exactly that rather than implying an
+ * install that cannot succeed — an honest dead end is a smaller defect than a
+ * silent one. Flip this to `true` in the same commit that publishes a release.
+ */
+export const IMAGE_PACK_RELEASE_PUBLISHED = false;
+
+export interface ImagePackFlowCopy {
+  /** Line one: what the download row promises today. */
+  downloadHintKey: string;
+  /** Line two: what picking a file does. */
+  installHintKey: string;
+}
+
+/**
+ * The two lines that state the flow. Kept out of the screen because *which*
+ * sentence is honest depends on whether a release exists, and that is a fact
+ * about the project rather than a rendering decision.
+ */
+export function imagePackFlowCopy(releasePublished: boolean): ImagePackFlowCopy {
+  return {
+    downloadHintKey: releasePublished
+      ? 'imagePackDownloadHint'
+      : 'imagePackNoReleaseYet',
+    installHintKey: 'imagePackInstallHint',
+  };
+}
+
 export const IMAGE_PACK_INSTALL_DIR = 'image-pack';
 
 export const IMAGE_PACK_MANIFEST_NAME = 'manifest.json';

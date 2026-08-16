@@ -512,5 +512,10 @@
   "imagePackInvalid": "Este archivo no es un paquete de imágenes válido.",
   "imagePackForeign": "Este paquete no coincide con el catálogo de ejercicios de esta app.",
   "imagePackTooLarge": "Este archivo es demasiado grande.",
-  "reportIssue": "Informar de un error"
+  "reportIssue": "Informar de un error",
+  "notificationsNoRoutine": "Ninguna rutina activa — activa una y sus días aparecerán aquí.",
+  "notificationsNoTrainingDays": "Esta rutina aún no tiene días de entrenamiento.",
+  "notificationsCustomTime": "hora propia",
+  "imagePackNoReleaseYet": "Todavía no se ha publicado ningún pack de imágenes, así que esa página está vacía.",
+  "imagePackInstallHint": "Elige el .zip descargado. Se comprueba antes de escribir nada."
 }

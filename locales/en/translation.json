@@ -512,5 +512,10 @@
   "imagePackInstallError": "The images could not be stored on this device.",
   "imagePackInvalid": "This file is not a valid image pack.",
   "imagePackForeign": "This pack does not match this app's exercise catalog.",
-  "imagePackTooLarge": "This file is too large."
+  "imagePackTooLarge": "This file is too large.",
+  "notificationsNoRoutine": "No active routine — activate one and its training days appear here.",
+  "notificationsNoTrainingDays": "This routine has no training days yet.",
+  "notificationsCustomTime": "own time",
+  "imagePackNoReleaseYet": "No image pack has been published yet, so this page is still empty.",
+  "imagePackInstallHint": "Pick the downloaded .zip. It is checked before anything is written."
 }

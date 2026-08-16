@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Alert, Linking, Platform, StyleSheet, Text, View } from 'react-native';
 import DateTimePicker, {
   type DateTimePickerEvent,
 } from '@react-native-community/datetimepicker';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTranslation } from 'react-i18next';
+import { useFocusEffect } from '@react-navigation/native';
 import { useSQLiteContext } from 'expo-sqlite';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -18,14 +19,28 @@ import { Section } from '../components/Section';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { Switch } from '../components/Switch';
 import { fontSize, spacing, tabBar } from '../utils/scale';
-import { useNotifications } from '../utils/useNotifications';
+import {
+  applyTrainingDayReminders,
+  cancelAllReminders,
+  requestNotificationPermissions,
+} from '../utils/notificationUtils';
+import {
+  WEEKDAY_LABEL_KEYS,
+  loadActiveRoutineTrainingDays,
+  notificationSchedule,
+  pruneDayTimes,
+  setDayTime,
+  type ActiveRoutineDays,
+} from '../utils/notificationSchedule';
 import { replaceDatabaseFile } from '../utils/databaseImport';
 import { DatabaseImportValidationError } from '../utils/databaseSchema';
 import { loadDemoData, removeDemoData, type DemoDatabase } from '../utils/demoData';
 import type { BarProfileKey } from '../utils/barProfiles';
 import {
   ImagePackValidationError,
+  IMAGE_PACK_RELEASE_PUBLISHED,
   IMAGE_PACK_RELEASE_URL,
+  imagePackFlowCopy,
   installImagePackFromUri,
 } from '../utils/imagePackInstaller';
 import {
@@ -82,19 +97,23 @@ export default function Settings() {
     setNotificationPermissionGranted,
     notificationTime,
     setNotificationTime,
+    notificationDayTimes,
+    setNotificationDayTimes,
   } = useSettings();
   const { theme, tokens, toggleTheme } = useTheme();
   const { t } = useTranslation();
   const db = useSQLiteContext();
-  const {
-    requestNotificationPermission,
-    cancelAllNotifications,
-    scheduleDailyReminder,
-  } = useNotifications();
 
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  /**
+   * Which time row the picker is editing: the global default, or one weekday.
+   * One picker serves both, because they set the same kind of value and a
+   * second picker would be a second idiom for one decision.
+   */
+  const [editingTime, setEditingTime] = useState<'default' | number | null>(null);
+  const [routineDays, setRoutineDays] = useState<ActiveRoutineDays | null>(null);
 
   const unit = routineUnitFor(weightFormat);
+  const imagePackCopy = imagePackFlowCopy(IMAGE_PACK_RELEASE_PUBLISHED);
 
   // The one place an option descriptor becomes words. Everything about WHICH options exist and
   // what they are called lives in utils/settingsOptions.ts; this screen only translates.
@@ -113,6 +132,18 @@ export default function Settings() {
         sql,
         (params ?? []) as never[],
       )) ?? undefined,
+  };
+
+  const routineDb = {
+    run: (sql: string, params?: readonly unknown[]) =>
+      db.runAsync(sql, (params ?? []) as never[]),
+    get: async (sql: string, params?: readonly unknown[]) =>
+      (await db.getFirstAsync<Record<string, unknown>>(
+        sql,
+        (params ?? []) as never[],
+      )) ?? undefined,
+    getAll: async (sql: string, params?: readonly unknown[]) =>
+      db.getAllAsync<Record<string, unknown>>(sql, (params ?? []) as never[]),
   };
 
   const handleLoadDemoData = async () => {
@@ -148,46 +179,155 @@ export default function Settings() {
     );
   };
 
+  /**
+   * The active routine owns the reminder list (§3.8), so it is re-read on every
+   * focus: activating a routine on the Rutinas tab must change what this screen
+   * offers to remind the user about, without a restart.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      loadActiveRoutineTrainingDays(routineDb)
+        .then((loaded) => {
+          if (!cancelled) {
+            setRoutineDays(loaded);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setRoutineDays(null);
+          }
+        });
+      return () => {
+        cancelled = true;
+      };
+      // routineDb is rebuilt each render from the one stable SQLite context.
+    }, [db]),
+  );
+
+  const schedule = notificationSchedule({
+    enabled: notificationPermissionGranted,
+    defaultTime: notificationTime,
+    dayTimes: notificationDayTimes,
+    trainingDays: routineDays?.days ?? [],
+    weekStartsOn: firstWeekday === 'Sunday' ? 0 : 1,
+  });
+
+  /**
+   * One writer for the OS schedule. Every change — the toggle, the default
+   * time, a per-day time, a routine that now trains different days — ends here,
+   * so the device can never hold a reminder the screen does not show.
+   */
+  const applySchedule = async (reminders: typeof schedule.reminders) => {
+    try {
+      await applyTrainingDayReminders(reminders);
+    } catch (error) {
+      console.error('Error applying reminders:', error);
+    }
+  };
+
   const handleNotificationToggle = async (value: boolean) => {
     if (value) {
-      const granted = await requestNotificationPermission();
+      const granted = await requestNotificationPermissions();
       setNotificationPermissionGranted(granted);
       if (granted) {
-        await scheduleDailyReminder(notificationTime);
+        await applySchedule(schedule.days);
       }
-    } else {
-      Alert.alert(
-        t('notificationsDisableTitle'),
-        t('notificationsDisableMessage'),
-        [
-          { text: t('Cancel'), style: 'cancel' },
-          {
-            text: t('confirm'),
-            onPress: async () => {
-              await cancelAllNotifications();
-              setNotificationPermissionGranted(false);
-            },
+      return;
+    }
+    Alert.alert(
+      t('notificationsDisableTitle'),
+      t('notificationsDisableMessage'),
+      [
+        { text: t('Cancel'), style: 'cancel' },
+        {
+          text: t('confirm'),
+          onPress: async () => {
+            await cancelAllReminders();
+            setNotificationPermissionGranted(false);
           },
-        ],
-        { cancelable: true },
+        },
+      ],
+      { cancelable: true },
+    );
+  };
+
+  const handleTimeChange = (
+    event: DateTimePickerEvent,
+    selectedTime?: Date,
+  ) => {
+    const target = editingTime;
+    setEditingTime(Platform.OS === 'ios' ? target : null);
+    if (!selectedTime || target === null) {
+      return;
+    }
+    const time = `${String(selectedTime.getHours()).padStart(2, '0')}:${String(
+      selectedTime.getMinutes(),
+    ).padStart(2, '0')}`;
+
+    if (target === 'default') {
+      setNotificationTime(time);
+      if (notificationPermissionGranted) {
+        void applySchedule(
+          notificationSchedule({
+            enabled: true,
+            defaultTime: time,
+            dayTimes: notificationDayTimes,
+            trainingDays: routineDays?.days ?? [],
+            weekStartsOn: firstWeekday === 'Sunday' ? 0 : 1,
+          }).reminders,
+        );
+      }
+      return;
+    }
+
+    // A day that agrees with the default stores no override, so moving the
+    // default later still moves every day that never disagreed with it.
+    const nextDayTimes = setDayTime(
+      notificationDayTimes,
+      target,
+      time,
+      notificationTime,
+    );
+    setNotificationDayTimes(nextDayTimes);
+    if (notificationPermissionGranted) {
+      void applySchedule(
+        notificationSchedule({
+          enabled: true,
+          defaultTime: notificationTime,
+          dayTimes: nextDayTimes,
+          trainingDays: routineDays?.days ?? [],
+          weekStartsOn: firstWeekday === 'Sunday' ? 0 : 1,
+        }).reminders,
       );
     }
   };
 
-  const handleNotificationTimeChange = (
-    event: DateTimePickerEvent,
-    selectedTime?: Date,
-  ) => {
-    setShowTimePicker(Platform.OS === 'ios');
-    if (selectedTime) {
-      const time = `${String(selectedTime.getHours()).padStart(2, '0')}:${String(
-        selectedTime.getMinutes(),
-      ).padStart(2, '0')}`;
-      setNotificationTime(time);
-      if (notificationPermissionGranted) {
-        void cancelAllNotifications().then(() => scheduleDailyReminder(time));
-      }
+  /**
+   * A routine the user edited or replaced can leave overrides behind for days
+   * it no longer trains. Dropping them here keeps the stored map equal to what
+   * the screen lists — "changing routine updates the list", in storage.
+   */
+  useEffect(() => {
+    if (routineDays === null) {
+      return;
     }
+    const pruned = pruneDayTimes(notificationDayTimes, routineDays.days);
+    if (pruned !== notificationDayTimes) {
+      setNotificationDayTimes(pruned);
+    }
+  }, [routineDays]);
+
+  const timePickerValue = (): Date => {
+    const source =
+      editingTime === null || editingTime === 'default'
+        ? notificationTime
+        : (schedule.days.find((day) => day.weekday === editingTime)?.time ??
+          notificationTime);
+    const [hours, minutes] = source.split(':').map(Number);
+    const date = new Date();
+    date.setHours(hours ?? 0, minutes ?? 0, 0, 0);
+    return date;
   };
 
   const exportDatabase = async () => {
@@ -460,26 +600,48 @@ export default function Settings() {
           divided={notificationPermissionGranted}
         />
         {notificationPermissionGranted && (
-          <Row
-            label={t('notificationTime')}
-            detail={formatTimeOfDay(notificationTime, timeFormat)}
-            right={chevron}
-            onPress={() => setShowTimePicker(true)}
-            testID="settings-notification-time"
-          />
+          <>
+            <Row
+              label={t('notificationTime')}
+              detail={formatTimeOfDay(notificationTime, timeFormat)}
+              right={chevron}
+              onPress={() => setEditingTime('default')}
+              divided={schedule.days.length > 0}
+              testID="settings-notification-time"
+            />
+            {/*
+              The active routine's own training days, each able to disagree with
+              the default. A routine that trains nothing, or no routine at all,
+              says so in one line instead of leaving a reminder with no owner.
+            */}
+            {routineDays === null ? (
+              <Row label={t('notificationsNoRoutine')} />
+            ) : schedule.days.length === 0 ? (
+              <Row label={t('notificationsNoTrainingDays')} />
+            ) : (
+              schedule.days.map((day, index) => (
+                <Row
+                  key={day.weekday}
+                  label={t(WEEKDAY_LABEL_KEYS[day.weekday] ?? 'weekdayFullMon')}
+                  detail={`${day.sessionName} · ${formatTimeOfDay(day.time, timeFormat)}${
+                    day.custom ? ` · ${t('notificationsCustomTime')}` : ''
+                  }`}
+                  right={chevron}
+                  onPress={() => setEditingTime(day.weekday)}
+                  divided={index < schedule.days.length - 1}
+                  testID={`settings-notification-day-${day.weekday}`}
+                />
+              ))
+            )}
+          </>
         )}
-        {showTimePicker && (
+        {editingTime !== null && (
           <DateTimePicker
-            value={(() => {
-              const [hours, minutes] = notificationTime.split(':').map(Number);
-              const date = new Date();
-              date.setHours(hours, minutes, 0, 0);
-              return date;
-            })()}
+            value={timePickerValue()}
             mode="time"
             is24Hour={timeFormat === '24h'}
             display="default"
-            onChange={handleNotificationTimeChange}
+            onChange={handleTimeChange}
           />
         )}
       </Section>
@@ -515,7 +677,7 @@ export default function Settings() {
         />
         <Row
           label={t('downloadImagePack')}
-          detail={t('imagePackDownloadHint')}
+          detail={t(imagePackCopy.downloadHintKey)}
           detailBelow
           right={chevron}
           onPress={downloadImagePack}
@@ -524,6 +686,8 @@ export default function Settings() {
         />
         <Row
           label={t('installImagePack')}
+          detail={t(imagePackCopy.installHintKey)}
+          detailBelow
           right={chevron}
           onPress={installImagePack}
           testID="settings-install-image-pack"

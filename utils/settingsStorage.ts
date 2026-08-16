@@ -15,6 +15,8 @@ export interface StoredSettings {
   firstWeekday?: string;
   notificationPermissionGranted?: boolean;
   notificationTime?: string;
+  /** Weekday (0 = Sunday) → `HH:MM`, for the days that disagree with the default (S3). */
+  notificationDayTimes?: Record<string, string>;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

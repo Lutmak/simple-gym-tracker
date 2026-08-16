@@ -3,7 +3,10 @@ import { strToU8, zipSync } from 'fflate';
 import {
   ImagePackValidationError,
   IMAGE_PACK_INSTALL_DIR,
+  IMAGE_PACK_RELEASE_PUBLISHED,
+  IMAGE_PACK_RELEASE_URL,
   MAX_IMAGE_PACK_BYTES,
+  imagePackFlowCopy,
   installImagePackFromUri,
   validateImagePackArchive,
 } from './imagePackInstaller';
@@ -284,8 +287,13 @@ describe('installImagePackFromUri', () => {
         return Promise.resolve();
       },
     );
+    // Deleting a directory takes its contents with it, as the real API does.
     mockedFileSystem.deleteAsync.mockImplementation((path: string) => {
-      filesystemMock.paths.delete(path);
+      for (const stored of [...filesystemMock.paths.keys()]) {
+        if (stored === path || stored.startsWith(`${path}/`)) {
+          filesystemMock.paths.delete(stored);
+        }
+      }
       return Promise.resolve();
     });
   });
@@ -354,5 +362,82 @@ describe('installImagePackFromUri', () => {
       (path) => path.includes('image-pack-installing-') || path.includes('image-pack.backup-'),
     );
     expect(leftovers).toEqual([]);
+  });
+
+  it('keeps the installed pack when the second image fails to write', async () => {
+    filesystemMock.write(installDirectory, 'directory');
+    filesystemMock.write(`${installDirectory}/Barbell_Full_Squat.jpg`, 'file');
+    let written = 0;
+    mockedFileSystem.writeAsStringAsync.mockImplementation((path: string) => {
+      written += 1;
+      if (written > 1) {
+        return Promise.reject(new Error('no space left on device'));
+      }
+      return Promise.resolve(filesystemMock.write(path, 'file'));
+    });
+
+    await expect(
+      installImagePackFromUri('file:///picked/pack.zip', KNOWN_KEYS),
+    ).rejects.toThrow('no space left on device');
+
+    // The live pack was never touched: the failure happened while staging.
+    expect(filesystemMock.paths.get(`${installDirectory}/Barbell_Full_Squat.jpg`)).toBe(
+      'file',
+    );
+    const leftovers = [...filesystemMock.paths.keys()].filter(
+      (path) => path.includes('image-pack-installing-') || path.includes('image-pack.backup-'),
+    );
+    expect(leftovers).toEqual([]);
+  });
+
+  it('writes nothing when the picked file cannot be read', async () => {
+    mockedFileSystem.readAsStringAsync.mockRejectedValue(
+      new Error('Permission denied: file:///picked/pack.zip'),
+    );
+
+    await expect(
+      installImagePackFromUri('file:///picked/pack.zip', KNOWN_KEYS),
+    ).rejects.toThrow('Permission denied');
+    expect(mockedFileSystem.makeDirectoryAsync).not.toHaveBeenCalled();
+    expect(mockedFileSystem.writeAsStringAsync).not.toHaveBeenCalled();
+    expect(filesystemMock.paths.size).toBe(0);
+  });
+
+  it('says so when a failed swap cannot be rolled back', async () => {
+    filesystemMock.write(installDirectory, 'directory');
+    mockedFileSystem.moveAsync.mockImplementation(
+      ({ from, to }: { from: string; to: string }) => {
+        if (from === installDirectory) {
+          filesystemMock.paths.delete(from);
+          filesystemMock.write(to, 'directory');
+          return Promise.resolve();
+        }
+        return Promise.reject(new Error('storage went away'));
+      },
+    );
+
+    await expect(
+      installImagePackFromUri('file:///picked/pack.zip', KNOWN_KEYS),
+    ).rejects.toThrow('the previous pack could not be restored');
+  });
+});
+
+describe('imagePackFlowCopy', () => {
+  it('states the real flow once a release exists', () => {
+    expect(imagePackFlowCopy(true)).toEqual({
+      downloadHintKey: 'imagePackDownloadHint',
+      installHintKey: 'imagePackInstallHint',
+    });
+  });
+
+  it('admits the release page is empty until one is published', () => {
+    expect(imagePackFlowCopy(false).downloadHintKey).toBe('imagePackNoReleaseYet');
+  });
+
+  it('ships with no release published', () => {
+    expect(IMAGE_PACK_RELEASE_PUBLISHED).toBe(false);
+    expect(IMAGE_PACK_RELEASE_URL).toBe(
+      'https://github.com/Lutmak/simple-gym-tracker/releases',
+    );
   });
 });

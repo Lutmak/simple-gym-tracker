@@ -9,6 +9,12 @@ import i18n, { SUPPORTED_LOCALES } from '../utils/i18n';
 import * as Localization from 'expo-localization';
 import { requestNotificationPermissions } from '../utils/notificationUtils';
 import {
+  DEFAULT_NOTIFICATION_TIME,
+  isTimeOfDay,
+  resolveDayTimes,
+  type DayTimes,
+} from '../utils/notificationSchedule';
+import {
   resolveBarProfile,
   resolveRoundingIncrement,
   roundingIncrementOnUnitChange,
@@ -64,11 +70,6 @@ const getDeviceFirstWeekday = (): FirstWeekday => {
   return 'Monday';
 };
 
-const DEFAULT_NOTIFICATION_TIME = '08:00';
-
-const isTimeOfDay = (value: unknown): value is string =>
-  typeof value === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
-
 // 1) Create the type for your context values:
 type SettingsContextType = {
   language: string;
@@ -92,6 +93,14 @@ type SettingsContextType = {
   setNotificationPermissionGranted: (granted: boolean) => void;
   notificationTime: string;
   setNotificationTime: (time: string) => void;
+  /**
+   * Per-weekday reminder overrides (S3), keyed on the weekday rather than on a
+   * session: "I train Monday mornings" survives editing a routine or activating
+   * a different one, where a `session_id` would not. A weekday absent from the
+   * map simply follows `notificationTime`.
+   */
+  notificationDayTimes: DayTimes;
+  setNotificationDayTimes: (dayTimes: DayTimes) => void;
   requestNotificationPermission: () => Promise<boolean>;
 };
 
@@ -118,6 +127,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     useState(false);
   const [notificationTime, setNotificationTime] = useState(
     DEFAULT_NOTIFICATION_TIME,
+  );
+  const [notificationDayTimes, setNotificationDayTimes] = useState<DayTimes>(
+    resolveDayTimes(undefined),
   );
 
   // Changing the default unit carries the default increment with it: 2.5 kg and 5 lb are the
@@ -199,6 +211,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
             ? savedSettings.notificationTime
             : DEFAULT_NOTIFICATION_TIME,
         );
+        setNotificationDayTimes(resolveDayTimes(savedSettings.notificationDayTimes));
       } else {
         const deviceLocale =
           Localization.getLocales()[0]?.languageCode || 'en';
@@ -241,6 +254,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         firstWeekday,
         notificationPermissionGranted,
         notificationTime,
+        notificationDayTimes,
       });
     };
     persistSettings();
@@ -254,6 +268,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     firstWeekday,
     notificationPermissionGranted,
     notificationTime,
+    notificationDayTimes,
     isInitialized,
   ]);
 
@@ -278,6 +293,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         setNotificationPermissionGranted,
         notificationTime,
         setNotificationTime,
+        notificationDayTimes,
+        setNotificationDayTimes,
         requestNotificationPermission,
       }}
     >

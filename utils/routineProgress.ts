@@ -21,6 +21,7 @@ import type {
   RoutineLoadSource,
   RoutineUnit,
 } from './routineActions';
+import { groupByUnit } from './chart';
 import { nominalSessionStamp, targetWeightFor } from './today';
 
 export type WeekSessionStatus = 'pending' | 'completed' | 'moved' | 'discarded';
@@ -80,11 +81,19 @@ export interface MainLiftPoint {
   reps: number;
 }
 
-export interface MainLiftSeries {
-  exerciseName: string;
-  /** The series label unit: the last log row's unit, falling back to the plan. */
+export interface LiftUnitSeries {
+  /** The unit every point of this series is in — never mixed within one series (§3.7). */
   unit: RoutineUnit;
   points: MainLiftPoint[];
+}
+
+export interface MainLiftSeries {
+  exerciseName: string;
+  /**
+   * One chartable series per logged unit, most recently logged first, and never empty: an
+   * exercise with nothing logged still carries its plan's unit so the chart can say so.
+   */
+  series: LiftUnitSeries[];
 }
 
 export interface PlannedExercise {
@@ -490,9 +499,15 @@ export async function loadMainLiftSeries(
         reps: num(row.reps_logged),
         unit: str(row.unit) as RoutineUnit,
       }));
-    const points = buildLiftSeries(rows);
-    const unit = rows.length > 0 ? rows[rows.length - 1].unit : planUnit;
-    return { exerciseName: name, unit, points };
+    const groups = groupByUnit(rows);
+    const series: LiftUnitSeries[] =
+      groups.length === 0
+        ? [{ unit: planUnit, points: [] }]
+        : groups.map((group) => ({
+            unit: group.unit,
+            points: buildLiftSeries(group.rows),
+          }));
+    return { exerciseName: name, series };
   });
 }
 

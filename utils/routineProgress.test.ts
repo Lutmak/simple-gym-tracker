@@ -353,14 +353,17 @@ describe('demo data through the db edges', () => {
       'Barbell Deadlift',
       'Barbell Shoulder Press',
     ]);
-    expect(series.every((entry) => entry.unit === 'kg')).toBe(true);
+    // Every main lift was logged in one unit, so each is exactly one series — P3's rule that a
+    // series never spans a unit change.
+    expect(series.every((entry) => entry.series.length === 1)).toBe(true);
+    expect(series.every((entry) => entry.series[0].unit === 'kg')).toBe(true);
 
     // One point per logged session: 24 weeks per lift, minus the discarded
     // bench day and the unresolved press day.
-    expect(series.map((entry) => entry.points.length)).toEqual([24, 23, 24, 23]);
-    expect(series.every((entry) => hasChartableSeries(entry.points))).toBe(true);
+    expect(series.map((entry) => entry.series[0].points.length)).toEqual([24, 23, 24, 23]);
+    expect(series.every((entry) => hasChartableSeries(entry.series[0].points))).toBe(true);
 
-    const squat = series[0];
+    const squat = series[0].series[0];
     expect(squat?.points[0]).toMatchObject({
       date: epoch('2026-03-02'),
       weight: 85,

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, BackHandler, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -8,7 +8,9 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
 import AppTextInput from '../components/AppTextInput';
+import { ChartRangeControl } from '../components/ChartRangeControl';
 import { EmptyState } from '../components/EmptyState';
+import { ExerciseHistoryView } from '../components/ExerciseHistoryView';
 import { ExerciseSheet } from '../components/ExerciseSheet';
 import { ProgressCalendar } from '../components/ProgressCalendar';
 import { ProgressChart } from '../components/ProgressChart';
@@ -48,17 +50,17 @@ import {
   type RoutineProgressData,
 } from '../utils/routineProgress';
 import {
-  filterExerciseSummaries,
-  loadExerciseSeries,
+  historyShortfall,
   loadExercisesWithHistory,
-  type ExerciseSeries,
+  rankExerciseHistory,
   type ExerciseSummary,
 } from '../utils/exerciseHistory';
+import { windowByRange, type ChartRange } from '../utils/chart';
 import type { RoutineDatabase } from '../utils/routineActions';
 import type { RootTabParamList } from '../App';
 
 /**
- * Progreso — one screen about the routine you are training (SPECS.md P1, P2).
+ * Progreso — one screen about the routine you are training (SPECS.md P1–P4).
  *
  * The two recorded defects were *"dos botones gigantes hasta arriba… tengo que mover la mano
  * incomodísimo"* and *"Ciclo 1, ciclo completado, un 1, un 3 de 3 — ¿qué estoy viendo? Estoy
@@ -76,9 +78,19 @@ import type { RootTabParamList } from '../App';
  * - **The calendar is first-class**, above the cycle history rather than at the bottom of a scroll,
  *   and every marked day opens its session through the same `Sheet` a week opens through.
  *
- * The screen holds no rules: cycles, adherence, day states and the streak all come from
- * `utils/routineProgress.ts`, `utils/progressCalendar.ts` and `utils/inicio.ts`, which are tested
- * without a device.
+ * P3 and P4 added the two things it was still missing:
+ *
+ * - **A range every chart is read through** — 1 semana · 1 mes · 6 meses · todo — chosen once and
+ *   kept across both views. The axis rescales and thins its own labels (`utils/chart.ts`), and no
+ *   chart ever draws two units on one axis.
+ * - **The exercise history is a place.** It replaces this view rather than growing under it, and
+ *   it is reached from a searchable list here, from R2's exercise sheet, and from any exercise row
+ *   in the app through the tab's `exercise` parameter — one destination, several doors.
+ *
+ * The screen holds no rules: cycles, adherence, day states, the streak, range windowing, axis
+ * thinning and the "not enough data yet" test all come from `utils/routineProgress.ts`,
+ * `utils/progressCalendar.ts`, `utils/inicio.ts`, `utils/chart.ts` and `utils/exerciseHistory.ts`,
+ * which are tested without a device.
  */
 
 const MONTH_KEYS = [
@@ -124,7 +136,7 @@ type Props = BottomTabScreenProps<RootTabParamList, 'Progress'>;
 export default function ProgressScreen({ navigation, route }: Props) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
-  const { dateFormat, firstWeekday } = useSettings();
+  const { firstWeekday } = useSettings();
   const db = useSQLiteContext();
 
   const requestedFocus: ProgressFocus | undefined = route.params?.focus;
@@ -144,7 +156,8 @@ export default function ProgressScreen({ navigation, route }: Props) {
   const [summaries, setSummaries] = useState<ExerciseSummary[]>([]);
   const [query, setQuery] = useState('');
   const [chartedExercise, setChartedExercise] = useState<string | null>(null);
-  const [exerciseSeries, setExerciseSeries] = useState<ExerciseSeries | null>(null);
+  /** P3: one range for every chart on this tab, kept across the two views. */
+  const [range, setRange] = useState<ChartRange>('sixMonths');
   /** R2: the exercise whose shared sheet is open. */
   const [information, setInformation] = useState<string | null>(null);
   const [detailTarget, setDetailTarget] = useState<SessionDetailTarget | null>(null);
@@ -279,28 +292,20 @@ export default function ProgressScreen({ navigation, route }: Props) {
     ]),
   );
 
-  React.useEffect(() => {
-    if (chartedExercise === null) {
-      setExerciseSeries(null);
-      return;
-    }
-    let cancelled = false;
-    loadExerciseSeries(routineDb, chartedExercise)
-      .then((loadedSeries) => {
-        if (!cancelled) {
-          setExerciseSeries(loadedSeries);
-        }
-      })
-      .catch((error: unknown) => {
-        console.error('Error loading the exercise history:', error);
-        if (!cancelled) {
-          setExerciseSeries(null);
-        }
+  // The exercise history is a place, not a section: Android's back gesture must leave it the way
+  // the on-screen back does, or the tab becomes a dead end (§7.2).
+  useFocusEffect(
+    useCallback(() => {
+      if (chartedExercise === null) {
+        return;
+      }
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        setChartedExercise(null);
+        return true;
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [db, chartedExercise, revision]);
+      return () => subscription.remove();
+    }, [chartedExercise]),
+  );
 
   const formatDate = (stamp: number): string => {
     const parts = datePartsOfStamp(stamp);
@@ -310,13 +315,6 @@ export default function ProgressScreen({ navigation, route }: Props) {
       month: t(MONTH_KEYS[parts.month]),
       year: parts.year,
     });
-  };
-
-  const shortDate = (stamp: number): string => {
-    const date = new Date(stamp * 1000);
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    return dateFormat === 'mm-dd-yyyy' ? `${month}/${day}` : `${day}/${month}`;
   };
 
   const calendarBounds = useMemo(() => {
@@ -335,7 +333,7 @@ export default function ProgressScreen({ navigation, route }: Props) {
   }, [calendarDays, todayStamp]);
 
   const searchResults = useMemo(
-    () => filterExerciseSummaries(summaries, query).slice(0, MAX_SEARCH_RESULTS),
+    () => rankExerciseHistory(summaries, query, MAX_SEARCH_RESULTS),
     [summaries, query],
   );
 
@@ -453,7 +451,12 @@ export default function ProgressScreen({ navigation, route }: Props) {
     );
   };
 
-  const renderSearch = () => (
+  /**
+   * P4's index: a searchable list, never a carousel. With the field empty it is the most recently
+   * logged exercises, so picking the one trained yesterday costs no typing at all; an exercise
+   * that cannot be charted yet is greyed and says why, instead of opening into three empty charts.
+   */
+  const renderExerciseIndex = () => (
     <Section
       title={t('progressFindExercise')}
       hint={t('progressFindExerciseHint')}
@@ -466,93 +469,49 @@ export default function ProgressScreen({ navigation, route }: Props) {
         placeholder={t('progressSearchPlaceholder')}
         testID="progress-search-field"
       />
-      {searchResults.map((entry) => (
-        <Row
-          key={entry.name}
-          label={entry.name}
-          detail={t('progressLastLogged', { date: formatDate(entry.lastDate) })}
-          detailBelow
-          right={
-            <Ionicons
-              name="information-circle-outline"
-              size={tabBar.icon}
-              color={tokens.textSecondary}
-            />
-          }
-          onPress={() => openExerciseSheet(entry.name)}
-          divided
-        />
-      ))}
+      {searchResults.map((entry) => {
+        const shortfall = historyShortfall(entry.sessions);
+        return (
+          <Row
+            key={entry.name}
+            label={entry.name}
+            detail={
+              shortfall === null
+                ? t('progressExerciseSessionsLine', {
+                    count: entry.sessions,
+                    date: formatDate(entry.lastDate),
+                  })
+                : t('progressSinglePoint')
+            }
+            detailBelow
+            right={
+              shortfall === null ? (
+                <Ionicons
+                  name="chevron-forward"
+                  size={tabBar.icon}
+                  color={tokens.textSecondary}
+                />
+              ) : undefined
+            }
+            onPress={() => setChartedExercise(entry.name)}
+            disabled={shortfall !== null}
+            divided
+            testID={`progress-exercise-${entry.name}`}
+          />
+        );
+      })}
       {query.trim() !== '' && searchResults.length === 0 && (
         <Text style={[styles.helper, { color: tokens.textSecondary }]}>
           {t('progressSearchNoMatch')}
         </Text>
       )}
+      {query.trim() === '' && summaries.length > MAX_SEARCH_RESULTS && (
+        <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+          {t('progressSearchMore', { count: summaries.length - MAX_SEARCH_RESULTS })}
+        </Text>
+      )}
     </Section>
   );
-
-  const renderChartedExercise = () => {
-    if (chartedExercise === null) {
-      return null;
-    }
-    const loadedSeries =
-      exerciseSeries !== null && exerciseSeries.exerciseName === chartedExercise
-        ? exerciseSeries
-        : null;
-    const note = loadedSeries?.mixedUnits === true ? t('progressHistoryMixedUnits') : undefined;
-    return (
-      <Section
-        title={t('progressExerciseHistoryOf', { name: chartedExercise })}
-        testID="progress-exercise-history"
-      >
-        {loadedSeries === null ? (
-          <ActivityIndicator color={tokens.accent} />
-        ) : (
-          <>
-            <ProgressChart
-              title={t('progressLoadOverTime')}
-              points={loadedSeries.points.map((point) => ({
-                date: point.date,
-                value: point.weight,
-              }))}
-              unit={loadedSeries.unit}
-              formatDate={shortDate}
-              emptyLabel={t('progressNoData')}
-              singlePointLabel={t('progressSinglePoint')}
-              note={note}
-            />
-            <ProgressChart
-              title={t('progressEstimated1rm')}
-              points={loadedSeries.points.map((point) => ({
-                date: point.date,
-                value: point.estimated1RM,
-              }))}
-              unit={loadedSeries.unit}
-              formatDate={shortDate}
-              emptyLabel={t('progressNoData')}
-              singlePointLabel={t('progressSinglePoint')}
-            />
-            <ProgressChart
-              title={t('progressVolume')}
-              points={loadedSeries.points.map((point) => ({
-                date: point.date,
-                value: point.volume,
-              }))}
-              unit={loadedSeries.unit}
-              formatDate={shortDate}
-              emptyLabel={t('progressNoData')}
-              singlePointLabel={t('progressSinglePoint')}
-            />
-          </>
-        )}
-        <Row
-          label={t('progressCloseExercise')}
-          onPress={() => setChartedExercise(null)}
-          testID="progress-close-exercise"
-        />
-      </Section>
-    );
-  };
 
   const renderCalendar = () => (
     <Section
@@ -607,23 +566,48 @@ export default function ProgressScreen({ navigation, route }: Props) {
     ));
   };
 
+  /**
+   * The routine's main lifts, one chart per lift and one more per unit that lift was ever logged
+   * in (P3 — a series never spans a unit change). The range control belongs to the section, not to
+   * each chart: the question is "over what period", asked once.
+   */
   const renderMainLifts = () => {
     if (series.length === 0) {
       return null;
     }
     return (
       <Section title={t('progressMainLifts')} testID="progress-main-lifts">
-        {series.map((entry) => (
-          <ProgressChart
-            key={entry.exerciseName}
-            title={entry.exerciseName}
-            points={entry.points.map((point) => ({ date: point.date, value: point.weight }))}
-            unit={entry.unit}
-            formatDate={shortDate}
-            emptyLabel={t('progressNoData')}
-            singlePointLabel={t('progressSinglePoint')}
-          />
-        ))}
+        <ChartRangeControl
+          value={range}
+          onChange={setRange}
+          testID="progress-main-lifts-range"
+        />
+        {series.map((entry) =>
+          entry.series.map((unitSeries) => (
+            <ProgressChart
+              key={`${entry.exerciseName}-${unitSeries.unit}`}
+              title={
+                entry.series.length > 1
+                  ? t('progressChartInUnit', {
+                      title: entry.exerciseName,
+                      unit: unitSeries.unit,
+                    })
+                  : entry.exerciseName
+              }
+              points={windowByRange(unitSeries.points, range, todayStamp).map((point) => ({
+                date: point.date,
+                value: point.weight,
+              }))}
+              unit={unitSeries.unit}
+              range={range}
+              emptyLabel={range === 'all' ? t('progressNoData') : t('progressNoDataInRange')}
+              singlePointLabel={
+                range === 'all' ? t('progressSinglePoint') : t('progressSinglePointInRange')
+              }
+              testID={`progress-main-lift-${entry.exerciseName}-${unitSeries.unit}`}
+            />
+          )),
+        )}
       </Section>
     );
   };
@@ -666,22 +650,51 @@ export default function ProgressScreen({ navigation, route }: Props) {
     );
   }
 
+  // P4: the exercise history is a destination, not a section — it replaces the routine view
+  // rather than growing under it, which is what "one search and one tap from anywhere" means.
+  if (chartedExercise !== null) {
+    return (
+      <>
+        <Screen scroll testID="progress-screen">
+          <ExerciseHistoryView
+            exerciseName={chartedExercise}
+            range={range}
+            onChangeRange={setRange}
+            onBack={() => setChartedExercise(null)}
+            onOpenSheet={openExerciseSheet}
+            todayStamp={todayStamp}
+            formatDate={formatDate}
+            revision={revision}
+          />
+        </Screen>
+
+        <ExerciseSheet
+          exercise={information === null ? null : { name: information }}
+          onClose={() => setInformation(null)}
+        />
+      </>
+    );
+  }
+
   return (
     <>
       <Screen scroll testID="progress-screen">
         {routines.length === 0 ? (
-          <EmptyState
-            title={t('progressNoRoutinesTitle')}
-            message={t('progressNoRoutines')}
-            actionLabel={t('goToRoutines')}
-            onAction={() => navigation.navigate('Routines')}
-            testID="progress-no-routines"
-          />
+          <>
+            <EmptyState
+              title={t('progressNoRoutinesTitle')}
+              message={t('progressNoRoutines')}
+              actionLabel={t('goToRoutines')}
+              onAction={() => navigation.navigate('Routines')}
+              testID="progress-no-routines"
+            />
+            {/* Free sessions are history too: with no routine yet, this is still their door. */}
+            {summaries.length > 0 && renderExerciseIndex()}
+          </>
         ) : (
           <>
             <Section testID="progress-header">{renderAnswer()}</Section>
-            {renderSearch()}
-            {renderChartedExercise()}
+            {renderExerciseIndex()}
             {renderCalendar()}
             {renderCycles()}
             {renderMainLifts()}

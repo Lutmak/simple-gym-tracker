@@ -305,9 +305,10 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
       const exercise = buildFreeRunnerExercise(
         nextTransientExerciseId.current,
         selection.name,
-        // A planned session logs one unit (§3.7); only a free session can take
-        // the app's current one.
-        mode === 'planned' ? session.unit : defaultUnit,
+        // One session logs one unit (§3.7), free or planned. The session's unit
+        // is fixed at load, so reading the app's current one here would mix
+        // units inside a single log whenever Settings is touched mid-session.
+        session.unit,
         barProfile,
       );
       nextTransientExerciseId.current -= 1;

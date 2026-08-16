@@ -19,6 +19,7 @@ import { Button } from '../components/Button';
 import AppTextInput from '../components/AppTextInput';
 import { Field } from '../components/Field';
 import { NumberStepper } from '../components/NumberStepper';
+import { PlatePicker } from '../components/PlatePicker';
 import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { Section } from '../components/Section';
@@ -30,7 +31,9 @@ import {
   BAR_PROFILES,
   STANDARD_PLATES,
   barWeightFor,
+  canSaveBarProfile,
   composeLoad,
+  formatWeight,
   suggestPlates,
   type BarProfileKey,
 } from '../utils/barProfiles';
@@ -66,8 +69,6 @@ interface EditingSet {
   exerciseIndex: number;
   setIndex: number;
 }
-
-const formatWeight = (value: number): string => String(Number(value.toFixed(1)));
 
 const pressStyle = (pressed: boolean) => (pressed ? styles.pressed : null);
 
@@ -767,6 +768,9 @@ function RunnerSetEditor({
           barProfile === 'custom' ? customBarWeight : null,
           unit,
         );
+  const canSaveComposer =
+    barProfile !== null &&
+    canSaveBarProfile(barProfile, barProfile === 'custom' ? customBarWeight : null);
 
   const changeUnit = (nextUnit: RoutineUnit) => {
     setUnit(nextUnit);
@@ -858,7 +862,7 @@ function RunnerSetEditor({
   };
 
   const saveComposer = async () => {
-    if (barProfile === null || savingProfile) {
+    if (barProfile === null || !canSaveComposer || savingProfile) {
       return;
     }
     setSavingProfile(true);
@@ -949,105 +953,105 @@ function RunnerSetEditor({
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.editorKeyboard}
         >
-          <ScrollView
-            style={styles.editorScroll}
-            contentContainerStyle={styles.composerContent}
-            keyboardShouldPersistTaps="handled"
-          >
-            <Section
-              title={t('runnerBarProfileLabel')}
-              hint={t('runnerBarProfileFuture')}
-              testID="editor-bar-profiles"
+          <View style={styles.composerLayout}>
+            <ScrollView
+              style={styles.composerScroll}
+              contentContainerStyle={styles.composerContent}
+              keyboardShouldPersistTaps="handled"
             >
-              {BAR_PROFILE_KEYS.map((profile) => {
-                const profileWeight = barWeightFor(
-                  profile,
-                  profile === 'custom' ? customBarWeight : null,
-                  unit,
-                );
-                return (
-                  <Row
-                    key={profile}
-                    label={t(barProfileLabelKey(profile))}
-                    detail={
-                      profileWeight === null
-                        ? t('runnerBarProfileNeedsWeight')
-                        : `${formatWeight(profileWeight)} ${unit}`
-                    }
-                    right={
-                      <Ionicons
-                        name={profile === barProfile ? 'checkmark-circle' : 'ellipse-outline'}
-                        size={tabBar.icon}
-                        color={profile === barProfile ? tokens.accent : tokens.textSecondary}
-                      />
-                    }
-                    onPress={() => chooseBarProfile(profile)}
-                    divided
-                    testID={`editor-bar-profile-${profile}`}
-                  />
-                );
-              })}
-            </Section>
-
-            {barProfile === 'custom' && (
-              <Field label={t('runnerCustomBarWeight', { unit })}>
-                <AppTextInput
-                  variant="numeric"
-                  value={customBarWeight === null ? '' : String(customBarWeight)}
-                  onCommit={changeCustomBarWeight}
-                  keyboardType="decimal-pad"
-                  testID="editor-custom-bar"
+              <Section
+                title={t('runnerBarProfileLabel')}
+                hint={t('runnerBarProfileFuture')}
+                testID="editor-bar-profiles"
+              >
+                <SegmentedControl
+                  options={BAR_PROFILE_KEYS.map((profile) => ({
+                    value: profile,
+                    label: t(barProfileLabelKey(profile)),
+                  }))}
+                  value={barProfile}
+                  onChange={chooseBarProfile}
+                  wrap
+                  testID="editor-bar-profile-options"
                 />
-              </Field>
-            )}
-
-            <Section
-              title={t('runnerPlatesTitle')}
-              hint={t('runnerPlateHoldToRemove')}
-              testID="editor-plates"
-            >
-              <Text style={[styles.composition, { color: tokens.textPrimary }]}>
-                {t('runnerPlatesPerSide')}:{' '}
-                {plates.length === 0
-                  ? t('runnerNoPlates')
-                  : plates.map((plate) => `${formatWeight(plate)} ${unit}`).join(' + ')}
-              </Text>
-              {STANDARD_PLATES[unit].map((plate) => (
-                <Row
-                  key={plate}
-                  label={`+${formatWeight(plate)} ${unit}`}
-                  detail={t('runnerAddPlate')}
-                  right={<Ionicons name="add" size={tabBar.icon} color={tokens.textPrimary} />}
-                  onPress={() => addPlate(plate)}
-                  onLongPress={() => removePlate(plate)}
-                  divided
-                />
-              ))}
-              {weight !== null && (currentBarWeight === null || composition === null) && (
-                <Text style={[styles.compositionHint, { color: tokens.textSecondary }]}>
-                  {t('runnerCompositionUnavailable')}
+                <Text
+                  style={[styles.composition, { color: tokens.textPrimary }]}
+                >
+                  {barSummary}
                 </Text>
-              )}
-            </Section>
+              </Section>
 
-            <View style={styles.composerTotal}>
-              <Text style={[styles.composerTotalLabel, { color: tokens.textSecondary }]}>
-                {t('runnerTotalLabel')}
-              </Text>
-              <Text style={[styles.composerTotalValue, { color: tokens.textPrimary }]}>
-                {weight === null
-                  ? t('runnerWeightToLearn')
-                  : `${formatWeight(weight)} ${unit}`}
-              </Text>
+              {barProfile === 'custom' && (
+                <Field
+                  label={t('runnerCustomBarWeight', { unit })}
+                  hint={t('runnerCustomBarWeightHint')}
+                >
+                  <AppTextInput
+                    variant="numeric"
+                    value={customBarWeight === null ? '' : String(customBarWeight)}
+                    onCommit={changeCustomBarWeight}
+                    keyboardType="decimal-pad"
+                    testID="editor-custom-bar"
+                  />
+                </Field>
+              )}
+
+              <Section
+                title={t('runnerPlatesTitle')}
+                hint={t('runnerPlateHoldToRemove')}
+                testID="editor-plates"
+              >
+                <Text
+                  style={[styles.composition, { color: tokens.textPrimary }]}
+                >
+                  {t('runnerPlatesPerSide')}:{' '}
+                  {plates.length === 0
+                    ? t('runnerNoPlates')
+                    : plates.map((plate) => `${formatWeight(plate)} ${unit}`).join(' + ')}
+                </Text>
+                <PlatePicker
+                  options={STANDARD_PLATES[unit].map((plate) => ({
+                    value: plate,
+                    label: `+${formatWeight(plate)} ${unit}`,
+                  }))}
+                  onPress={addPlate}
+                  onLongPress={removePlate}
+                  longPressHint={t('runnerPlateHoldToRemove')}
+                  testID="editor-plate-picker"
+                />
+                {weight !== null && (currentBarWeight === null || composition === null) && (
+                  <Text
+                    style={[styles.compositionHint, { color: tokens.textSecondary }]}
+                  >
+                    {t('runnerCompositionUnavailable')}
+                  </Text>
+                )}
+              </Section>
+            </ScrollView>
+
+            <View style={styles.composerFooter}>
+              <View style={styles.composerTotal}>
+                <Text
+                  style={[styles.composerTotalLabel, { color: tokens.textSecondary }]}
+                >
+                  {t('runnerTotalLabel')}
+                </Text>
+                <Text
+                  style={[styles.composerTotalValue, { color: tokens.textPrimary }]}
+                >
+                  {weight === null
+                    ? t('runnerWeightToLearn')
+                    : `${formatWeight(weight)} ${unit}`}
+                </Text>
+              </View>
+              <Button
+                label={t('runnerDone')}
+                onPress={() => void saveComposer()}
+                disabled={savingProfile || !canSaveComposer}
+                testID="editor-composer-done"
+              />
             </View>
-            <Button
-              label={t('runnerDone')}
-              onPress={() => void saveComposer()}
-              disabled={savingProfile}
-              style={styles.editorButton}
-              testID="editor-composer-done"
-            />
-          </ScrollView>
+          </View>
         </KeyboardAvoidingView>
       ) : (
         <KeyboardAvoidingView
@@ -1073,7 +1077,7 @@ function RunnerSetEditor({
             </Field>
             {canEditWeight && (
               <Field label={t('runnerWeightLabel')}>
-                <View style={styles.unitRow}>
+                <View style={styles.unitControl}>
                   <Text style={[styles.unitLabel, { color: tokens.textSecondary }]}>
                     {t('runnerSetUnit')}
                   </Text>
@@ -1268,11 +1272,17 @@ const styles = StyleSheet.create({
   composerContent: {
     paddingBottom: spacing.cardGap,
   },
-  unitRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.inline,
+  composerLayout: {
+    flexShrink: 1,
+  },
+  composerScroll: {
+    flexShrink: 1,
+  },
+  composerFooter: {
+    gap: spacing.cardGap,
+  },
+  unitControl: {
+    gap: spacing.label,
     marginBottom: spacing.cardGap,
   },
   unitLabel: {

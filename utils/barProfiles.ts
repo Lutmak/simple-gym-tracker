@@ -70,6 +70,24 @@ export function defaultBarProfileForEquipment(equipment: string | null): BarProf
 
 export const KG_PER_LB = 0.45359237;
 
+/** A custom bar is meaningful only when its stored weight is finite and positive. */
+export function isValidCustomBarWeight(weight: number | null): weight is number {
+  return weight !== null && Number.isFinite(weight) && weight > 0;
+}
+
+/** Whether a profile has enough information to be persisted. */
+export function canSaveBarProfile(
+  profile: BarProfileKey | null,
+  barWeight: number | null,
+): boolean {
+  return profile !== null && (profile !== 'custom' || isValidCustomBarWeight(barWeight));
+}
+
+/** Display load values without losing the smallest standard plate precision. */
+export function formatWeight(value: number): string {
+  return String(Number(value.toFixed(2)));
+}
+
 export function convertWeight(
   weight: number,
   from: PlateUnit,
@@ -97,7 +115,7 @@ export function barWeightFor(
     return null;
   }
   if (profile === 'custom') {
-    return barWeight;
+    return isValidCustomBarWeight(barWeight) ? barWeight : null;
   }
   const conventions = BAR_PROFILES[profile];
   return unit === 'kg' ? conventions.weightKg : conventions.weightLb;

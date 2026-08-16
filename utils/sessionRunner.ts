@@ -29,7 +29,7 @@
 import { warmupSets } from './fiveThreeOne';
 import { inferBaselineWeight, baselineColumn } from './learnedWeights';
 import { proposeJokerWeight } from './jokers';
-import type { BarProfileKey } from './barProfiles';
+import { canSaveBarProfile, type BarProfileKey } from './barProfiles';
 import { targetSetsFor, targetWeightFor, type PlannedTargetSet } from './today';
 import type {
   RoutineDatabase,
@@ -501,6 +501,9 @@ export async function saveRunnerBarProfile(
   barProfile: BarProfileKey,
   barWeight: number | null,
 ): Promise<void> {
+  if (!canSaveBarProfile(barProfile, barWeight)) {
+    throw new Error('saveRunnerBarProfile: custom bar weight must be positive');
+  }
   await db.run(
     `UPDATE SessionExercises
         SET bar_profile = ?, bar_weight = ?

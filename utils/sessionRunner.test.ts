@@ -585,6 +585,16 @@ describe('loadRunnerSession', () => {
 
     expect(persisted).toMatchObject({ barProfile: 'custom', barWeight: 27.5 });
   });
+
+  it('does not persist a custom bar profile without a positive weight', async () => {
+    const { executor } = connect();
+    const session = await fixture(executor);
+    const exercise = squat(session);
+
+    await expect(
+      saveRunnerBarProfile(executor, exercise.sessionExerciseId, 'custom', 0),
+    ).rejects.toThrow('positive');
+  });
 });
 
 describe('saveSessionLog — one atomic transaction', () => {

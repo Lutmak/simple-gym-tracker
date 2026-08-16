@@ -211,10 +211,6 @@ export function buildRoutineCopyRows(
   };
 }
 
-export function routineNeedsWeights(source: RoutineSourceBundle): boolean {
-  return source.exercises.some((exercise) => exercise.loadSource !== 'bodyweight');
-}
-
 export interface RoutineDatabase {
   run(sql: string, params?: readonly unknown[]): Promise<unknown> | unknown;
   get(
@@ -472,6 +468,46 @@ export async function activatePresetRoutine(
   });
   const routineId = await insertCopyRows(db, rows);
   return { routineId, copied: true };
+}
+
+/**
+ * The routine "from scratch" starts as (R1): one `Routines` row with no sessions and no
+ * exercises. It is inactive — an empty plan has nothing to train — and it is deliberately not
+ * validated against anything, because there is nothing to validate: the editor adds the days.
+ * The defaults come from `blankRoutineDraft` (utils/routineLibrary.ts), which is where the
+ * decision of what the app can decide for the user lives.
+ */
+export async function createBlankRoutine(
+  db: RoutineDatabase,
+  draft: {
+    name: string;
+    unit: RoutineUnit;
+    roundingIncrement: number;
+    restMainSeconds: number;
+    restAccessorySeconds: number;
+    progressionRule: RoutineProgressionRule;
+  },
+): Promise<number> {
+  await db.run(
+    `INSERT INTO Routines
+       (routine_key, name, origin, progression_rule, unit, rounding_increment,
+        rest_main_seconds, rest_accessory_seconds, is_active, created_at, planned_jokers)
+     VALUES (NULL, ?, 'user', ?, ?, ?, ?, ?, 0, ?, 0);`,
+    [
+      draft.name,
+      draft.progressionRule,
+      draft.unit,
+      draft.roundingIncrement,
+      draft.restMainSeconds,
+      draft.restAccessorySeconds,
+      Date.now(),
+    ],
+  );
+  const row = await db.get('SELECT last_insert_rowid() AS id;', []);
+  if (!row) {
+    throw new Error('Could not read the new routine id');
+  }
+  return num(row.id);
 }
 
 export async function activateRoutineById(db: RoutineDatabase, routineId: number): Promise<void> {

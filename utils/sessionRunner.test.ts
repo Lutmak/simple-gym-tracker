@@ -810,50 +810,20 @@ describe('saveSessionLog — learned baselines (§3.2)', () => {
     ...(overrides as Partial<WaveDayDraft>),
   });
 
-  /** One pending week session for a freshly written wave routine. */
+  /**
+   * Week 1's first pending session of a freshly written wave routine —
+   * `writeWaveRoutine` seeds the cycle itself (utils/cycleSeed.ts).
+   */
   const pendingWaveWeekSession = async (
     executor: TestExecutor,
     routineId: number,
   ): Promise<number> => {
-    await executor.run(
-      `INSERT INTO Cycles (routine_id, cycle_number, weeks, status, current_week, started_at)
-       VALUES (?, 1, 4, 'active', 1, ?);`,
-      [routineId, TODAY],
-    );
-    const cycle = await executor.get(
-      'SELECT cycle_id FROM Cycles WHERE routine_id = ? AND cycle_number = 1;',
-      [routineId],
-    );
-    if (!cycle) {
-      throw new Error('No wave cycle');
-    }
-    await executor.run(
-      'INSERT INTO CycleWeeks (cycle_id, week_number) VALUES (?, 1);',
-      [cycle.cycle_id],
-    );
-    const week = await executor.get(
-      'SELECT cycle_week_id FROM CycleWeeks WHERE cycle_id = ? AND week_number = 1;',
-      [cycle.cycle_id],
-    );
-    if (!week) {
-      throw new Error('No wave week');
-    }
-    const session = await executor.get(
-      `SELECT session_id FROM Sessions WHERE routine_id = ? ORDER BY sort_order LIMIT 1;`,
-      [routineId],
-    );
-    if (!session) {
-      throw new Error('No wave session');
-    }
-    await executor.run(
-      `INSERT INTO WeekSessions (cycle_week_id, session_id, status)
-       VALUES (?, ?, 'pending');`,
-      [week.cycle_week_id, session.session_id],
-    );
     const weekSession = await executor.get(
       `SELECT ws.week_session_id FROM WeekSessions ws
        JOIN Sessions s ON s.session_id = ws.session_id
-       WHERE s.routine_id = ? ORDER BY ws.week_session_id LIMIT 1;`,
+       JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+       WHERE s.routine_id = ? AND cw.week_number = 1 AND ws.status = 'pending'
+       ORDER BY ws.week_session_id LIMIT 1;`,
       [routineId],
     );
     if (!weekSession) {

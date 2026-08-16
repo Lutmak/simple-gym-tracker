@@ -21,6 +21,7 @@
  * held. Wave TM: two or more AMRAP misses in the completed cycle.
  */
 
+import { createCycle } from './cycleSeed';
 import { estimate1RM, waveForWeek } from './fiveThreeOne';
 import {
   proposeNextTargets,
@@ -812,8 +813,9 @@ export async function applyReview(
 }
 
 /**
- * Explicitly generates the next cycle after a completed review: a new Cycles
- * row (status 'active', current week 1) with the same weeks structure, all
+ * Explicitly generates the next cycle after a completed review, through the
+ * shared `createCycle` (utils/cycleSeed.ts): a new Cycles row (status
+ * 'active', current week 1) with the reviewed cycle's weeks structure, all
  * CycleWeeks, and one pending WeekSessions row per session per week. The
  * confirmed plan values — absolute weights or training maxes — are already in
  * SessionExercises, which is where the new week's targets derive from.
@@ -828,52 +830,14 @@ export async function startNextCycle(
     throw new Error('startNextCycle: the cycle is not complete');
   }
 
-  const sessionRows = await db.getAll(
-    `SELECT session_id FROM Sessions WHERE routine_id = ? ORDER BY sort_order;`,
-    [routineId],
-  );
-  const sessions = sessionRows.map((row) => num(row.session_id));
-  const nextNumber =
-    Math.max(0, ...source.cycles.map((cycle) => cycle.cycleNumber)) + 1;
-  const startedAt = Math.floor(Date.now() / 1000);
-
   await db.run('BEGIN;');
   try {
-    await db.run(
-      `INSERT INTO Cycles
-         (routine_id, cycle_number, weeks, status, current_week, started_at, completed_at)
-       VALUES (?, ?, ?, 'active', 1, ?, NULL);`,
-      [routineId, nextNumber, source.cycle.weeks, startedAt],
+    const newCycleId = await createCycle(
+      db,
+      routineId,
+      source.cycle.weeks,
+      Math.floor(Date.now() / 1000),
     );
-    const cycleRow = await db.get('SELECT last_insert_rowid() AS id;', []);
-    if (!cycleRow) {
-      throw new Error('Could not read the new cycle id');
-    }
-    const newCycleId = num(cycleRow.id);
-
-    const weekIds: number[] = [];
-    for (let weekNumber = 1; weekNumber <= source.cycle.weeks; weekNumber += 1) {
-      await db.run(
-        `INSERT INTO CycleWeeks (cycle_id, week_number) VALUES (?, ?);`,
-        [newCycleId, weekNumber],
-      );
-      const weekRow = await db.get('SELECT last_insert_rowid() AS id;', []);
-      if (!weekRow) {
-        throw new Error('Could not read the new cycle week id');
-      }
-      weekIds.push(num(weekRow.id));
-    }
-
-    for (const weekId of weekIds) {
-      for (const sessionId of sessions) {
-        await db.run(
-          `INSERT INTO WeekSessions (cycle_week_id, session_id, status)
-           VALUES (?, ?, 'pending');`,
-          [weekId, sessionId],
-        );
-      }
-    }
-
     await db.run('COMMIT;');
     return newCycleId;
   } catch (error) {

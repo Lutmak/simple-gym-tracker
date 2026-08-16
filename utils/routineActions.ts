@@ -13,10 +13,14 @@
  * one is already stored. The thin edges load source rows, build the copy, and
  * write it in one transaction. The same transaction clears any other active
  * routine, which is what the partial unique index `Routines_single_active`
- * enforces.
+ * enforces, and — when the routine becomes the active one — seeds its cycle
+ * through `ensureActiveCycle` (utils/cycleSeed.ts). A routine without a cycle
+ * has no week sessions, so the queue offers nothing; activation and its first
+ * cycle are therefore one atomic step, never two.
  */
 
 import { defaultBarProfileForEquipment, type BarProfileKey } from './barProfiles';
+import { ensureActiveCycle } from './cycleSeed';
 import { usableWeight } from './learnedWeights';
 
 export type RoutineUnit = 'kg' | 'lb';
@@ -436,6 +440,13 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
       );
     }
 
+    // An active copy is trainable from the moment it is written: the cycle is
+    // part of the same transaction. A duplicate is not active and gets none —
+    // it is a plan the user has not started, and a cycle would date it now.
+    if (rows.routine.isActive) {
+      await ensureActiveCycle(db, routineId, Math.floor(Date.now() / 1000));
+    }
+
     await db.run('COMMIT;');
     return routineId;
   } catch (error) {
@@ -510,11 +521,18 @@ export async function createBlankRoutine(
   return num(row.id);
 }
 
+/**
+ * Makes a saved routine the active one and guarantees it has a cycle to
+ * train, in one transaction. Re-activating a routine that already has an
+ * unfinished cycle resumes it untouched — `ensureActiveCycle` never
+ * duplicates a cycle and never rewrites a logged session (utils/cycleSeed.ts).
+ */
 export async function activateRoutineById(db: RoutineDatabase, routineId: number): Promise<void> {
   await db.run('BEGIN;');
   try {
     await db.run('UPDATE Routines SET is_active = 0 WHERE is_active = 1;');
     await db.run('UPDATE Routines SET is_active = 1 WHERE routine_id = ?;', [routineId]);
+    await ensureActiveCycle(db, routineId, Math.floor(Date.now() / 1000));
     await db.run('COMMIT;');
   } catch (error) {
     await db.run('ROLLBACK;');

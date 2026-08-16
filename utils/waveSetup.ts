@@ -32,6 +32,7 @@ import {
   type WarmupSet,
 } from './fiveThreeOne';
 import { defaultBarProfileForEquipment } from './barProfiles';
+import { ensureActiveCycle } from './cycleSeed';
 import type { RoutineCopyRows, RoutineDatabase, RoutineUnit } from './routineActions';
 
 export type AssistanceBias = 'hypertrophy' | 'strength' | 'hybrid';
@@ -340,7 +341,9 @@ export function buildWaveRoutineRows(draft: WaveSetupDraft): RoutineCopyRows {
 /**
  * Writes the routine in one transaction: clears any other active routine
  * (the partial unique index `Routines_single_active` enforces it), inserts
- * the routine, its sessions and their exercises, and returns the new id.
+ * the routine, its sessions and their exercises, seeds its first cycle
+ * (utils/cycleSeed.ts — without one the session queue has no head), and
+ * returns the new id.
  */
 export async function writeWaveRoutine(
   db: RoutineDatabase,
@@ -418,6 +421,11 @@ export async function writeWaveRoutine(
           exercise.barWeight,
         ],
       );
+    }
+
+    // The routine is written active, so it is trainable immediately.
+    if (rows.routine.isActive) {
+      await ensureActiveCycle(db, routineId, Math.floor(Date.now() / 1000));
     }
 
     await db.run('COMMIT;');

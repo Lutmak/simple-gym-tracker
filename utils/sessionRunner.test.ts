@@ -10,6 +10,7 @@ import {
   loadRunnerSession,
   nextExtraSet,
   runnerTargetsFor,
+  saveRunnerBarProfile,
   saveSessionLog,
   sessionTotals,
   warmupSetsFor,
@@ -129,6 +130,8 @@ describe('runnerTargetsFor — the runner receives the cycle week', () => {
     trainingMaxPct: 0.9,
     unitOverride: null,
     isAmrap: true,
+    barProfile: 'olympic',
+    barWeight: null,
   };
 
   const sessionForWeek = (weekNumber: number): RunnerSession => ({
@@ -543,7 +546,10 @@ describe('loadRunnerSession', () => {
     ]);
     expect(loaded.exercises[0].isAmrap).toBe(true);
     expect(loaded.exercises[0].role).toBe('main');
+    expect(loaded.exercises[0].barProfile).toBe('olympic');
+    expect(loaded.exercises[0].barWeight).toBeNull();
     expect(loaded.exercises[1].role).toBe('accessory');
+    expect(loaded.exercises[1].barProfile).toBeNull();
   });
 
   it('refuses a session that is not pending', async () => {
@@ -563,6 +569,21 @@ describe('loadRunnerSession', () => {
     await expect(loadRunnerSession(executor, Number(completed.week_session_id), TODAY)).rejects.toThrow(
       'is not pending',
     );
+  });
+
+  it('persists a changed bar profile for the exercise in future runner loads', async () => {
+    const { executor } = connect();
+    const session = await fixture(executor);
+    const exercise = squat(session);
+
+    await saveRunnerBarProfile(executor, exercise.sessionExerciseId, 'custom', 27.5);
+
+    const loaded = await loadRunnerSession(executor, session.weekSessionId, TODAY);
+    const persisted = loaded.exercises.find(
+      (candidate) => candidate.sessionExerciseId === exercise.sessionExerciseId,
+    );
+
+    expect(persisted).toMatchObject({ barProfile: 'custom', barWeight: 27.5 });
   });
 });
 

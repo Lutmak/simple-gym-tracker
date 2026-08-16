@@ -29,6 +29,7 @@
 import { warmupSets } from './fiveThreeOne';
 import { inferBaselineWeight, baselineColumn } from './learnedWeights';
 import { proposeJokerWeight } from './jokers';
+import type { BarProfileKey } from './barProfiles';
 import { targetSetsFor, targetWeightFor, type PlannedTargetSet } from './today';
 import type {
   RoutineDatabase,
@@ -49,6 +50,8 @@ export interface RunnerExercise {
   trainingMaxPct: number | null;
   unitOverride: RoutineUnit | null;
   isAmrap: boolean;
+  barProfile: BarProfileKey | null;
+  barWeight: number | null;
 }
 
 /** Everything the runner needs that is not the user's own set results. */
@@ -491,6 +494,21 @@ export async function saveSessionLog(
   }
 }
 
+/** Persist the exercise-level bar choice; it affects this exercise in future sessions. */
+export async function saveRunnerBarProfile(
+  db: RoutineDatabase,
+  sessionExerciseId: number,
+  barProfile: BarProfileKey,
+  barWeight: number | null,
+): Promise<void> {
+  await db.run(
+    `UPDATE SessionExercises
+        SET bar_profile = ?, bar_weight = ?
+      WHERE session_exercise_id = ?;`,
+    [barProfile, barProfile === 'custom' ? barWeight : null, sessionExerciseId],
+  );
+}
+
 /**
  * The runner's context for one week session: the plan rows and the routine's
  * unit, rounding and rest values. Throws when the session is not pending —
@@ -524,7 +542,7 @@ export async function loadRunnerSession(
   const exerciseRows = await db.getAll(
     `SELECT session_exercise_id, exercise_name, role, target_sets, target_reps,
             load_source, absolute_weight, training_max_weight, training_max_pct,
-            unit_override, is_amrap
+            unit_override, is_amrap, bar_profile, bar_weight
      FROM SessionExercises
      WHERE session_id = ? ORDER BY sort_order;`,
     [Number(row.session_id)],
@@ -564,6 +582,8 @@ export async function loadRunnerSession(
       trainingMaxPct: nullableNum(exercise.training_max_pct),
       unitOverride: nullableStr(exercise.unit_override) as RoutineUnit | null,
       isAmrap: num(exercise.is_amrap) === 1,
+      barProfile: nullableStr(exercise.bar_profile) as BarProfileKey | null,
+      barWeight: nullableNum(exercise.bar_weight),
     })),
   };
 }

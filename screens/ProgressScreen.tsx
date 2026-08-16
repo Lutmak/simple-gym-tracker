@@ -1,14 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import {
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-} from 'react-native';
-import { LineChart } from 'react-native-chart-kit';
+import { ActivityIndicator, BackHandler, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -16,39 +7,91 @@ import { useTranslation } from 'react-i18next';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
-import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from '../components/AppTextInput';
+import AppTextInput from '../components/AppTextInput';
+import { ChartRangeControl } from '../components/ChartRangeControl';
+import { EmptyState } from '../components/EmptyState';
+import { ExerciseHistoryView } from '../components/ExerciseHistoryView';
 import { ExerciseSheet } from '../components/ExerciseSheet';
-import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
-import { dayStampOf } from '../utils/today';
+import { ProgressCalendar } from '../components/ProgressCalendar';
+import { ProgressChart } from '../components/ProgressChart';
+import { Row } from '../components/Row';
+import { Screen } from '../components/Screen';
+import { Section } from '../components/Section';
 import {
-  buildCalendarMarkers,
-  hasChartableSeries,
-  loadCalendarLogs,
+  SessionDetailSheet,
+  type SessionDetailTarget,
+} from '../components/SessionDetailSheet';
+import { fontSize, spacing, tabBar } from '../utils/scale';
+import { dayStampOf, loadSessionQueueInput } from '../utils/today';
+import {
+  computeInicioStreak,
+  datePartsOfStamp,
+  type InicioStreak,
+} from '../utils/inicio';
+import { calendarMonthIndex, monthOfStamp, weekdayOrder } from '../utils/calendar';
+import {
+  buildProgressCalendarDays,
+  loadProgressCalendar,
+  type ProgressCalendarDay,
+  type ProgressDayState,
+} from '../utils/progressCalendar';
+import {
+  cycleAdherence,
+  hasProgressFocus,
   loadMainLiftSeries,
   loadProgressRoutines,
   loadRoutineProgress,
-  loadWeekDetail,
-  hasProgressFocus,
-  logsOnDate,
-  type CalendarLogRow,
-  type MainLiftPoint,
+  weekSessionsDone,
   type MainLiftSeries,
   type ProgressCycle,
+  type ProgressFocus,
   type ProgressRoutine,
   type ProgressWeek,
   type RoutineProgressData,
-  type ProgressFocus,
-  type WeekDetailData,
 } from '../utils/routineProgress';
 import {
+  historyShortfall,
   loadExercisesWithHistory,
-  loadExerciseSeries,
-  type ExerciseSeries,
-  type ExerciseSessionPoint,
+  rankExerciseHistory,
   type ExerciseSummary,
 } from '../utils/exerciseHistory';
+import { windowByRange, type ChartRange } from '../utils/chart';
 import type { RoutineDatabase } from '../utils/routineActions';
 import type { RootTabParamList } from '../App';
+
+/**
+ * Progreso — one screen about the routine you are training (SPECS.md P1–P4).
+ *
+ * The two recorded defects were *"dos botones gigantes hasta arriba… tengo que mover la mano
+ * incomodísimo"* and *"Ciclo 1, ciclo completado, un 1, un 3 de 3 — ¿qué estoy viendo? Estoy
+ * perdido."* Both came from the same cause: the screen was two screens behind a segmented control,
+ * and it printed numbers without ever saying what they counted.
+ *
+ * What replaced it:
+ *
+ * - **No mode switch.** The Rutina/Ejercicios control is gone. This screen is the active routine;
+ *   an exercise's own history is one search away and one tap from R2's shared sheet.
+ * - **Every number carries its noun.** `Semana 2 · 3 de 3 sesiones`, `Ciclo 1 · completado el
+ *   12 de marzo · 16 de 16 sesiones (100 %)`. There is no bare `3 de 3` anywhere (§0.5).
+ * - **One primitive per repeated thing.** Every week of every cycle is the same `Row`, so cycle 1
+ *   and cycle 2 cannot look different from each other, which they did.
+ * - **The calendar is first-class**, above the cycle history rather than at the bottom of a scroll,
+ *   and every marked day opens its session through the same `Sheet` a week opens through.
+ *
+ * P3 and P4 added the two things it was still missing:
+ *
+ * - **A range every chart is read through** — 1 semana · 1 mes · 6 meses · todo — chosen once and
+ *   kept across both views. The axis rescales and thins its own labels (`utils/chart.ts`), and no
+ *   chart ever draws two units on one axis.
+ * - **The exercise history is a place.** It replaces this view rather than growing under it, and
+ *   it is reached from a searchable list here, from R2's exercise sheet, and from any exercise row
+ *   in the app through the tab's `exercise` parameter — one destination, several doors.
+ *
+ * The screen holds no rules: cycles, adherence, day states, the streak, range windowing, axis
+ * thinning and the "not enough data yet" test all come from `utils/routineProgress.ts`,
+ * `utils/progressCalendar.ts`, `utils/inicio.ts`, `utils/chart.ts` and `utils/exerciseHistory.ts`,
+ * which are tested without a device.
+ */
 
 const MONTH_KEYS = [
   'January',
@@ -75,211 +118,245 @@ const WEEKDAY_SHORT_KEYS = [
   'weekdayShortSat',
 ] as const;
 
-const formatWeight = (value: number): string => String(Number(value.toFixed(1)));
+const WEEKDAY_FULL_KEYS = [
+  'weekdayFullSun',
+  'weekdayFullMon',
+  'weekdayFullTue',
+  'weekdayFullWed',
+  'weekdayFullThu',
+  'weekdayFullFri',
+  'weekdayFullSat',
+] as const;
 
-interface SelectedWeek {
-  routineId: number;
-  cycleId: number;
-  cycleNumber: number;
-  weekNumber: number;
-}
+/** The search field lists what fits on a phone, not the whole catalog. */
+const MAX_SEARCH_RESULTS = 8;
 
 type Props = BottomTabScreenProps<RootTabParamList, 'Progress'>;
 
 export default function ProgressScreen({ navigation, route }: Props) {
-  const { theme } = useTheme();
+  const { tokens } = useTheme();
   const { t } = useTranslation();
-  const { dateFormat, firstWeekday } = useSettings();
-  const { width } = useWindowDimensions();
+  const { firstWeekday } = useSettings();
   const db = useSQLiteContext();
+
   const requestedFocus: ProgressFocus | undefined = route.params?.focus;
   /** R2: the exercise sheet's "see the full chart" link arrives here. */
   const requestedExercise: string | undefined = route.params?.exercise;
+  /** A saved routine's progress, opened from the routines tab. */
+  const requestedRoutineId: number | undefined = route.params?.routineId;
 
   const [routines, setRoutines] = useState<ProgressRoutine[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [routineData, setRoutineData] = useState<RoutineProgressData | null>(null);
   const [series, setSeries] = useState<MainLiftSeries[]>([]);
-  const [calendarLogs, setCalendarLogs] = useState<CalendarLogRow[]>([]);
-  const [view, setView] = useState<'routine' | 'exercises'>('routine');
-  const [exerciseSummaries, setExerciseSummaries] = useState<ExerciseSummary[]>([]);
-  const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
+  const [calendarDays, setCalendarDays] = useState<Map<number, ProgressCalendarDay>>(
+    () => new Map(),
+  );
+  const [streak, setStreak] = useState<InicioStreak | null>(null);
+  const [summaries, setSummaries] = useState<ExerciseSummary[]>([]);
+  const [query, setQuery] = useState('');
+  const [chartedExercise, setChartedExercise] = useState<string | null>(null);
+  /** P3: one range for every chart on this tab, kept across the two views. */
+  const [range, setRange] = useState<ChartRange>('sixMonths');
   /** R2: the exercise whose shared sheet is open. */
   const [information, setInformation] = useState<string | null>(null);
-  const [exerciseSeries, setExerciseSeries] = useState<ExerciseSeries | null>(null);
-  const [weekDetail, setWeekDetail] = useState<SelectedWeek | null>(null);
-  const [weekData, setWeekData] = useState<WeekDetailData | null>(null);
-  const [dayPopup, setDayPopup] = useState<number | null>(null);
-  const [month, setMonth] = useState(() => {
-    const now = new Date();
-    return { year: now.getFullYear(), month: now.getMonth() };
-  });
+  const [detailTarget, setDetailTarget] = useState<SessionDetailTarget | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [revision, setRevision] = useState(0);
 
   const routineDb: RoutineDatabase = {
     run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
     get: async (sql, params) =>
-      (await db.getFirstAsync<Record<string, unknown>>(
-        sql,
-        (params ?? []) as never[],
-      )) ?? undefined,
+      (await db.getFirstAsync<Record<string, unknown>>(sql, (params ?? []) as never[])) ??
+      undefined,
     getAll: async (sql, params) =>
       db.getAllAsync<Record<string, unknown>>(sql, (params ?? []) as never[]),
   };
 
+  const todayStamp = dayStampOf(new Date());
+
   useFocusEffect(
     useCallback(() => {
       let cancelled = false;
+
       const load = async () => {
-        const focus = requestedFocus;
-        const [loaded, logs, summaries] = await Promise.all([
+        const [loadedRoutines, loadedSummaries] = await Promise.all([
           loadProgressRoutines(routineDb),
-          loadCalendarLogs(routineDb),
           loadExercisesWithHistory(routineDb),
         ]);
         if (cancelled) {
           return;
         }
-        setRoutines(loaded);
-        setCalendarLogs(logs);
-        setExerciseSummaries(summaries);
+        setRoutines(loadedRoutines);
+        setSummaries(loadedSummaries);
+
+        const exists = (routineId: number | undefined): boolean =>
+          routineId !== undefined &&
+          loadedRoutines.some((routine) => routine.routineId === routineId);
+        // What the caller asked for, then what was being read, then the routine
+        // being trained: Progreso is about the active routine unless told otherwise.
         const preferred =
-          focus !== undefined && loaded.some((routine) => routine.routineId === focus.routineId)
-            ? focus.routineId
-            : selectedId !== null && loaded.some((routine) => routine.routineId === selectedId)
-            ? selectedId
-            : (loaded.find((routine) => routine.isActive)?.routineId ??
-              loaded[0]?.routineId ??
-              null);
+          [requestedRoutineId, requestedFocus?.routineId, selectedId ?? undefined].find(
+            exists,
+          ) ??
+          loadedRoutines.find((routine) => routine.isActive)?.routineId ??
+          loadedRoutines[0]?.routineId ??
+          null;
         setSelectedId((current) => (current === preferred ? current : preferred));
-        // R2's deep link wins over whatever was last selected: the user asked for this exercise's
-        // chart from its sheet, so the screen opens on it and on the exercise view.
-        const linkedExercise =
-          requestedExercise !== undefined &&
-          summaries.some((entry) => entry.name === requestedExercise)
-            ? requestedExercise
-            : null;
-        const preferredExercise =
-          linkedExercise ??
-          (selectedExercise !== null &&
-          summaries.some((entry) => entry.name === selectedExercise)
-            ? selectedExercise
-            : (summaries[0]?.name ?? null));
-        setSelectedExercise((current) =>
-          current === preferredExercise ? current : preferredExercise,
-        );
+
+        // R2's deep link wins over whatever was last charted: the user asked for
+        // this exercise's history from its sheet.
         if (requestedExercise !== undefined) {
-          if (linkedExercise !== null) {
-            setView('exercises');
+          if (loadedSummaries.some((entry) => entry.name === requestedExercise)) {
+            setChartedExercise(requestedExercise);
           }
           navigation.setParams({ exercise: undefined });
         }
+        if (requestedRoutineId !== undefined) {
+          navigation.setParams({ routineId: undefined });
+        }
+
         if (preferred === null) {
           setRoutineData(null);
           setSeries([]);
-          setWeekDetail(null);
-          if (focus !== undefined) {
+          setCalendarDays(new Map());
+          setStreak(null);
+          setLoaded(true);
+          if (requestedFocus !== undefined) {
             navigation.setParams({ focus: undefined });
           }
           return;
         }
-        const [data, liftSeries] = await Promise.all([
+
+        const [data, liftSeries, calendar, queueInput] = await Promise.all([
           loadRoutineProgress(routineDb, preferred),
           loadMainLiftSeries(routineDb, preferred),
+          loadProgressCalendar(routineDb, preferred),
+          loadSessionQueueInput(routineDb),
         ]);
-        if (!cancelled) {
-          setRoutineData(data);
-          setSeries(liftSeries);
-          if (focus !== undefined && hasProgressFocus(data, focus)) {
-            setView('routine');
-            setWeekData(null);
-            const focusedCycle = data.cycles.find(
-              (cycleView) => cycleView.cycle.cycleId === focus.cycleId,
+        if (cancelled) {
+          return;
+        }
+        setRoutineData(data);
+        setSeries(liftSeries);
+        setCalendarDays(buildProgressCalendarDays(calendar));
+        setStreak(
+          queueInput.routine !== null && queueInput.routine.routineId === preferred
+            ? computeInicioStreak(queueInput, todayStamp, firstWeekday)
+            : null,
+        );
+        setLoaded(true);
+
+        if (requestedFocus !== undefined) {
+          if (hasProgressFocus(data, requestedFocus)) {
+            const focused = data.cycles.find(
+              (view) => view.cycle.cycleId === requestedFocus.cycleId,
             );
-            if (focusedCycle !== undefined) {
-              setWeekDetail({
-                ...focus,
-                cycleNumber: focusedCycle.cycle.cycleNumber,
+            if (focused !== undefined) {
+              setDetailTarget({
+                kind: 'week',
+                routineId: requestedFocus.routineId,
+                cycleId: requestedFocus.cycleId,
+                cycleNumber: focused.cycle.cycleNumber,
+                weekNumber: requestedFocus.weekNumber,
               });
             }
           }
-          if (focus !== undefined) {
-            navigation.setParams({ focus: undefined });
-          }
+          navigation.setParams({ focus: undefined });
         }
       };
-      load().catch((error) => {
+
+      load().catch((error: unknown) => {
         console.error('Error loading progress:', error);
         if (!cancelled) {
           setRoutineData(null);
           setSeries([]);
-          setCalendarLogs([]);
-          setExerciseSummaries([]);
-          if (requestedFocus !== undefined) {
-            navigation.setParams({ focus: undefined });
-          }
-          if (requestedExercise !== undefined) {
-            navigation.setParams({ exercise: undefined });
-          }
+          setCalendarDays(new Map());
+          setStreak(null);
+          setLoaded(true);
         }
       });
+
       return () => {
         cancelled = true;
       };
     }, [
       db,
+      firstWeekday,
       navigation,
-      requestedFocus,
       requestedExercise,
+      requestedFocus,
+      requestedRoutineId,
+      revision,
       selectedId,
-      selectedExercise,
     ]),
   );
 
-  React.useEffect(() => {
-    if (selectedExercise === null) {
-      setExerciseSeries(null);
-      return;
-    }
-    let cancelled = false;
-    loadExerciseSeries(routineDb, selectedExercise)
-      .then((series) => {
-        if (!cancelled) {
-          setExerciseSeries(series);
-        }
-      })
-      .catch((error) => {
-        console.error('Error loading the exercise history:', error);
-        if (!cancelled) {
-          setExerciseSeries(null);
-        }
+  // The exercise history is a place, not a section: Android's back gesture must leave it the way
+  // the on-screen back does, or the tab becomes a dead end (§7.2).
+  useFocusEffect(
+    useCallback(() => {
+      if (chartedExercise === null) {
+        return;
+      }
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        setChartedExercise(null);
+        return true;
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [db, selectedExercise]);
+      return () => subscription.remove();
+    }, [chartedExercise]),
+  );
 
-  const markers = useMemo(() => buildCalendarMarkers(calendarLogs), [calendarLogs]);
   const formatDate = (stamp: number): string => {
-    const date = new Date(stamp * 1000);
-    const dd = String(date.getUTCDate()).padStart(2, '0');
-    const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const yyyy = date.getUTCFullYear();
-    return dateFormat === 'mm-dd-yyyy' ? `${mm}/${dd}/${yyyy}` : `${dd}/${mm}/${yyyy}`;
+    const parts = datePartsOfStamp(stamp);
+    return t('inicioDate', {
+      weekday: t(WEEKDAY_FULL_KEYS[parts.weekday]),
+      day: parts.day,
+      month: t(MONTH_KEYS[parts.month]),
+      year: parts.year,
+    });
   };
 
-  const shortDate = (stamp: number): string => {
-    const date = new Date(stamp * 1000);
-    const dd = String(date.getUTCDate()).padStart(2, '0');
-    const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-    return dateFormat === 'mm-dd-yyyy' ? `${mm}/${dd}` : `${dd}/${mm}`;
-  };
+  const calendarBounds = useMemo(() => {
+    const stamps = [...calendarDays.keys()];
+    const todayMonth = monthOfStamp(todayStamp);
+    if (stamps.length === 0) {
+      return { first: todayMonth, last: todayMonth, initial: todayMonth };
+    }
+    const months = [
+      ...stamps.map((stamp) => monthOfStamp(stamp)),
+      todayMonth,
+    ].sort((a, b) => calendarMonthIndex(a) - calendarMonthIndex(b));
+    const first = months[0];
+    const last = months[months.length - 1];
+    return { first, last, initial: todayMonth };
+  }, [calendarDays, todayStamp]);
 
-  const openWeekDetail = (cycle: ProgressCycle, week: ProgressWeek) => {
+  const searchResults = useMemo(
+    () => rankExerciseHistory(summaries, query, MAX_SEARCH_RESULTS),
+    [summaries, query],
+  );
+
+  /** The legend, and the word every marked day says to a screen reader. */
+  const stateLabels = useMemo(
+    (): Record<ProgressDayState, string> => ({
+      done: t('progressDayDone'),
+      moved: t('progressDayMoved'),
+      discarded: t('progressDayDiscarded'),
+      planned: t('progressDayPlanned'),
+      free: t('progressDayFree'),
+    }),
+    [t],
+  );
+
+  const openExerciseSheet = (exerciseName: string) => setInformation(exerciseName);
+
+  const openWeek = (cycle: ProgressCycle, week: ProgressWeek) => {
     if (selectedId === null) {
       return;
     }
-    setWeekData(null);
-    setWeekDetail({
+    setDetailTarget({
+      kind: 'week',
       routineId: selectedId,
       cycleId: cycle.cycleId,
       cycleNumber: cycle.cycleNumber,
@@ -287,1123 +364,381 @@ export default function ProgressScreen({ navigation, route }: Props) {
     });
   };
 
-  React.useEffect(() => {
-    if (weekDetail === null) {
-      setWeekData(null);
-      return;
-    }
-    let cancelled = false;
-    loadWeekDetail(routineDb, weekDetail.routineId, weekDetail.cycleId, weekDetail.weekNumber)
-      .then((data) => {
-        if (!cancelled) {
-          setWeekData(data);
-        }
-      })
-      .catch((error) => {
-        console.error('Error loading the week detail:', error);
-        if (!cancelled) {
-          setWeekDetail(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [db, weekDetail]);
-
-  const goToEditRoutine = () => {
-    const routineId = weekData?.routineId ?? routineData?.routine.routineId;
-    setWeekDetail(null);
-    setWeekData(null);
-    if (routineId !== undefined) {
-      navigation.navigate('Routines', {
-        screen: 'EditRoutine',
-        params: { routineId },
-      });
-    }
-  };
-
-  const chartLabels = (points: readonly MainLiftPoint[]): string[] => {
-    const max = 6;
-    if (points.length <= max) {
-      return points.map((point) => shortDate(point.date));
-    }
-    const labels = points.map(() => '');
-    const indices = new Set<number>([0, points.length - 1]);
-    const step = Math.max(1, Math.floor(points.length / max));
-    for (let index = step; index < points.length - 1; index += step) {
-      indices.add(index);
-    }
-    for (const index of indices) {
-      labels[index] = shortDate(points[index].date);
-    }
-    return labels;
-  };
-
-  const renderRoutineChip = (routine: ProgressRoutine) => {
-    const selected = routine.routineId === selectedId;
-    const active = routine.isActive;
-    return (
-      <Pressable
-        key={routine.routineId}
-        style={({ pressed }) => [
-          styles.chip,
-          { borderColor: theme.border },
-          selected && { backgroundColor: theme.buttonBackground, borderColor: theme.buttonBackground },
-          pressed && styles.pressed,
-        ]}
-        onPress={() => setSelectedId(routine.routineId)}
-        accessibilityRole="button"
-      >
-        <Text
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[
-            styles.chipText,
-            { color: theme.text },
-            selected && { color: theme.buttonText },
-          ]}
-          numberOfLines={1}
-        >
-          {active ? `${routine.name} (${t('activeRoutine')})` : routine.name}
-        </Text>
-      </Pressable>
+  const openDay = (entry: ProgressCalendarDay) => {
+    setDetailTarget(
+      entry.target.kind === 'session'
+        ? {
+            kind: 'session',
+            routineId: entry.target.routineId,
+            cycleId: entry.target.cycleId,
+            cycleNumber: entry.target.cycleNumber,
+            weekNumber: entry.target.weekNumber,
+            sessionId: entry.target.sessionId,
+          }
+        : { kind: 'freeLog', workoutLogId: entry.target.workoutLogId },
     );
   };
 
-  const renderWeekCell = (cycle: ProgressCycle, week: ProgressWeek) => {
-    const tappable = week.resolved && !week.isCurrent;
-    const label = `${week.adherence.completed + week.adherence.moved + week.adherence.discarded}/${week.adherence.planned}`;
+  const cycleHint = (cycle: ProgressCycle, weeks: readonly ProgressWeek[]): string => {
+    const adherence = cycleAdherence(weeks);
+    const sessions = t('progressSessionsOf', {
+      done: adherence.done,
+      planned: adherence.planned,
+      percent: adherence.percent,
+    });
+    if (cycle.status === 'complete') {
+      return cycle.completedAt === null
+        ? `${t('progressCycleDone')} · ${sessions}`
+        : `${t('progressCycleDoneOn', { date: formatDate(cycle.completedAt) })} · ${sessions}`;
+    }
+    if (cycle.status === 'active') {
+      return `${t('progressCycleWeekOf', {
+        week: cycle.currentWeek,
+        weeks: cycle.weeks,
+      })} · ${sessions}`;
+    }
+    return t('progressCycleNotStarted', { weeks: cycle.weeks });
+  };
+
+  const renderWeekRow = (cycle: ProgressCycle, week: ProgressWeek) => {
+    const done = weekSessionsDone(week.adherence);
+    const detail = week.isCurrent
+      ? `${t('progressWeekSessions', { done, planned: week.adherence.planned })} · ${t(
+          'progressWeekCurrent',
+        )}`
+      : t('progressWeekSessions', { done, planned: week.adherence.planned });
     return (
-      <Pressable
-        key={week.weekNumber}
-        style={({ pressed }) => [
-          styles.weekCell,
-          { borderColor: theme.border, backgroundColor: theme.card },
-          week.isCurrent && {
-            borderColor: theme.buttonBackground,
-            borderWidth: 2,
-            backgroundColor: theme.buttonBackground,
-          },
-          !tappable && styles.dimmed,
-          pressed && tappable && styles.pressed,
-        ]}
-        disabled={!tappable}
-        onPress={() => openWeekDetail(cycle, week)}
-        accessibilityRole="button"
-      >
-        <Text
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[styles.weekNumber, { color: week.isCurrent ? theme.buttonText : theme.text }]}
-        >
-          {week.weekNumber}
-        </Text>
-        <Text
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[styles.weekAdherence, { color: week.isCurrent ? theme.buttonText : theme.text }]}
-        >
-          {label}
-        </Text>
-        {week.isCurrent && (
-          <Text
-            maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            style={[styles.currentBadge, { color: theme.buttonText }]}
-          >
-            {t('progressCurrentWeek')}
+      <Row
+        key={`${cycle.cycleId}-${week.weekNumber}`}
+        label={t('progressWeekLabel', { week: week.weekNumber })}
+        detail={detail}
+        detailBelow
+        right={
+          <Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />
+        }
+        onPress={() => openWeek(cycle, week)}
+        divided
+        testID={`progress-week-${cycle.cycleNumber}-${week.weekNumber}`}
+      />
+    );
+  };
+
+  const renderAnswer = () => {
+    const routine = routines.find((entry) => entry.routineId === selectedId);
+    if (routine === undefined) {
+      return null;
+    }
+    return (
+      <View testID="progress-answer">
+        <Text style={[styles.overline, { color: tokens.textSecondary }]}>{t('progress')}</Text>
+        <Text style={[styles.routineName, { color: tokens.textPrimary }]}>{routine.name}</Text>
+        {routine.isActive && streak !== null && (
+          <Text style={[styles.helper, { color: tokens.textSecondary }]} testID="progress-streak">
+            {t('inicioStreak', {
+              count: streak.weeks,
+              weeks: streak.weeks,
+              completed: streak.current.completed,
+              planned: streak.current.planned,
+            })}
           </Text>
         )}
-      </Pressable>
-    );
-  };
-
-  const renderCycleCard = (cycle: ProgressCycle, weeks: readonly ProgressWeek[]) => (
-    <View
-      key={cycle.cycleId}
-      style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-    >
-      <View style={styles.cycleHeader}>
-        <Text style={[styles.cardTitle, { color: theme.text }]}>
-          {t('progressCycleHeader', { n: cycle.cycleNumber })}
-        </Text>
-        {cycle.status === 'complete' && (
-          <Text
-            maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            style={[styles.statusText, { color: theme.text }]}
-          >
-            {t('reviewCycleComplete')}
+        {!routine.isActive && (
+          <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+            {t('progressSavedRoutine')}
           </Text>
         )}
       </View>
-      <View style={styles.weekRow}>{weeks.map((week) => renderWeekCell(cycle, week))}</View>
-    </View>
+    );
+  };
+
+  /**
+   * P4's index: a searchable list, never a carousel. With the field empty it is the most recently
+   * logged exercises, so picking the one trained yesterday costs no typing at all; an exercise
+   * that cannot be charted yet is greyed and says why, instead of opening into three empty charts.
+   */
+  const renderExerciseIndex = () => (
+    <Section
+      title={t('progressFindExercise')}
+      hint={t('progressFindExerciseHint')}
+      testID="progress-search"
+    >
+      <AppTextInput
+        variant="text"
+        value={query}
+        onChangeText={setQuery}
+        placeholder={t('progressSearchPlaceholder')}
+        testID="progress-search-field"
+      />
+      {searchResults.map((entry) => {
+        const shortfall = historyShortfall(entry.sessions);
+        return (
+          <Row
+            key={entry.name}
+            label={entry.name}
+            detail={
+              shortfall === null
+                ? t('progressExerciseSessionsLine', {
+                    count: entry.sessions,
+                    date: formatDate(entry.lastDate),
+                  })
+                : t('progressSinglePoint')
+            }
+            detailBelow
+            right={
+              shortfall === null ? (
+                <Ionicons
+                  name="chevron-forward"
+                  size={tabBar.icon}
+                  color={tokens.textSecondary}
+                />
+              ) : undefined
+            }
+            onPress={() => setChartedExercise(entry.name)}
+            disabled={shortfall !== null}
+            divided
+            testID={`progress-exercise-${entry.name}`}
+          />
+        );
+      })}
+      {query.trim() !== '' && searchResults.length === 0 && (
+        <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+          {t('progressSearchNoMatch')}
+        </Text>
+      )}
+      {query.trim() === '' && summaries.length > MAX_SEARCH_RESULTS && (
+        <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+          {t('progressSearchMore', { count: summaries.length - MAX_SEARCH_RESULTS })}
+        </Text>
+      )}
+    </Section>
   );
 
-  const renderLiftChart = (entry: MainLiftSeries) => {
-    const points = entry.points;
-    const chartWidth = Math.max(200, width - spacing.gutter * 2 - spacing.card * 2);
-    if (points.length === 0) {
+  const renderCalendar = () => (
+    <Section
+      title={t('progressCalendar')}
+      hint={t('progressCalendarHint')}
+      testID="progress-calendar"
+    >
+      <ProgressCalendar
+        initialMonth={calendarBounds.initial}
+        firstMonth={calendarBounds.first}
+        lastMonth={calendarBounds.last}
+        firstWeekday={firstWeekday}
+        days={calendarDays}
+        todayStamp={todayStamp}
+        weekdayLabels={weekdayOrder(firstWeekday).map((weekday) =>
+          t(WEEKDAY_SHORT_KEYS[weekday]),
+        )}
+        monthLabels={MONTH_KEYS.map((key) => t(key))}
+        stateLabels={stateLabels}
+        previousMonthLabel={t('progressPreviousMonth')}
+        nextMonthLabel={t('progressNextMonth')}
+        todayLabel={t('inicioToday')}
+        dateLabel={formatDate}
+        onSelectDay={openDay}
+        testID="progress-calendar-grid"
+      />
+    </Section>
+  );
+
+  const renderCycles = () => {
+    if (routineData === null || routineData.routine.routineId !== selectedId) {
+      return null;
+    }
+    if (routineData.cycles.length === 0) {
       return (
-        <View
-          key={entry.exerciseName}
-          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-        >
-          <Text style={[styles.cardTitle, { color: theme.text }]}>{entry.exerciseName}</Text>
-          <Text style={[styles.helper, { color: theme.text }]}>{t('progressNoData')}</Text>
-        </View>
+        <Section title={t('progressCycles')} testID="progress-no-cycles">
+          <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+            {t('progressNoCycles')}
+          </Text>
+        </Section>
       );
     }
-    if (!hasChartableSeries(points)) {
-      const point = points[0];
-      return (
-        <View
-          key={entry.exerciseName}
-          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-        >
-          <Text style={[styles.cardTitle, { color: theme.text }]}>{entry.exerciseName}</Text>
-          <Text style={[styles.singlePoint, { color: theme.text }]}>
-            {point === undefined
-              ? ''
-              : `${t('loadAbsoluteValue', {
-                  weight: formatWeight(point.weight),
-                  unit: entry.unit,
-                })} · ${point.reps} ${t('repsPlaceholder')}`}
-          </Text>
-          <Text style={[styles.helper, { color: theme.text }]}>{t('progressSinglePoint')}</Text>
-        </View>
-      );
+    return routineData.cycles.map((view) => (
+      <Section
+        key={view.cycle.cycleId}
+        title={t('progressCycleHeader', { n: view.cycle.cycleNumber })}
+        hint={cycleHint(view.cycle, view.weeks)}
+        testID={`progress-cycle-${view.cycle.cycleNumber}`}
+      >
+        {view.weeks.map((week) => renderWeekRow(view.cycle, week))}
+      </Section>
+    ));
+  };
+
+  /**
+   * The routine's main lifts, one chart per lift and one more per unit that lift was ever logged
+   * in (P3 — a series never spans a unit change). The range control belongs to the section, not to
+   * each chart: the question is "over what period", asked once.
+   */
+  const renderMainLifts = () => {
+    if (series.length === 0) {
+      return null;
     }
     return (
-      <View
-        key={entry.exerciseName}
-        style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-      >
-        <Text style={[styles.cardTitle, { color: theme.text }]}>{entry.exerciseName}</Text>
-        <LineChart
-          data={{
-            labels: chartLabels(points),
-            datasets: [{ data: points.map((point) => point.weight) }],
-          }}
-          width={chartWidth}
-          height={180}
-          withShadow={false}
-          withInnerLines
-          withOuterLines
-          withDots
-          bezier={false}
-          fromZero={false}
-          yAxisSuffix={` ${entry.unit}`}
-          chartConfig={{
-            backgroundColor: theme.card,
-            backgroundGradientFrom: theme.card,
-            backgroundGradientTo: theme.card,
-            decimalPlaces: 1,
-            color: () => theme.buttonBackground,
-            labelColor: () => theme.text,
-            propsForDots: {
-              r: '3',
-              strokeWidth: '1',
-              stroke: theme.border,
-            },
-          }}
-          style={styles.chart}
+      <Section title={t('progressMainLifts')} testID="progress-main-lifts">
+        <ChartRangeControl
+          value={range}
+          onChange={setRange}
+          testID="progress-main-lifts-range"
         />
-      </View>
+        {series.map((entry) =>
+          entry.series.map((unitSeries) => (
+            <ProgressChart
+              key={`${entry.exerciseName}-${unitSeries.unit}`}
+              title={
+                entry.series.length > 1
+                  ? t('progressChartInUnit', {
+                      title: entry.exerciseName,
+                      unit: unitSeries.unit,
+                    })
+                  : entry.exerciseName
+              }
+              points={windowByRange(unitSeries.points, range, todayStamp).map((point) => ({
+                date: point.date,
+                value: point.weight,
+              }))}
+              unit={unitSeries.unit}
+              range={range}
+              emptyLabel={range === 'all' ? t('progressNoData') : t('progressNoDataInRange')}
+              singlePointLabel={
+                range === 'all' ? t('progressSinglePoint') : t('progressSinglePointInRange')
+              }
+              testID={`progress-main-lift-${entry.exerciseName}-${unitSeries.unit}`}
+            />
+          )),
+        )}
+      </Section>
     );
   };
 
-  const renderExerciseChip = (entry: ExerciseSummary) => {
-    const selected = entry.name === selectedExercise;
-    return (
-      <Pressable
-        key={entry.name}
-        style={({ pressed }) => [
-          styles.chip,
-          { borderColor: theme.border },
-          selected && { backgroundColor: theme.buttonBackground, borderColor: theme.buttonBackground },
-          pressed && styles.pressed,
-        ]}
-        onPress={() => setSelectedExercise(entry.name)}
-        accessibilityRole="button"
-      >
-        <Text
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-          style={[
-            styles.chipText,
-            { color: theme.text },
-            selected && { color: theme.buttonText },
-          ]}
-          numberOfLines={1}
-        >
-          {entry.name}
-        </Text>
-      </Pressable>
-    );
-  };
-
-  const renderMetricChart = (
-    titleKey: string,
-    points: readonly ExerciseSessionPoint[],
-    unit: string,
-    valueOf: (point: ExerciseSessionPoint) => number,
-  ) => {
-    const chartWidth = Math.max(200, width - spacing.gutter * 2 - spacing.card * 2);
-    if (points.length === 0) {
-      return (
-        <View
-          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-        >
-          <Text style={[styles.cardTitle, { color: theme.text }]}>{t(titleKey)}</Text>
-          <Text style={[styles.helper, { color: theme.text }]}>{t('progressNoData')}</Text>
-        </View>
-      );
-    }
-    if (!hasChartableSeries(points)) {
-      const point = points[0];
-      return (
-        <View
-          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-        >
-          <Text style={[styles.cardTitle, { color: theme.text }]}>{t(titleKey)}</Text>
-          <Text style={[styles.singlePoint, { color: theme.text }]}>
-            {point === undefined
-              ? ''
-              : `${formatWeight(valueOf(point))} ${unit}`}
-          </Text>
-          <Text style={[styles.helper, { color: theme.text }]}>{t('progressSinglePoint')}</Text>
-        </View>
-      );
+  const renderOtherRoutines = () => {
+    const others = routines.filter((routine) => routine.routineId !== selectedId);
+    if (others.length === 0) {
+      return null;
     }
     return (
-      <View
-        style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
+      <Section
+        title={t('progressOtherRoutines')}
+        hint={t('progressOtherRoutinesHint')}
+        testID="progress-other-routines"
       >
-        <Text style={[styles.cardTitle, { color: theme.text }]}>{t(titleKey)}</Text>
-        <LineChart
-          data={{
-            labels: chartLabels(points),
-            datasets: [{ data: points.map(valueOf) }],
-          }}
-          width={chartWidth}
-          height={180}
-          withShadow={false}
-          withInnerLines
-          withOuterLines
-          withDots
-          bezier={false}
-          fromZero={false}
-          yAxisSuffix={` ${unit}`}
-          chartConfig={{
-            backgroundColor: theme.card,
-            backgroundGradientFrom: theme.card,
-            backgroundGradientTo: theme.card,
-            decimalPlaces: 1,
-            color: () => theme.buttonBackground,
-            labelColor: () => theme.text,
-            propsForDots: {
-              r: '3',
-              strokeWidth: '1',
-              stroke: theme.border,
-            },
-          }}
-          style={styles.chart}
-        />
-      </View>
+        {others.map((routine) => (
+          <Row
+            key={routine.routineId}
+            label={routine.name}
+            detail={routine.isActive ? t('activeRoutine') : undefined}
+            right={
+              <Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />
+            }
+            onPress={() => {
+              setSelectedId(routine.routineId);
+              setChartedExercise(null);
+            }}
+            divided
+          />
+        ))}
+      </Section>
     );
   };
 
-  const renderExerciseHistory = () => {
-    if (exerciseSummaries.length === 0) {
-      return (
-        <View
-          style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-        >
-          <Text style={[styles.cardTitle, { color: theme.text }]}>
-            {t('progressExerciseHistory')}
-          </Text>
-          <Text style={[styles.helper, { color: theme.text }]}>{t('progressHistoryNone')}</Text>
-        </View>
-      );
-    }
+  if (!loaded) {
+    return (
+      <Screen testID="progress-screen">
+        <ActivityIndicator color={tokens.accent} />
+      </Screen>
+    );
+  }
+
+  // P4: the exercise history is a destination, not a section — it replaces the routine view
+  // rather than growing under it, which is what "one search and one tap from anywhere" means.
+  if (chartedExercise !== null) {
     return (
       <>
-        <View style={styles.historyHeader}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('progressExerciseHistory')}
-          </Text>
-          {selectedExercise !== null && (
-            <Pressable
-              onPress={() => setInformation(selectedExercise)}
-              style={({ pressed }) => [styles.historyInfo, pressed && styles.pressed]}
-              accessibilityRole="button"
-              accessibilityLabel={t('exerciseInfoAction')}
-              testID="progress-exercise-information"
-            >
-              <Ionicons name="information-circle-outline" size={24} color={theme.text} />
-            </Pressable>
-          )}
-        </View>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.chipRow}
-        >
-          {exerciseSummaries.map(renderExerciseChip)}
-        </ScrollView>
-        {exerciseSeries === null || exerciseSeries.exerciseName !== selectedExercise ? null : (
-          <>
-            {exerciseSeries.mixedUnits && (
-              <Text style={[styles.helper, { color: theme.text }]}>
-                {t('progressHistoryMixedUnits')}
-              </Text>
-            )}
-            {renderMetricChart(
-              'progressLoadOverTime',
-              exerciseSeries.points,
-              exerciseSeries.unit,
-              (point) => point.weight,
-            )}
-            {renderMetricChart(
-              'progressEstimated1rm',
-              exerciseSeries.points,
-              exerciseSeries.unit,
-              (point) => point.estimated1RM,
-            )}
-            {renderMetricChart(
-              'progressVolume',
-              exerciseSeries.points,
-              exerciseSeries.unit,
-              (point) => point.volume,
-            )}
-          </>
-        )}
+        <Screen scroll testID="progress-screen">
+          <ExerciseHistoryView
+            exerciseName={chartedExercise}
+            range={range}
+            onChangeRange={setRange}
+            onBack={() => setChartedExercise(null)}
+            onOpenSheet={openExerciseSheet}
+            todayStamp={todayStamp}
+            formatDate={formatDate}
+            revision={revision}
+          />
+        </Screen>
+
+        <ExerciseSheet
+          exercise={information === null ? null : { name: information }}
+          onClose={() => setInformation(null)}
+        />
       </>
     );
-  };
-
-  const statusChip = (status: WeekDetailData['sessionStatuses'][number]['status']) => {
-    const key =
-      status === 'completed'
-        ? 'progressStatusCompleted'
-        : status === 'moved'
-          ? 'progressStatusMoved'
-          : status === 'discarded'
-            ? 'progressStatusDiscarded'
-            : '';
-    if (key === '') {
-      return null;
-    }
-    return (
-      <Text
-        maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-        style={[styles.statusText, { color: theme.text }]}
-      >
-        {t(key)}
-      </Text>
-    );
-  };
-
-  const renderWeekDetail = () => {
-    if (weekDetail === null || weekData === null) {
-      return null;
-    }
-    return (
-      <Modal
-        visible
-        animationType="slide"
-        onRequestClose={() => {
-          setWeekDetail(null);
-          setWeekData(null);
-        }}
-      >
-        <View style={[styles.modalContainer, { backgroundColor: theme.background }]}>
-          <View style={[styles.modalHeader, { borderColor: theme.border }]}>
-            <Text style={[styles.modalTitle, { color: theme.text }]} numberOfLines={1}>
-              {weekData.routineName}
-            </Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.closeButton,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => {
-                setWeekDetail(null);
-                setWeekData(null);
-              }}
-              accessibilityRole="button"
-            >
-              <Ionicons name="close" size={24} color={theme.text} />
-            </Pressable>
-          </View>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalContent}>
-            <Text style={[styles.modalSubtitle, { color: theme.text }]}>
-              {t('progressWeekDetailTitle', {
-                week: weekData.weekNumber,
-                cycle: weekData.cycleNumber,
-              })}
-            </Text>
-            {weekData.planned.map((session) => {
-              const status = weekData.sessionStatuses.find(
-                (entry) => entry.sessionId === session.sessionId,
-              )?.status;
-              const logged = weekData.logged.find(
-                (entry) => entry.sessionId === session.sessionId,
-              );
-              return (
-                <View
-                  key={session.sessionId}
-                  style={[
-                    styles.card,
-                    { backgroundColor: theme.card, borderColor: theme.border },
-                  ]}
-                >
-                  <View style={styles.cycleHeader}>
-                    <Text style={[styles.cardTitle, { color: theme.text }]}>{session.name}</Text>
-                    {status !== undefined && statusChip(status)}
-                  </View>
-                  <View style={styles.compareRow}>
-                    <View style={styles.compareColumn}>
-                      <Text style={[styles.columnHeader, { color: theme.text }]}>
-                        {t('progressPlanned')}
-                      </Text>
-                      {session.exercises.map((exercise) => (
-                        <View key={exercise.sessionExerciseId} style={styles.compareItem}>
-                          <Text style={[styles.exerciseName, { color: theme.text }]}>
-                            {exercise.name}
-                          </Text>
-                          <Text style={[styles.exerciseDetail, { color: theme.text }]}>
-                            {`${exercise.targetSets} × ${exercise.targetReps}${exercise.isAmrap ? '+' : ''}`}
-                            {exercise.targetWeight === null
-                              ? ` · ${t('loadBodyweight')}`
-                              : ` · ${t('loadAbsoluteValue', {
-                                  weight: formatWeight(exercise.targetWeight),
-                                  unit: exercise.unit,
-                                })}`}
-                          </Text>
-                        </View>
-                      ))}
-                    </View>
-                    {logged !== undefined && (
-                      <View style={styles.compareColumn}>
-                        <Text style={[styles.columnHeader, { color: theme.text }]}>
-                          {t('progressLogged')}
-                        </Text>
-                        {logged.exercises.map((exercise) => (
-                          <View key={exercise.exerciseName} style={styles.compareItem}>
-                            <Text style={[styles.exerciseName, { color: theme.text }]}>
-                              {exercise.exerciseName}
-                            </Text>
-                            {exercise.sets.map((set) => (
-                              <Text
-                                key={set.setNumber}
-                                style={[styles.exerciseDetail, { color: theme.text }]}
-                              >
-                                {`${set.setNumber}: ${formatWeight(set.weight)} ${set.unit} × ${set.reps}`}
-                              </Text>
-                            ))}
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                  </View>
-                </View>
-              );
-            })}
-          </ScrollView>
-          <View style={[styles.actionBar, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.primaryButton,
-                { backgroundColor: theme.buttonBackground },
-                pressed && styles.pressed,
-              ]}
-              onPress={goToEditRoutine}
-              accessibilityRole="button"
-            >
-              <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-                {t('progressEditRoutine')}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-    );
-  };
-
-  const renderCalendar = () => {
-    const start = firstWeekday === 'Monday' ? 1 : 0;
-    const orderedWeekdays = Array.from({ length: 7 }, (_, index) => (start + index) % 7);
-    const firstDayOfMonth = new Date(month.year, month.month, 1).getDay();
-    const daysInMonth = new Date(month.year, month.month + 1, 0).getDate();
-    const leadingBlanks = (firstDayOfMonth - start + 7) % 7;
-    const todayStamp = dayStampOf(new Date());
-    const cells: (number | null)[] = [
-      ...Array.from({ length: leadingBlanks }, () => null),
-      ...Array.from({ length: daysInMonth }, (_, index) => index + 1),
-    ];
-    while (cells.length % 7 !== 0) {
-      cells.push(null);
-    }
-
-    const prevMonth = () => {
-      setMonth((current) =>
-        current.month === 0
-          ? { year: current.year - 1, month: 11 }
-          : { year: current.year, month: current.month - 1 },
-      );
-    };
-    const nextMonth = () => {
-      setMonth((current) =>
-        current.month === 11
-          ? { year: current.year + 1, month: 0 }
-          : { year: current.year, month: current.month + 1 },
-      );
-    };
-
-    return (
-      <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-        <View style={styles.monthHeader}>
-          <Pressable
-            style={({ pressed }) => [styles.monthNav, pressed && styles.pressed]}
-            onPress={prevMonth}
-            accessibilityRole="button"
-            accessibilityLabel={t('progressPreviousMonth')}
-          >
-            <Ionicons name="chevron-back" size={20} color={theme.text} />
-          </Pressable>
-          <Text style={[styles.monthTitle, { color: theme.text }]}>
-            {`${t(MONTH_KEYS[month.month])} ${month.year}`}
-          </Text>
-          <Pressable
-            style={({ pressed }) => [styles.monthNav, pressed && styles.pressed]}
-            onPress={nextMonth}
-            accessibilityRole="button"
-            accessibilityLabel={t('progressNextMonth')}
-          >
-            <Ionicons name="chevron-forward" size={20} color={theme.text} />
-          </Pressable>
-        </View>
-        <View style={styles.weekdayRow}>
-          {orderedWeekdays.map((weekday) => (
-            <Text
-              key={weekday}
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-              style={[styles.weekdayLetter, { color: theme.text }]}
-            >
-              {t(WEEKDAY_SHORT_KEYS[weekday])}
-            </Text>
-          ))}
-        </View>
-        <View style={styles.calendarGrid}>
-          {cells.map((day, index) => {
-            if (day === null) {
-              return <View key={`blank-${index}`} style={styles.dayCell} />;
-            }
-            const stamp = dayStampOf(new Date(month.year, month.month, day));
-            const count = markers.get(stamp) ?? 0;
-            const isToday = stamp === todayStamp;
-            return (
-              <Pressable
-                key={stamp}
-                style={({ pressed }) => [
-                  styles.dayCell,
-                  isToday && { borderColor: theme.buttonBackground, borderWidth: 2 },
-                  pressed && count > 0 && styles.pressed,
-                ]}
-                disabled={count === 0}
-                onPress={() => setDayPopup(stamp)}
-                accessibilityRole="button"
-                accessibilityLabel={formatDate(stamp)}
-              >
-                <Text
-                  maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                  style={[styles.dayNumber, { color: theme.text }]}
-                >
-                  {day}
-                </Text>
-                <View style={styles.dotRow}>
-                  {Array.from({ length: Math.min(count, 3) }, (_, dotIndex) => (
-                    <View
-                      key={dotIndex}
-                      style={[styles.dot, { backgroundColor: theme.buttonBackground }]}
-                    />
-                  ))}
-                </View>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-    );
-  };
-
-  const renderDayPopup = () => {
-    if (dayPopup === null) {
-      return null;
-    }
-    const logs = logsOnDate(calendarLogs, dayPopup);
-    return (
-      <Modal
-        visible
-        transparent
-        animationType="fade"
-        onRequestClose={() => setDayPopup(null)}
-      >
-        <Pressable style={styles.backdrop} onPress={() => setDayPopup(null)}>
-          <Pressable
-            style={[styles.popupCard, { backgroundColor: theme.card, borderColor: theme.border }]}
-            onPress={() => {}}
-          >
-            <Text style={[styles.cardTitle, { color: theme.text }]}>
-              {t('progressLogsOn', { date: formatDate(dayPopup) })}
-            </Text>
-            <View style={styles.popupList}>
-              {logs.map((log) => (
-                <View key={log.workoutLogId} style={styles.popupRow}>
-                  <Text style={[styles.exerciseName, { color: theme.text }]} numberOfLines={1}>
-                    {log.workoutName}
-                  </Text>
-                  <Text style={[styles.exerciseDetail, { color: theme.text }]} numberOfLines={1}>
-                    {log.dayName}
-                  </Text>
-                </View>
-              ))}
-            </View>
-            <Pressable
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                { borderColor: theme.border },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => setDayPopup(null)}
-              accessibilityRole="button"
-            >
-              <Text style={[styles.secondaryButtonText, { color: theme.text }]}>{t('Cancel')}</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
-    );
-  };
+  }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <Text style={[styles.title, { color: theme.text }]}>{t('progress')}</Text>
-
-        <View style={styles.viewSwitcher}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.viewSwitchChip,
-              { borderColor: theme.border },
-              view === 'routine' && {
-                backgroundColor: theme.buttonBackground,
-                borderColor: theme.buttonBackground,
-              },
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setView('routine')}
-            accessibilityRole="button"
-          >
-            <Text
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-              style={[
-                styles.chipText,
-                { color: theme.text },
-                view === 'routine' && { color: theme.buttonText },
-              ]}
-            >
-              {t('progressViewRoutine')}
-            </Text>
-          </Pressable>
-          <Pressable
-            style={({ pressed }) => [
-              styles.viewSwitchChip,
-              { borderColor: theme.border },
-              view === 'exercises' && {
-                backgroundColor: theme.buttonBackground,
-                borderColor: theme.buttonBackground,
-              },
-              pressed && styles.pressed,
-            ]}
-            onPress={() => setView('exercises')}
-            accessibilityRole="button"
-          >
-            <Text
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-              style={[
-                styles.chipText,
-                { color: theme.text },
-                view === 'exercises' && { color: theme.buttonText },
-              ]}
-            >
-              {t('progressViewExercises')}
-            </Text>
-          </Pressable>
-        </View>
-
-        {view === 'routine' ? (
+    <>
+      <Screen scroll testID="progress-screen">
+        {routines.length === 0 ? (
           <>
-            {routines.length > 0 && (
-              <>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.chipRow}
-                >
-                  {routines.map(renderRoutineChip)}
-                </ScrollView>
-
-                {routineData === null || routineData.routine.routineId !== selectedId ? null : (
-                  <>
-                    {routineData.cycles.length === 0 ? (
-                      <View
-                        style={[
-                          styles.card,
-                          { backgroundColor: theme.card, borderColor: theme.border },
-                        ]}
-                      >
-                        <Text style={[styles.cardTitle, { color: theme.text }]}>
-                          {routineData.routine.name}
-                        </Text>
-                        <Text style={[styles.helper, { color: theme.text }]}>
-                          {t('progressNoCycles')}
-                        </Text>
-                      </View>
-                    ) : (
-                      routineData.cycles.map((cycleView) =>
-                        renderCycleCard(cycleView.cycle, cycleView.weeks),
-                      )
-                    )}
-
-                    <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                      {t('progressMainLifts')}
-                    </Text>
-                    {series.map(renderLiftChart)}
-
-                  </>
-                )}
-              </>
-            )}
-
-            {routines.length === 0 && (
-              <View style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                <Text style={[styles.cardTitle, { color: theme.text }]}>{t('progress')}</Text>
-                <Text style={[styles.helper, { color: theme.text }]}>{t('progressNoRoutines')}</Text>
-              </View>
-            )}
-
-            <Text style={[styles.sectionTitle, { color: theme.text }]}>
-              {t('progressCalendar')}
-            </Text>
-            {renderCalendar()}
+            <EmptyState
+              title={t('progressNoRoutinesTitle')}
+              message={t('progressNoRoutines')}
+              actionLabel={t('goToRoutines')}
+              onAction={() => navigation.navigate('Routines')}
+              testID="progress-no-routines"
+            />
+            {/* Free sessions are history too: with no routine yet, this is still their door. */}
+            {summaries.length > 0 && renderExerciseIndex()}
           </>
         ) : (
-          renderExerciseHistory()
+          <>
+            <Section testID="progress-header">{renderAnswer()}</Section>
+            {renderExerciseIndex()}
+            {renderCalendar()}
+            {renderCycles()}
+            {renderMainLifts()}
+            {renderOtherRoutines()}
+          </>
         )}
-      </ScrollView>
-      {renderWeekDetail()}
-      {renderDayPopup()}
+      </Screen>
+
+      {/* P1/P2: a week and a day open the same sheet. */}
+      <SessionDetailSheet
+        target={detailTarget}
+        visible={detailTarget !== null && information === null}
+        onClose={() => setDetailTarget(null)}
+        onOpenExercise={openExerciseSheet}
+        onEdited={() => setRevision((current) => current + 1)}
+        formatDate={formatDate}
+      />
 
       {/* R2: the same exercise sheet the runner, the editor and the picker open. */}
       <ExerciseSheet
         exercise={information === null ? null : { name: information }}
         onClose={() => setInformation(null)}
+        onOpenHistory={(exerciseName) => {
+          setInformation(null);
+          setChartedExercise(exerciseName);
+        }}
       />
-    </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  overline: {
+    fontSize: fontSize.caption,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
-  content: {
-    padding: spacing.gutter,
-    paddingBottom: spacing.section * 2,
-  },
-  title: {
+  routineName: {
     fontSize: fontSize.screenTitle,
-    fontWeight: '900',
-    textAlign: 'center',
-    marginBottom: spacing.section,
-  },
-  sectionTitle: {
-    fontSize: fontSize.sectionTitle,
-    fontWeight: '900',
-    marginTop: spacing.section,
-    marginBottom: spacing.card,
-  },
-  historyHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.inline,
-  },
-  historyInfo: {
-    minWidth: touchTarget.icon,
-    minHeight: touchTarget.icon,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chipRow: {
-    flexDirection: 'row',
-    gap: spacing.inline,
-    marginBottom: spacing.section,
-  },
-  viewSwitcher: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacing.inline,
-    marginBottom: spacing.section,
-  },
-  viewSwitchChip: {
-    flex: 1,
-    maxWidth: 220,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    paddingHorizontal: spacing.card,
-    minHeight: touchTarget.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chip: {
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    paddingHorizontal: spacing.card,
-    minHeight: touchTarget.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  chipText: {
-    fontSize: fontSize.body,
-    fontWeight: '600',
-  },
-  card: {
-    borderWidth: 1,
-    borderRadius: radius.card,
-    padding: spacing.card,
-    marginBottom: spacing.cardGap,
-  },
-  cardTitle: {
-    fontSize: fontSize.cardTitle,
     fontWeight: '700',
-  },
-  cycleHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.card,
-  },
-  statusText: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-    opacity: 0.7,
-  },
-  weekRow: {
-    flexDirection: 'row',
-    gap: spacing.inline,
-  },
-  weekCell: {
-    flex: 1,
-    borderRadius: radius.control,
-    borderWidth: 1,
-    paddingVertical: spacing.label,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: touchTarget.control,
-  },
-  weekNumber: {
-    fontSize: fontSize.cardTitle,
-    fontWeight: '900',
-  },
-  weekAdherence: {
-    fontSize: fontSize.caption,
-    opacity: 0.8,
-  },
-  currentBadge: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  dimmed: {
-    opacity: 0.5,
-  },
-  pressed: {
-    opacity: 0.5,
+    marginTop: spacing.label,
   },
   helper: {
     fontSize: fontSize.helper,
-    opacity: 0.7,
     marginTop: spacing.label,
-  },
-  singlePoint: {
-    fontSize: fontSize.body,
-    fontWeight: '700',
-    marginTop: spacing.card,
-  },
-  chart: {
-    marginTop: spacing.card,
-    marginLeft: -spacing.card,
-  },
-  primaryButton: {
-    borderRadius: radius.control,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.card,
-    minHeight: touchTarget.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: spacing.card,
-  },
-  secondaryButton: {
-    borderRadius: radius.control,
-    borderWidth: 1,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.card,
-    minHeight: touchTarget.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  primaryButtonText: {
-    fontSize: fontSize.button,
-    fontWeight: '700',
-  },
-  secondaryButtonText: {
-    fontSize: fontSize.button,
-    fontWeight: '600',
-  },
-  modalContainer: {
-    flex: 1,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderBottomWidth: 1,
-    paddingHorizontal: spacing.gutter,
-    paddingVertical: spacing.card,
-  },
-  modalTitle: {
-    fontSize: fontSize.cardTitle,
-    fontWeight: '700',
-    flex: 1,
-  },
-  modalSubtitle: {
-    fontSize: fontSize.helper,
-    opacity: 0.7,
-    textAlign: 'center',
-    marginBottom: spacing.section,
-  },
-  closeButton: {
-    width: touchTarget.icon,
-    height: touchTarget.icon,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalContent: {
-    padding: spacing.gutter,
-    paddingBottom: spacing.section * 2,
-  },
-  compareRow: {
-    flexDirection: 'row',
-    gap: spacing.card,
-  },
-  compareColumn: {
-    flex: 1,
-  },
-  columnHeader: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-    opacity: 0.7,
-    marginBottom: spacing.label,
-  },
-  compareItem: {
-    marginBottom: spacing.card,
-  },
-  exerciseName: {
-    fontSize: fontSize.body,
-    fontWeight: '600',
-  },
-  exerciseDetail: {
-    fontSize: fontSize.helper,
-    opacity: 0.8,
-  },
-  actionBar: {
-    borderTopWidth: 1,
-    padding: spacing.card,
-  },
-  monthHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.card,
-  },
-  monthNav: {
-    width: touchTarget.icon,
-    height: touchTarget.icon,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  monthTitle: {
-    fontSize: fontSize.cardTitle,
-    fontWeight: '700',
-  },
-  weekdayRow: {
-    flexDirection: 'row',
-    marginBottom: spacing.label,
-  },
-  weekdayLetter: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: fontSize.caption,
-    fontWeight: '600',
-    opacity: 0.7,
-  },
-  calendarGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-  },
-  dayCell: {
-    width: '14.285714%',
-    aspectRatio: 1,
-    borderRadius: radius.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'transparent',
-  },
-  dayNumber: {
-    fontSize: fontSize.caption,
-    fontWeight: '600',
-  },
-  dotRow: {
-    flexDirection: 'row',
-    gap: 2,
-    marginTop: 2,
-  },
-  dot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-  },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: spacing.gutter,
-  },
-  popupCard: {
-    width: '100%',
-    maxWidth: 400,
-    borderRadius: radius.card,
-    borderWidth: 1,
-    padding: spacing.card,
-  },
-  popupList: {
-    marginTop: spacing.card,
-    gap: spacing.cardGap,
-  },
-  popupRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: spacing.inline,
   },
 });

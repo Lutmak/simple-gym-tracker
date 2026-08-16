@@ -216,18 +216,25 @@ export function computeInicioStreak(
         week.startStamp <= currentWeekEnd &&
         week.startStamp + 6 * DAY_SECONDS >= currentWeekStart,
     );
+  let currentEntry: StreakWeek | undefined = currentCycleWeek;
   if (currentCycleWeek === undefined && currentWeek.planned > 0) {
-    historicalWeeks.push({
+    // No cycle row covers this week — between cycles, or before the first one
+    // is materialised. The week is still in progress either way, so it takes
+    // the same treatment as a cycle's own current week below.
+    currentEntry = {
       startStamp: currentWeekStart,
       planned: currentWeek.planned,
       completed: currentWeek.completed,
       complete: currentWeek.completed === currentWeek.planned,
-    });
+    };
+    historicalWeeks.push(currentEntry);
   }
 
   let weeks = 0;
   for (let index = historicalWeeks.length - 1; index >= 0; index -= 1) {
-    if (historicalWeeks[index] === currentCycleWeek && !currentCycleWeek.complete) {
+    // A week still being trained never breaks the streak: only a finished week
+    // whose plan went unmet does (§3.7).
+    if (historicalWeeks[index] === currentEntry && currentEntry?.complete === false) {
       continue;
     }
     if (!historicalWeeks[index].complete) {

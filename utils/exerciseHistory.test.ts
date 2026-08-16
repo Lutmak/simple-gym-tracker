@@ -5,9 +5,15 @@ import { saveFreeSession } from './freeLogging';
 import { hasChartableSeries } from './routineProgress';
 import {
   buildExerciseSeries,
+  buildExerciseSeriesByUnit,
+  historyShortfall,
   loadExerciseSeries,
+  loadExerciseUnitHistory,
   loadExercisesWithHistory,
+  rankExerciseHistory,
+  MIN_CHART_SESSIONS,
   type ExerciseHistoryRow,
+  type ExerciseSummary,
 } from './exerciseHistory';
 import type { RoutineDatabase } from './routineActions';
 
@@ -48,6 +54,51 @@ const setupDemo = async (): Promise<{ db: DatabaseSync; executor: TestExecutor }
   await loadDemoData(demoDb(db));
   return { db, executor };
 };
+
+describe('P4 — the exercise list of Progreso', () => {
+  const summaries: ExerciseSummary[] = [
+    { name: 'Barbell Full Squat', lastDate: 3, sessions: 32 },
+    { name: 'Barbell Bench Press - Medium Grip', lastDate: 2, sessions: 23 },
+    { name: 'Hack Squat', lastDate: 1, sessions: 1 },
+    { name: 'Squat Jump', lastDate: 0, sessions: 4 },
+  ];
+
+  it('matches anywhere in the name, ignoring case', () => {
+    expect(rankExerciseHistory(summaries, 'squat', 8).map((entry) => entry.name)).toEqual([
+      'Squat Jump',
+      'Barbell Full Squat',
+      'Hack Squat',
+    ]);
+    expect(rankExerciseHistory(summaries, 'BENCH', 8)).toHaveLength(1);
+    expect(rankExerciseHistory(summaries, 'deadlift', 8)).toEqual([]);
+  });
+
+  it('ranks a name that starts with the query above one that merely contains it', () => {
+    const ranked = rankExerciseHistory(summaries, 'sq', 8).map((entry) => entry.name);
+    expect(ranked[0]).toBe('Squat Jump');
+    // "Full Squat" and "Hack Squat" both start a word with it, and keep recency order.
+    expect(ranked.slice(1)).toEqual(['Barbell Full Squat', 'Hack Squat']);
+  });
+
+  it('is a list before anything is typed — the most recently logged, capped', () => {
+    expect(rankExerciseHistory(summaries, '', 2).map((entry) => entry.name)).toEqual([
+      'Barbell Full Squat',
+      'Barbell Bench Press - Medium Grip',
+    ]);
+    expect(rankExerciseHistory(summaries, '   ', 8)).toHaveLength(4);
+  });
+
+  it('caps what it returns at the limit it was given', () => {
+    expect(rankExerciseHistory(summaries, 'squat', 1)).toHaveLength(1);
+  });
+
+  it('says an exercise cannot be charted yet, and why', () => {
+    expect(historyShortfall(0)).toBe('noSessions');
+    expect(historyShortfall(1)).toBe('oneSession');
+    expect(historyShortfall(MIN_CHART_SESSIONS)).toBeNull();
+    expect(historyShortfall(50)).toBeNull();
+  });
+});
 
 describe('pure core', () => {
   it('builds one point per session with top weight, session-max 1RM and volume', () => {
@@ -128,6 +179,33 @@ describe('pure core', () => {
     expect(mixed.points.map((point) => point.weight)).toEqual([100, 200]);
   });
 
+  it('splits a history that spans a unit change into one series per unit', () => {
+    const series = buildExerciseSeriesByUnit([
+      { date: epoch('2026-04-06'), setNumber: 1, weight: 100, reps: 5, unit: 'kg' },
+      { date: epoch('2026-04-13'), setNumber: 1, weight: 102.5, reps: 5, unit: 'kg' },
+      // The same day read in pounds on a machine: two points, one per series.
+      { date: epoch('2026-04-13'), setNumber: 2, weight: 225, reps: 5, unit: 'lb' },
+      { date: epoch('2026-04-20'), setNumber: 1, weight: 230, reps: 5, unit: 'lb' },
+    ]);
+
+    // Most recently logged unit first — that is what the user is training in now.
+    expect(series.map((entry) => entry.unit)).toEqual(['lb', 'kg']);
+    expect(series[0].points.map((point) => point.weight)).toEqual([225, 230]);
+    expect(series[1].points.map((point) => point.weight)).toEqual([100, 102.5]);
+    // Nothing is converted and nothing crosses over: the kg series never sees 225.
+    expect(series[1].points).toHaveLength(2);
+  });
+
+  it('gives an empty history no series at all, and a single-unit one exactly one', () => {
+    expect(buildExerciseSeriesByUnit([])).toEqual([]);
+    const single = buildExerciseSeriesByUnit([
+      { date: epoch('2026-04-06'), setNumber: 1, weight: 100, reps: 5, unit: 'kg' },
+    ]);
+    expect(single).toHaveLength(1);
+    expect(single[0].points).toHaveLength(1);
+    expect(hasChartableSeries(single[0].points)).toBe(false);
+  });
+
   it('never crashes the estimator on bodyweight sets logged as 0', () => {
     const { points } = buildExerciseSeries([
       { date: epoch('2026-04-06'), setNumber: 1, weight: 0, reps: 10, unit: 'kg' },
@@ -151,6 +229,41 @@ describe('demo data through the db edges', () => {
     expect(summaries.map((entry) => entry.name)).toContain('Hack Squat');
     expect(summaries.map((entry) => entry.name)).toContain('Wide-Grip Lat Pulldown');
     expect(summaries[summaries.length - 1]?.lastDate).toBe(epoch('2026-06-20'));
+  });
+
+  it('counts the sessions the list greys an exercise out by, matching the chart points', async () => {
+    const { executor } = await setupDemo();
+    const summaries = await loadExercisesWithHistory(executor);
+
+    const squat = summaries.find((entry) => entry.name === 'Barbell Full Squat');
+    const series = await loadExerciseSeries(executor, 'Barbell Full Squat');
+    expect(squat?.sessions).toBe(series.points.length);
+    expect(historyShortfall(squat?.sessions ?? 0)).toBeNull();
+
+    // The free log's one-off exercise: visibly a one-session exercise before it is opened.
+    const oneOff = summaries.find((entry) => entry.sessions === 1);
+    expect(oneOff).toBeDefined();
+    expect(historyShortfall(oneOff?.sessions ?? 0)).toBe('oneSession');
+  });
+
+  it('loads a per-unit history for the charts, one series per logged unit', async () => {
+    const { executor } = await setupDemo();
+
+    const squat = await loadExerciseUnitHistory(executor, 'Barbell Full Squat');
+    expect(squat.mixedUnits).toBe(false);
+    expect(squat.series).toHaveLength(1);
+    expect(squat.series[0].unit).toBe('kg');
+    expect(squat.series[0].points).toHaveLength(32);
+
+    const pulldown = await loadExerciseUnitHistory(executor, 'Wide-Grip Lat Pulldown');
+    expect(pulldown.series.map((entry) => entry.unit)).toEqual(['lb']);
+
+    const never = await loadExerciseUnitHistory(executor, 'Never Logged Exercise');
+    expect(never).toEqual({
+      exerciseName: 'Never Logged Exercise',
+      mixedUnits: false,
+      series: [],
+    });
   });
 
   it('merges the squat history across both routines: the linear early block then six wave cycles', async () => {

@@ -30,6 +30,7 @@ import { warmupSets } from './fiveThreeOne';
 import { inferBaselineWeight, baselineColumn } from './learnedWeights';
 import { proposeJokerWeight } from './jokers';
 import { canSaveBarProfile, type BarProfileKey } from './barProfiles';
+import { loadSessionFinishContext, type SessionFinishContext } from './sessionFinish';
 import { targetSetsFor, targetWeightFor, type PlannedTargetSet } from './today';
 import type {
   RoutineDatabase,
@@ -175,6 +176,25 @@ export function buildPlannedDraft(session: RunnerSession): RunnerDraft {
       reps: target.targetReps,
       weight: target.targetWeight,
     })),
+  );
+}
+
+/** Retains set timing already observed and gives untouched planned sets real finish timing. */
+export function stampMissingSetTimes(
+  draft: RunnerDraft,
+  startedAt: number,
+  completedAt: number,
+): RunnerDraft {
+  return draft.map((sets) =>
+    sets.map((set) =>
+      set === null
+        ? null
+        : {
+            ...set,
+            startedAt: set.startedAt ?? startedAt,
+            completedAt: set.completedAt ?? completedAt,
+          },
+    ),
   );
 }
 
@@ -346,6 +366,7 @@ export interface SavedSession {
   workoutLogId: number;
   loggedSets: number;
   loggedExercises: number;
+  finishContext: SessionFinishContext;
 }
 
 /**
@@ -482,11 +503,14 @@ export async function saveSessionLog(
       }
     }
 
+    const finishContext = await loadSessionFinishContext(db, weekSessionId);
+
     await db.run('COMMIT;');
     return {
       workoutLogId,
       loggedSets: rows.weightLog.length,
       loggedExercises: rows.loggedExercises.length,
+      finishContext,
     };
   } catch (error) {
     await db.run('ROLLBACK;');

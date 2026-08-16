@@ -609,7 +609,18 @@ describe('saveSessionLog — one atomic transaction', () => {
 
     const saved = await saveSessionLog(executor, session.weekSessionId, session, planned(session));
 
-    expect(saved).toEqual({ workoutLogId: expect.any(Number), loggedSets: 12, loggedExercises: 4 });
+    expect(saved).toEqual({
+      workoutLogId: expect.any(Number),
+      loggedSets: 12,
+      loggedExercises: 4,
+      finishContext: {
+        routineId: 1,
+        cycleId: 6,
+        cycleNumber: 6,
+        weekNumber: 4,
+        reviewAvailable: false,
+      },
+    });
     expect(count(db, 'Workout_Log')).toBe(historyBefore.workoutLog + 1);
     expect(count(db, 'Logged_Exercises')).toBe(historyBefore.logged + 4);
     expect(count(db, 'Weight_Log')).toBe(historyBefore.weight + 12);

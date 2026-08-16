@@ -7,6 +7,7 @@ import {
   buildLiftSeries,
   computeWeekAdherence,
   hasChartableSeries,
+  hasProgressFocus,
   loadCalendarLogs,
   loadMainLiftSeries,
   loadProgressRoutines,
@@ -55,6 +56,47 @@ const setupDemo = async (): Promise<{ db: DatabaseSync; executor: TestExecutor }
 };
 
 describe('pure core', () => {
+  it('recognizes an exact saved routine week for a progress deep link', () => {
+    const data = {
+      routine: {
+        routineId: 4,
+        name: 'Demo Routine',
+        isActive: true,
+        unit: 'kg' as const,
+        roundingIncrement: 2.5,
+      },
+      cycles: [
+        {
+          cycle: {
+            cycleId: 9,
+            cycleNumber: 2,
+            weeks: 4,
+            status: 'active' as const,
+            currentWeek: 3,
+          },
+          weeks: [
+            {
+              weekNumber: 3,
+              adherence: {
+                planned: 1,
+                completed: 1,
+                moved: 0,
+                discarded: 0,
+                pending: 0,
+              },
+              resolved: true,
+              isCurrent: true,
+            },
+          ],
+        },
+      ],
+    };
+
+    expect(hasProgressFocus(data, { routineId: 4, cycleId: 9, weekNumber: 3 })).toBe(true);
+    expect(hasProgressFocus(data, { routineId: 4, cycleId: 9, weekNumber: 2 })).toBe(false);
+    expect(hasProgressFocus(data, { routineId: 5, cycleId: 9, weekNumber: 3 })).toBe(false);
+  });
+
   it('computes adherence from WeekSessions statuses', () => {
     expect(
       computeWeekAdherence([

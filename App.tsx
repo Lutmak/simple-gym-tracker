@@ -6,7 +6,13 @@
   import { Asset } from 'expo-asset';
   import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
   import { createNativeStackNavigator } from '@react-navigation/native-stack';
-  import { DarkTheme, DefaultTheme, NavigationContainer, NavigationContainerRef } from '@react-navigation/native';
+import {
+  DarkTheme,
+  DefaultTheme,
+  NavigationContainer,
+  NavigationContainerRef,
+  type NavigatorScreenParams,
+} from '@react-navigation/native';
   import type { Theme } from '@react-navigation/native';
   import { GestureHandlerRootView } from 'react-native-gesture-handler';
   import './utils/i18n'; // Ensure this is present to initialize i18n
@@ -22,7 +28,8 @@
   import ActivateRoutineScreen from './screens/ActivateRoutineScreen';
   import EditRoutineScreen from './screens/EditRoutineScreen';
   import FiveThreeOneSetupScreen from './screens/FiveThreeOneSetupScreen';
-  import CycleReviewScreen from './screens/CycleReviewScreen';
+import CycleReviewScreen from './screens/CycleReviewScreen';
+import SessionSummaryScreen from './screens/SessionSummaryScreen';
   import { SettingsProvider, useSettings } from './context/SettingsContext';
   import { ThemeProvider, useTheme } from './context/ThemeContext';
   import { QueueRevisionProvider } from './context/QueueRevision';
@@ -31,11 +38,14 @@
   import { checkAndSyncPermissions } from './utils/notificationUtils';
   import { fontSize } from './utils/scale';
   import { getTokens, type ThemeMode } from './utils/theme';
-  import { TabBar } from './components/TabBar';
+import { TabBar } from './components/TabBar';
+import type { ProgressFocus } from './utils/routineProgress';
+import type { SessionSummaryFinishContext } from './utils/sessionFinish';
+import type { SessionSummary } from './utils/sessionSummary';
 
 
 
-  const Bottom = createBottomTabNavigator();
+  const Bottom = createBottomTabNavigator<RootTabParamList>();
 
   /**
    * React Navigation's own palette, derived from the tokens (ENGINEERING.md §4:
@@ -146,6 +156,22 @@
     InicioIndex: { resolutionWeekSessionId?: number } | undefined;
     StartSession: { weekSessionId: number };
     FreeLogging: undefined;
+    SessionSummary: SessionSummaryRouteParams;
+  };
+
+  export interface SessionSummaryRouteParams {
+    sessionName: string;
+    routineName: string;
+    workoutDate: number;
+    summary: SessionSummary;
+    finishContext: SessionSummaryFinishContext;
+  }
+
+  export type RootTabParamList = {
+    Inicio: NavigatorScreenParams<InicioStackParamList> | undefined;
+    Progress: { focus?: ProgressFocus } | undefined;
+    Routines: NavigatorScreenParams<RoutinesStackParamList> | undefined;
+    Settings: undefined;
   };
 
 // The schema lives in utils/schema.ts (pure, testable); this is the app-side
@@ -193,6 +219,11 @@ const InicioStack = () => {
         name="FreeLogging"
         component={FreeLoggingScreen}
         options={{ title: t('freeLogging') }}
+      />
+      <InicioStackNavigator.Screen
+        name="SessionSummary"
+        component={SessionSummaryScreen}
+        options={{ headerShown: false }}
       />
     </InicioStackNavigator.Navigator>
   );
@@ -250,7 +281,7 @@ const AppContent = () => {
   const { theme, tokens } = useTheme();
   const { notificationPermissionGranted, setNotificationPermissionGranted } =
     useSettings();
-  const navigationRef = useRef<NavigationContainerRef<any>>(null);
+  const navigationRef = useRef<NavigationContainerRef<RootTabParamList>>(null);
 
   useEffect(() => {
     if (notificationPermissionGranted) {

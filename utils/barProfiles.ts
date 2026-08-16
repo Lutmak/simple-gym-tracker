@@ -68,6 +68,21 @@ export function defaultBarProfileForEquipment(equipment: string | null): BarProf
   return null;
 }
 
+/**
+ * The default profile for a catalog row, seeded or custom (R2). A seeded row has no `uses_bar`
+ * answer and falls back to the equipment mapping; a custom exercise was asked the question
+ * outright, so its answer wins — a user's bar is a fact about their gym, not an inference.
+ */
+export function defaultBarProfileForCatalogRow(
+  equipment: string | null,
+  usesBar: boolean | null,
+): BarProfileKey | null {
+  if (usesBar === null) {
+    return defaultBarProfileForEquipment(equipment);
+  }
+  return usesBar ? 'olympic' : null;
+}
+
 export const KG_PER_LB = 0.45359237;
 
 /** A custom bar is meaningful only when its stored weight is finite and positive. */

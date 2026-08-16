@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
 import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
 
@@ -12,6 +13,8 @@ import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
 export type SegmentedOption<T extends string> = {
   value: T;
   label: string;
+  /** An Ionicons glyph before the label, for options that are things rather than states (R2). */
+  icon?: string;
 };
 
 export type SegmentedControlProps<T extends string> = {
@@ -55,6 +58,19 @@ export function SegmentedControl<T extends string>({
                   : null,
             ]}
           >
+            {option.icon !== undefined && (
+              <Ionicons
+                name={option.icon}
+                size={fontSize.button}
+                color={
+                  selected
+                    ? tokens.onAccent
+                    : disabled
+                      ? tokens.disabled
+                      : tokens.textPrimary
+                }
+              />
+            )}
             <Text
               style={[
                 styles.label,
@@ -85,6 +101,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: touchTarget.control,
     borderRadius: radius.control,
+    flexDirection: 'row',
+    gap: spacing.inline,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: spacing.card,

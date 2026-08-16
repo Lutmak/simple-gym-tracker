@@ -9,6 +9,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
+import { ExerciseSheet } from '../components/ExerciseSheet';
 import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { Section } from '../components/Section';
@@ -33,7 +34,8 @@ import {
   type InicioDayStatus,
 } from '../utils/inicio';
 import type { RoutineDatabase } from '../utils/routineActions';
-import type { InicioStackParamList } from '../App';
+import type { InicioStackParamList, RootTabParamList } from '../App';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { useQueueRevision } from '../context/QueueRevision';
 
 type Props = NativeStackScreenProps<InicioStackParamList, 'InicioIndex'>;
@@ -102,6 +104,8 @@ export default function InicioScreen({ navigation, route }: Props) {
   const [resolutionStep, setResolutionStep] = useState<ResolutionStep>('outcomes');
   const [moveDayPlan, setMoveDayPlan] = useState<MoveDayPlan | null>(null);
   const [calendarVisible, setCalendarVisible] = useState(false);
+  /** R2: the exercise whose shared sheet is open. */
+  const [information, setInformation] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [resolutionError, setResolutionError] = useState<string | null>(null);
   const [pendingReopenId, setPendingReopenId] = useState<number | null>(null);
@@ -114,6 +118,14 @@ export default function InicioScreen({ navigation, route }: Props) {
       (await db.getFirstAsync<Record<string, unknown>>(sql, (params ?? []) as never[])) ?? undefined,
     getAll: async (sql: string, params?: readonly unknown[]) =>
       db.getAllAsync<Record<string, unknown>>(sql, (params ?? []) as never[]),
+  };
+
+  /** R2's link from the exercise sheet to that exercise's full chart, on the Progreso tab. */
+  const openExerciseHistory = (exerciseName: string) => {
+    setInformation(null);
+    navigation
+      .getParent<BottomTabNavigationProp<RootTabParamList>>()
+      ?.navigate('Progress', { exercise: exerciseName });
   };
 
   const reload = useCallback(async (): Promise<InicioData | null> => {
@@ -564,6 +576,8 @@ export default function InicioScreen({ navigation, route }: Props) {
                       : `${formatWeight(exercise.targetWeight)} ${exercise.unit}`}
                   </Text>
                 }
+                /* R2: today's plan is one tap from what each exercise actually is. */
+                onPress={() => setInformation(exercise.name)}
                 divided
               />
             ))}
@@ -630,6 +644,13 @@ export default function InicioScreen({ navigation, route }: Props) {
         )}
       </Screen>
       {renderResolutionSheet()}
+
+      {/* R2: the shared exercise sheet, the same one the runner and the editor open. */}
+      <ExerciseSheet
+        exercise={information === null ? null : { name: information }}
+        onClose={() => setInformation(null)}
+        onOpenHistory={openExerciseHistory}
+      />
     </>
   );
 }

@@ -1,22 +1,54 @@
-import React, { useCallback, useEffect, useState } from 'react';
-import {
-  Alert,
-  FlatList,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
-import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from './AppTextInput';
-import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
 import AppTextInput from './AppTextInput';
+import { Button } from './Button';
+import { ExerciseSheet } from './ExerciseSheet';
+import { Field } from './Field';
+import { Row } from './Row';
+import { SegmentedControl, type SegmentedOption } from './SegmentedControl';
+import { Sheet } from './Sheet';
+import { Switch } from './Switch';
+import { fontSize, spacing, tabBar, touchTarget } from '../utils/scale';
+import { BODY_PARTS, bodyPartLabelKey, type BodyPartKey } from '../utils/bodyParts';
+import {
+  filterCatalogExercises,
+  initialBodyPart,
+  loadCatalogExercises,
+  type CatalogExercise,
+} from '../utils/exerciseCatalog';
+import {
+  CUSTOM_EQUIPMENT_OPTIONS,
+  createCustomExercise,
+  usesBarByDefault,
+  validateCustomExercise,
+  type CustomExerciseDraft,
+} from '../utils/customExercise';
+import type { RoutineDatabase } from '../utils/routineActions';
 
-type CatalogRow = { exerciseKey: string; name: string };
+/**
+ * The exercise picker (SPECS.md R2, §3.5).
+ *
+ * Two defects shaped this rewrite. The first: the picker asked the database a different question
+ * per state and **skipped the muscle filter entirely when no exercise was in context**, so the
+ * runner's "add an exercise" opened 870 unfiltered rows. It now loads the catalog once and filters
+ * in memory by search and by body part, with the tapped exercise's own region pre-selected and no
+ * filter at all when nothing was tapped — a deliberate absence rather than a silent skip.
+ *
+ * The second: a custom exercise used to be a name and nothing else, which produced an exercise the
+ * app could say nothing about, permanently, in history. It is now a catalog row with a primary
+ * muscle, equipment and a bar answer, so it appears in these same filters and opens the same
+ * `ExerciseSheet` as a seeded one.
+ *
+ * Every row is one tap from its full description through the info button — the picker is one of
+ * R2's six doors into the same sheet.
+ */
+
+const ALL_BODY_PARTS = 'all';
+type BodyPartFilter = BodyPartKey | typeof ALL_BODY_PARTS;
 
 type Props = {
   visible: boolean;
@@ -26,318 +58,334 @@ type Props = {
   onClose: () => void;
 };
 
-/**
- * The D3 catalog picker (SPECS.md D3, §3.5): pre-filtered to the tapped
- * exercise's primary muscles, searchable, with an "all exercises" escape and
- * a free-text custom exercise. Selecting a row snapshots the catalog name
- * into the plan; a custom exercise is a plan row with a NULL catalog id.
- */
+const emptyDraft = (): CustomExerciseDraft => ({
+  name: '',
+  primaryMuscle: null,
+  equipment: null,
+  usesBar: false,
+});
+
 export default function ExerciseCatalogPicker({
   visible,
   catalogExerciseId,
   onSelect,
   onClose,
 }: Props) {
-  const { theme } = useTheme();
+  const { tokens } = useTheme();
   const { t } = useTranslation();
   const db = useSQLiteContext();
 
-  const [exercises, setExercises] = useState<CatalogRow[]>([]);
-  const [filterMuscles, setFilterMuscles] = useState<string[]>([]);
+  const [exercises, setExercises] = useState<CatalogExercise[]>([]);
   const [query, setQuery] = useState('');
-  const [showAll, setShowAll] = useState(false);
+  const [bodyPart, setBodyPart] = useState<BodyPartFilter>(ALL_BODY_PARTS);
   const [customMode, setCustomMode] = useState(false);
-  const [customName, setCustomName] = useState('');
+  const [draft, setDraft] = useState<CustomExerciseDraft>(emptyDraft);
+  const [draftBodyPart, setDraftBodyPart] = useState<BodyPartKey | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [information, setInformation] = useState<CatalogExercise | null>(null);
+
+  const routineDb: RoutineDatabase = useMemo(
+    () => ({
+      run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
+      get: async (sql, params) =>
+        (await db.getFirstAsync<Record<string, unknown>>(
+          sql,
+          (params ?? []) as never[],
+        )) ?? undefined,
+      getAll: async (sql, params) =>
+        db.getAllAsync<Record<string, unknown>>(sql, (params ?? []) as never[]),
+    }),
+    [db],
+  );
 
   const load = useCallback(async () => {
-    const muscleRows = await db.getAllAsync<{ muscle_name: string }>(
-      `SELECT DISTINCT muscle_name FROM Catalog_Exercise_Muscles
-       WHERE exercise_key = ? AND is_primary = 1;`,
-      [catalogExerciseId],
-    );
-    const muscles = muscleRows.map((row) => row.muscle_name);
-    setFilterMuscles(muscles);
-
-    const rows =
-      showAll || muscles.length === 0
-        ? await db.getAllAsync<{ exercise_key: string; name: string }>(
-            'SELECT exercise_key, name FROM Catalog_Exercises ORDER BY name;',
-          )
-        : await db.getAllAsync<{ exercise_key: string; name: string }>(
-            `SELECT DISTINCT e.exercise_key, e.name
-             FROM Catalog_Exercises e
-             JOIN Catalog_Exercise_Muscles m ON m.exercise_key = e.exercise_key
-             WHERE m.muscle_name IN (${muscles.map(() => '?').join(', ')})
-             ORDER BY e.name;`,
-            muscles,
-          );
-    setExercises(
-      rows.map((row) => ({ exerciseKey: row.exercise_key, name: row.name })),
-    );
-  }, [db, catalogExerciseId, showAll]);
+    const rows = await loadCatalogExercises(routineDb);
+    setExercises(rows);
+    setBodyPart(initialBodyPart(rows, catalogExerciseId) ?? ALL_BODY_PARTS);
+  }, [routineDb, catalogExerciseId]);
 
   useEffect(() => {
     if (!visible) {
       return;
     }
     setQuery('');
-    setShowAll(false);
     setCustomMode(false);
-    setCustomName('');
+    setDraft(emptyDraft());
+    setDraftBodyPart(null);
+    setProblem(null);
+    setInformation(null);
     load().catch((error: unknown) => {
       console.error('Error loading the exercise catalog:', error);
     });
   }, [visible, load]);
 
-  const selectRow = (exercise: { catalogExerciseId: string | null; name: string }) => {
-    onSelect(exercise);
-  };
-
-  const addCustom = () => {
-    const name = customName.trim();
-    if (name === '') {
-      Alert.alert(t('pickerCustomNameRequired'));
-      return;
-    }
-    selectRow({ catalogExerciseId: null, name });
-  };
-
-  const normalizedQuery = query.trim().toLowerCase();
-  const visibleExercises = exercises.filter((exercise) =>
-    exercise.name.toLowerCase().includes(normalizedQuery),
+  const visibleExercises = useMemo(
+    () =>
+      filterCatalogExercises(exercises, {
+        query,
+        bodyPart: bodyPart === ALL_BODY_PARTS ? null : bodyPart,
+      }),
+    [exercises, query, bodyPart],
   );
 
-  const muscleFilterLabel =
-    !showAll && filterMuscles.length > 0 ? filterMuscles.join(', ') : null;
+  const filterOptions: SegmentedOption<BodyPartFilter>[] = [
+    { value: ALL_BODY_PARTS, label: t('pickerAllBodyParts'), icon: 'apps-outline' },
+    ...BODY_PARTS.map((part) => ({
+      value: part.key,
+      label: t(bodyPartLabelKey(part.key)),
+      icon: part.icon,
+    })),
+  ];
+
+  const saveCustom = async () => {
+    const failure = validateCustomExercise(
+      draft,
+      new Set(exercises.map((exercise) => exercise.name)),
+    );
+    if (failure !== null) {
+      setProblem(t(`pickerCustom_${failure}`));
+      return;
+    }
+    try {
+      const created = await createCustomExercise(
+        routineDb,
+        draft,
+        new Set(exercises.map((exercise) => exercise.exerciseKey)),
+      );
+      onSelect({ catalogExerciseId: created.exerciseKey, name: created.name });
+    } catch (error: unknown) {
+      console.error('Error creating a custom exercise:', error);
+      setProblem(t('pickerCustom_save-failed'));
+    }
+  };
+
+  const patchDraft = (patch: Partial<CustomExerciseDraft>) => {
+    setProblem(null);
+    setDraft((current) => ({ ...current, ...patch }));
+  };
+
+  const chooseEquipment = (equipment: string) => {
+    patchDraft({ equipment, usesBar: usesBarByDefault(equipment) });
+  };
+
+  if (customMode) {
+    return (
+      <Sheet
+        visible={visible}
+        title={t('pickerCustomTitle')}
+        onBack={() => {
+          setCustomMode(false);
+          setProblem(null);
+        }}
+        backAccessibilityLabel={t('pickerBackToCatalog')}
+        onClose={onClose}
+        testID="exercise-picker-custom"
+      >
+        <ScrollView
+          style={styles.list}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <Field label={t('pickerCustomNameLabel')}>
+            <AppTextInput
+              variant="text"
+              value={draft.name}
+              onChangeText={(name) => patchDraft({ name })}
+              placeholder={t('pickerCustomNamePlaceholder')}
+              autoFocus
+            />
+          </Field>
+
+          <Field label={t('pickerCustomBodyPartLabel')} hint={t('pickerCustomMuscleHint')}>
+            <SegmentedControl<string>
+              options={BODY_PARTS.map((part) => ({
+                value: part.key,
+                label: t(bodyPartLabelKey(part.key)),
+                icon: part.icon,
+              }))}
+              value={draftBodyPart ?? ''}
+              onChange={(key) => {
+                const part = BODY_PARTS.find((candidate) => candidate.key === key);
+                if (part === undefined) {
+                  return;
+                }
+                setDraftBodyPart(part.key);
+                patchDraft({ primaryMuscle: part.muscles[0] ?? null });
+              }}
+              wrap
+            />
+          </Field>
+
+          {draftBodyPart !== null && (
+            <Field label={t('pickerCustomMuscleLabel')}>
+              <SegmentedControl<string>
+                options={(
+                  BODY_PARTS.find((part) => part.key === draftBodyPart)?.muscles ?? []
+                ).map((muscle) => ({ value: muscle, label: muscle }))}
+                value={draft.primaryMuscle ?? ''}
+                onChange={(muscle) => patchDraft({ primaryMuscle: muscle })}
+                wrap
+              />
+            </Field>
+          )}
+
+          <Field label={t('pickerCustomEquipmentLabel')}>
+            <SegmentedControl<string>
+              options={CUSTOM_EQUIPMENT_OPTIONS.map((equipment) => ({
+                value: equipment,
+                label: equipment,
+              }))}
+              value={draft.equipment ?? ''}
+              onChange={chooseEquipment}
+              wrap
+            />
+          </Field>
+
+          <Row
+            label={t('pickerCustomUsesBar')}
+            detail={t('pickerCustomUsesBarHint')}
+            detailBelow
+            right={
+              <Switch
+                value={draft.usesBar}
+                onValueChange={(usesBar) => patchDraft({ usesBar })}
+                testID="picker-custom-uses-bar"
+              />
+            }
+          />
+
+          {problem !== null && (
+            <Text style={[styles.problem, { color: tokens.warning }]}>{problem}</Text>
+          )}
+
+          <Button
+            label={t('pickerCustomSave')}
+            onPress={() => void saveCustom()}
+            style={styles.save}
+            testID="picker-custom-save"
+          />
+        </ScrollView>
+      </Sheet>
+    );
+  }
 
   return (
-    <Modal visible={visible} animationType='slide' transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={[styles.sheet, { backgroundColor: theme.background }]}>
-          <View style={styles.header}>
-            <Text style={[styles.title, { color: theme.text }]}>{t('pickerTitle')}</Text>
-            <Pressable
-              onPress={onClose}
-              style={styles.closeButton}
-              accessibilityRole='button'
-            >
-              <Ionicons name='close' size={24} color={theme.text} />
-            </Pressable>
-          </View>
+    <>
+      <Sheet
+        visible={visible && information === null}
+        title={t('pickerTitle')}
+        onClose={onClose}
+        testID="exercise-picker"
+      >
+        <AppTextInput
+          variant="text"
+          value={query}
+          onChangeText={setQuery}
+          placeholder={t('pickerSearchPlaceholder')}
+        />
 
-          {muscleFilterLabel !== null && (
-            <Text
-              style={[styles.filterLabel, { color: theme.text }]}
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            >
-              {t('pickerMuscleFilter', { muscles: muscleFilterLabel })}
-            </Text>
-          )}
-
-          <Pressable
-            onPress={() => setShowAll((current) => !current)}
-            style={[
-              styles.allToggle,
-              {
-                backgroundColor: showAll ? theme.buttonBackground : theme.card,
-                borderColor: theme.border,
-              },
-            ]}
-            accessibilityRole='button'
-          >
-            <Text
-              style={[styles.allToggleText, { color: showAll ? theme.buttonText : theme.text }]}
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            >
-              {t('pickerAllExercises')}
-            </Text>
-          </Pressable>
-
-          {customMode ? (
-            <View style={styles.customRow}>
-              <AppTextInput
-                variant='text'
-                style={styles.customInput}
-                value={customName}
-                onChangeText={setCustomName}
-                placeholder={t('pickerCustomNamePlaceholder')}
-                autoFocus
-              />
-              <Pressable
-                onPress={addCustom}
-                style={({ pressed }) => [
-                  styles.customAdd,
-                  { backgroundColor: theme.buttonBackground },
-                  pressed && styles.pressed,
-                ]}
-                accessibilityRole='button'
-              >
-                <Text style={[styles.customAddText, { color: theme.buttonText }]}>
-                  {t('pickerAddCustom')}
-                </Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={styles.searchRow}>
-              <AppTextInput
-                variant='text'
-                style={styles.searchInput}
-                value={query}
-                onChangeText={setQuery}
-                placeholder={t('pickerSearchPlaceholder')}
-              />
-              <Pressable
-                onPress={() => setCustomMode(true)}
-                style={({ pressed }) => [
-                  styles.customButton,
-                  { borderColor: theme.border },
-                  pressed && styles.pressed,
-                ]}
-                accessibilityRole='button'
-              >
-                <Ionicons name='create-outline' size={20} color={theme.text} />
-                <Text style={[styles.customButtonText, { color: theme.text }]}>
-                  {t('pickerCustomExercise')}
-                </Text>
-              </Pressable>
-            </View>
-          )}
-
-          <FlatList
-            data={visibleExercises}
-            keyExtractor={(item) => item.exerciseKey}
-            keyboardShouldPersistTaps='handled'
-            ListEmptyComponent={
-              <Text style={[styles.empty, { color: theme.text }]}>
-                {t('pickerEmpty')}
-              </Text>
-            }
-            renderItem={({ item }) => (
-              <Pressable
-                onPress={() => selectRow({ catalogExerciseId: item.exerciseKey, name: item.name })}
-                style={({ pressed }) => [
-                  styles.row,
-                  { backgroundColor: theme.card, borderColor: theme.border },
-                  pressed && styles.pressed,
-                ]}
-                accessibilityRole='button'
-              >
-                <Text style={[styles.rowName, { color: theme.text }]} numberOfLines={1}>
-                  {item.name}
-                </Text>
-              </Pressable>
-            )}
+        <View style={styles.filters}>
+          <SegmentedControl<BodyPartFilter>
+            options={filterOptions}
+            value={bodyPart}
+            onChange={setBodyPart}
+            wrap
+            testID="picker-body-part-filter"
           />
         </View>
-      </View>
-    </Modal>
+
+        <FlatList
+          style={styles.list}
+          data={visibleExercises}
+          keyExtractor={(item) => item.exerciseKey}
+          keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={
+            <Text style={[styles.empty, { color: tokens.textSecondary }]}>
+              {t('pickerEmpty')}
+            </Text>
+          }
+          ListFooterComponent={
+            <Row
+              label={t('pickerCustomExercise')}
+              right={
+                <Ionicons name="add-outline" size={tabBar.icon} color={tokens.textPrimary} />
+              }
+              onPress={() => {
+                setDraft(emptyDraft());
+                setDraftBodyPart(null);
+                setCustomMode(true);
+              }}
+              testID="picker-add-custom"
+            />
+          }
+          renderItem={({ item }) => (
+            <Row
+              label={item.name}
+              detail={
+                item.primaryMuscles.length === 0 ? undefined : item.primaryMuscles.join(', ')
+              }
+              detailBelow
+              onPress={() =>
+                onSelect({ catalogExerciseId: item.exerciseKey, name: item.name })
+              }
+              right={
+                <Pressable
+                  onPress={() => setInformation(item)}
+                  style={styles.info}
+                  hitSlop={spacing.inline}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('pickerOpenInfo', { name: item.name })}
+                >
+                  <Ionicons
+                    name="information-circle-outline"
+                    size={tabBar.icon}
+                    color={tokens.textSecondary}
+                  />
+                </Pressable>
+              }
+              divided
+            />
+          )}
+        />
+      </Sheet>
+
+      <ExerciseSheet
+        exercise={
+          information === null
+            ? null
+            : { name: information.name, catalogExerciseId: information.exerciseKey }
+        }
+        onClose={() => setInformation(null)}
+        testID="picker-exercise-sheet"
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    maxHeight: '85%',
-    borderTopLeftRadius: radius.card,
-    borderTopRightRadius: radius.card,
-    padding: spacing.gutter,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.card,
-  },
-  title: {
-    fontSize: fontSize.sectionTitle,
-    fontWeight: '900',
-    flexShrink: 1,
-  },
-  closeButton: {
-    minHeight: touchTarget.icon,
-    minWidth: touchTarget.icon,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  filterLabel: {
-    fontSize: fontSize.caption,
-    opacity: 0.7,
-    marginBottom: spacing.card,
-  },
-  allToggle: {
-    alignSelf: 'flex-start',
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    paddingHorizontal: spacing.card,
-    minHeight: touchTarget.control,
-    justifyContent: 'center',
-    marginBottom: spacing.card,
-  },
-  allToggleText: {
-    fontSize: fontSize.button,
-    fontWeight: '700',
-  },
-  searchRow: {
-    flexDirection: 'row',
-    gap: spacing.cardGap,
-    marginBottom: spacing.card,
-  },
-  searchInput: {
-    flex: 1,
-  },
-  customButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.inline,
-    borderRadius: radius.control,
-    borderWidth: 1,
-    paddingHorizontal: spacing.card,
-    minHeight: touchTarget.control,
-  },
-  customButtonText: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-  },
-  customRow: {
-    flexDirection: 'row',
-    gap: spacing.cardGap,
-    marginBottom: spacing.card,
-  },
-  customInput: {
-    flex: 1,
-  },
-  customAdd: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.control,
-    paddingHorizontal: spacing.card,
-    minHeight: touchTarget.control,
-  },
-  customAddText: {
-    fontSize: fontSize.button,
-    fontWeight: '700',
-  },
-  row: {
-    borderRadius: radius.control,
-    borderWidth: 1,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.card,
+  filters: {
+    marginTop: spacing.cardGap,
     marginBottom: spacing.cardGap,
   },
-  rowName: {
-    fontSize: fontSize.body,
+  list: {
+    flexShrink: 1,
+  },
+  info: {
+    minWidth: touchTarget.icon,
+    minHeight: touchTarget.icon,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   empty: {
     fontSize: fontSize.body,
-    opacity: 0.7,
     textAlign: 'center',
-    padding: spacing.section,
+    paddingVertical: spacing.section,
   },
-  pressed: {
-    opacity: 0.7,
+  problem: {
+    fontSize: fontSize.helper,
+    marginBottom: spacing.cardGap,
+  },
+  save: {
+    marginTop: spacing.cardGap,
   },
 });

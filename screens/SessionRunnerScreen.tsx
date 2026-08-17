@@ -741,11 +741,18 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
           </View>
           {currentExercise === undefined ? (
             <View style={styles.exerciseHeader}>
-              <Text
-                style={[styles.exerciseName, { color: tokens.textPrimary }]}
-              >
-                {t('runnerFreeChooseExercise')}
-              </Text>
+              {/*
+                The name row is what gives `exerciseName` a horizontal main axis
+                to flex along. Dropped into the column directly, its `flex: 1`
+                collapses the text's height and clips the heading.
+              */}
+              <View style={styles.exerciseNameRow}>
+                <Text
+                  style={[styles.exerciseName, { color: tokens.textPrimary }]}
+                >
+                  {t('runnerFreeChooseExercise')}
+                </Text>
+              </View>
               <Text
                 style={[styles.planSummary, { color: tokens.textSecondary }]}
               >

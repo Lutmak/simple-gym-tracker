@@ -723,7 +723,7 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
               <Ionicons name="chevron-back" size={tabBar.icon} color={tokens.textPrimary} />
             </Pressable>
             <Text
-              style={[styles.position, { color: tokens.accent }]}
+              style={[styles.position, { color: tokens.textSecondary }]}
             >
               {mode === 'free'
                 ? t('freeLogging')
@@ -789,15 +789,13 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
           keyboardShouldPersistTaps="handled"
         >
           {currentExercise === undefined ? (
-            <Section testID="runner-no-exercise">
-              <Row
-                label={t('runnerAddExercise')}
-                onPress={() => setPickerVisible(true)}
-                right={<Ionicons name="add" size={tabBar.icon} color={tokens.textPrimary} />}
-                divided
-                testID="runner-add-exercise"
-              />
-            </Section>
+            /*
+             * Nothing here on purpose. The header already states the empty case, and the footer
+             * button below is the runner's standing primary-action slot — in this state it reads
+             * "add exercise". A row saying the same thing gave the empty screen two identical
+             * affordances for one action.
+             */
+            null
           ) : (
             <>
               {isWarmupOn && warmups.length > 0 ? (
@@ -1541,10 +1539,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  /**
+   * The marker that says where you are: a position in a planned session, or the mode when there
+   * is no plan. It is neither a heading nor an action, so it wears `ScreenTitle`'s overline — the
+   * one idiom this app already has for "what kind of thing this is". At caption size it shares a
+   * baseline with the elapsed label opposite it instead of floating against the 44pt back control.
+   */
   position: {
     flex: 1,
-    fontSize: fontSize.body,
+    fontSize: fontSize.caption,
     fontWeight: '700',
+    textTransform: 'uppercase',
   },
   elapsed: {
     alignItems: 'flex-end',

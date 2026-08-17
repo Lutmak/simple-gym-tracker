@@ -47,6 +47,7 @@ export function Row({
       <Text
         style={[
           styles.label,
+          detailBelow !== true && styles.labelBesideDetail,
           { color: disabled ? tokens.disabled : tokens.textPrimary },
         ]}
         numberOfLines={2}
@@ -98,6 +99,14 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: fontSize.cardTitle,
+  },
+  /**
+   * Growing to fill the row belongs to the layout context, not to the label's type role: in the
+   * row case the label is a direct child of a `flexDirection: 'row'` parent and these govern
+   * width, but under `detailBelow` it sits in `textColumn`, where the same pair governs height
+   * and collapses the text. `textColumn` already carries the growth for that case.
+   */
+  labelBesideDetail: {
     flexShrink: 1,
     flexGrow: 1,
   },

@@ -5,12 +5,6 @@
     "version": "1.7.15",
     "orientation": "portrait",
     "icon": "./assets/simpleicon.png",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/simpleicon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "bundleIdentifier": "dev.lutmak.simplegymtracker"
     },
@@ -31,10 +25,6 @@
         "backgroundColor": "#ffffff"
       },
       "package": "dev.lutmak.simplegymtracker"
-    },
-    "androidNavigationBar": {
-      "barStyle": "dark-content",
-      "enforceContrast": false
     },
     "web": {
       "favicon": "./assets/simpleicon.png"
@@ -61,7 +51,22 @@
       ],
       "expo-audio",
       "expo-font",
-      "./plugins/withDebugInternetPermission"
+      "./plugins/withDebugInternetPermission",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/simpleicon.png",
+          "resizeMode": "contain",
+          "backgroundColor": "#ffffff"
+        }
+      ],
+      [
+        "expo-navigation-bar",
+        {
+          "style": "dark",
+          "enforceContrast": false
+        }
+      ]
     ]
   }
 }

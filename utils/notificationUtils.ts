@@ -1,4 +1,4 @@
-import * as Notifications from 'expo-notifications';
+import { isRunningInExpoGo } from 'expo';
 import { Platform } from 'react-native';
 import i18n from './i18n';
 import { expoWeekday, type TrainingDayReminder } from './notificationSchedule';
@@ -9,42 +9,69 @@ import { expoWeekday, type TrainingDayReminder } from './notificationSchedule';
  * tested; this file just carries the result across the boundary.
  *
  * Reminders are **local** notifications, one weekly trigger per training day.
- * Remote push does not exist in this app — it is impossible offline, and it was
- * removed from Expo Go in SDK 53 (`utils/suppressExpoGoLogs.ts`).
+ * Remote push does not exist in this app — it is impossible offline.
+ *
+ * `expo-notifications` is loaded lazily, and never in Expo Go: since SDK 57 the
+ * package throws from module scope there on Android (push was removed from Expo
+ * Go in SDK 53), so a static import would take the whole app down in
+ * development. In Expo Go reminders simply do not exist — every function below
+ * answers "not granted", which every caller already handles. A build gets the
+ * real module.
  */
+
+type NotificationsModule = typeof import('expo-notifications');
 
 export const WORKOUT_CHANNEL_ID = 'workout-reminders';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-  }),
-});
+let notificationsModule: NotificationsModule | null | undefined;
+
+const notifications = (): NotificationsModule | null => {
+  if (notificationsModule !== undefined) {
+    return notificationsModule;
+  }
+  if (isRunningInExpoGo()) {
+    notificationsModule = null;
+    return notificationsModule;
+  }
+  const loaded: NotificationsModule = require('expo-notifications');
+  loaded.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowBanner: true,
+      shouldShowList: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+  notificationsModule = loaded;
+  return notificationsModule;
+};
 
 export const requestNotificationPermissions = async (): Promise<boolean> => {
+  const api = notifications();
+  if (!api) {
+    return false;
+  }
+
   if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync(WORKOUT_CHANNEL_ID, {
+    await api.setNotificationChannelAsync(WORKOUT_CHANNEL_ID, {
       name: 'Workout Reminders',
-      importance: Notifications.AndroidImportance.MAX,
+      importance: api.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#FF231F7C',
     });
   }
 
-  const { status: existingStatus } = await Notifications.getPermissionsAsync();
+  const { status: existingStatus } = await api.getPermissionsAsync();
   if (existingStatus === 'granted') {
     return true;
   }
 
-  const { status } = await Notifications.requestPermissionsAsync();
+  const { status } = await api.requestPermissionsAsync();
   return status === 'granted';
 };
 
 export const cancelAllReminders = async (): Promise<void> => {
-  await Notifications.cancelAllScheduledNotificationsAsync();
+  await notifications()?.cancelAllScheduledNotificationsAsync();
 };
 
 /**
@@ -56,7 +83,12 @@ export const cancelAllReminders = async (): Promise<void> => {
 export const applyTrainingDayReminders = async (
   reminders: readonly TrainingDayReminder[],
 ): Promise<number> => {
-  await cancelAllReminders();
+  const api = notifications();
+  if (!api) {
+    return 0;
+  }
+
+  await api.cancelAllScheduledNotificationsAsync();
 
   if (reminders.length === 0) {
     return 0;
@@ -68,14 +100,14 @@ export const applyTrainingDayReminders = async (
   }
 
   for (const reminder of reminders) {
-    await Notifications.scheduleNotificationAsync({
+    await api.scheduleNotificationAsync({
       content: {
         title: i18n.t('workoutReminderTitle', { workoutName: reminder.sessionName }),
         body: i18n.t('dailyReminderBody'),
         data: { kind: 'training-day-reminder', weekday: reminder.weekday },
       },
       trigger: {
-        type: Notifications.SchedulableTriggerInputTypes.WEEKLY,
+        type: api.SchedulableTriggerInputTypes.WEEKLY,
         weekday: expoWeekday(reminder.weekday),
         hour: reminder.hour,
         minute: reminder.minute,
@@ -94,7 +126,12 @@ export const applyTrainingDayReminders = async (
 export const checkAndSyncPermissions = async (
   setNotificationPermissionGranted: (granted: boolean) => void,
 ) => {
-  const { status } = await Notifications.getPermissionsAsync();
+  const api = notifications();
+  if (!api) {
+    setNotificationPermissionGranted(false);
+    return;
+  }
+  const { status } = await api.getPermissionsAsync();
   if (status !== 'granted') {
     setNotificationPermissionGranted(false);
   }

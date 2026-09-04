@@ -33,7 +33,6 @@ import SessionSummaryScreen from './screens/SessionSummaryScreen';
   import { SettingsProvider, useSettings } from './context/SettingsContext';
   import { ThemeProvider, useTheme } from './context/ThemeContext';
   import { QueueRevisionProvider } from './context/QueueRevision';
-  import * as Notifications from 'expo-notifications';
   import { runSchema } from './utils/schema';
   import { checkAndSyncPermissions } from './utils/notificationUtils';
   import { fontSize } from './utils/scale';
@@ -350,26 +349,6 @@ const AppContent = () => {
     
     useEffect(() => {
       loadDatabase().then(() => setDbLoaded(true));
-      
-      // Configure notification permissions
-      const setupNotifications = async () => {
-        // Don't request permissions on app start - this will be handled when needed
-        await Notifications.setNotificationHandler({
-          handleNotification: async () => ({
-            shouldShowBanner: true,
-            shouldShowList: true,
-            shouldPlaySound: true,
-            shouldSetBadge: false,
-          }),
-        });
-        
-      };
-      
-      setupNotifications();
-      
-      return () => {
-        // Clean up if needed
-      };
     }, []);
 
     React.useEffect(() => {

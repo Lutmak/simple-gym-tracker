@@ -23,10 +23,22 @@ export type ScreenTitleProps = {
   overline?: string;
   /** Draws the back chevron. Omitted on a tab root, which has nowhere to go back to. */
   onBack?: () => void;
+  /** A trailing icon button — e.g. the `⋯` that opens a routine's action sheet (SPEC.md U4). */
+  actionIcon?: string;
+  actionAccessibilityLabel?: string;
+  onAction?: () => void;
   testID?: string;
 };
 
-export function ScreenTitle({ title, overline, onBack, testID }: ScreenTitleProps) {
+export function ScreenTitle({
+  title,
+  overline,
+  onBack,
+  actionIcon,
+  actionAccessibilityLabel,
+  onAction,
+  testID,
+}: ScreenTitleProps) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
 
@@ -60,6 +72,21 @@ export function ScreenTitle({ title, overline, onBack, testID }: ScreenTitleProp
           {title}
         </Text>
       </View>
+      {actionIcon !== undefined && onAction !== undefined && (
+        <Pressable
+          onPress={onAction}
+          accessibilityRole="button"
+          accessibilityLabel={actionAccessibilityLabel}
+          hitSlop={spacing.card}
+          style={({ pressed }) => [
+            styles.action,
+            pressed && { backgroundColor: tokens.inputFill },
+          ]}
+          testID="screen-title-action"
+        >
+          <Ionicons name={actionIcon} size={tabBar.icon} color={tokens.textPrimary} />
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -77,6 +104,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: -spacing.label,
+  },
+  action: {
+    minWidth: touchTarget.icon,
+    minHeight: touchTarget.icon,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -spacing.label,
   },
   text: {
     flexShrink: 1,

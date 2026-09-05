@@ -152,9 +152,14 @@ export default function NewRoutineScreen({ navigation }: Props) {
     setBusy(true);
     setError(null);
     try {
+      // `copyToCacheDirectory: false` is deliberate: Expo Go's `readAsStringAsync` runs a
+      // scoped-permission check that a copied `file://` path under `cache/DocumentPicker/`
+      // fails (it sits outside this experience's scoped cache — a standalone build would not
+      // hit this). The `content://` URI the picker returns without a copy is exempt from that
+      // check and reads directly.
       const picked = await DocumentPicker.getDocumentAsync({
         type: IMPORT_PICKER_TYPES,
-        copyToCacheDirectory: true,
+        copyToCacheDirectory: false,
       });
       if (picked.canceled) {
         return;

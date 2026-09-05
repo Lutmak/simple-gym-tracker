@@ -15,6 +15,13 @@ describe('Row', () => {
     expect(screen.getByText('trailing')).toBeTruthy();
   });
 
+  it('renders a leading marker before the label', () => {
+    render(<Row label="Barbell Squat" left={<Text>{'marker'}</Text>} />);
+
+    expect(screen.getByText('marker')).toBeTruthy();
+    expect(screen.getByText('Barbell Squat')).toBeTruthy();
+  });
+
   it('is pressable when onPress is given', () => {
     const onPress = jest.fn();
     render(<Row label="Unit" onPress={onPress} />);

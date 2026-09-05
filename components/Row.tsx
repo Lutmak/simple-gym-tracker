@@ -18,6 +18,8 @@ export type RowProps = {
   detailContent?: ReactNode;
   /** Place the secondary text below the label, for explanatory decision rows. */
   detailBelow?: boolean;
+  /** A leading marker before the label — a role glyph, a series colour dot (ADR-0047). */
+  left?: ReactNode;
   /** A trailing control — a Switch, a chevron, a value chip. */
   right?: ReactNode;
   onPress?: () => void;
@@ -33,6 +35,7 @@ export function Row({
   detail,
   detailContent,
   detailBelow,
+  left,
   right,
   onPress,
   onLongPress,
@@ -84,6 +87,7 @@ export function Row({
         pressed && onPress !== undefined && { backgroundColor: tokens.inputFill },
       ]}
     >
+      {left !== undefined && <View style={styles.left}>{left}</View>}
       {content}
       {right !== undefined && <View style={styles.right}>{right}</View>}
     </Pressable>
@@ -96,6 +100,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.inline,
+  },
+  left: {
+    marginRight: spacing.inline,
   },
   label: {
     fontSize: fontSize.cardTitle,

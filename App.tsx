@@ -277,7 +277,7 @@ const RoutinesStack = () => {
       <RoutinesStackNavigator.Screen
         name="CycleReview"
         component={CycleReviewScreen}
-        options={{ title: t('cycleReviewTitle') }}
+        options={{ headerShown: false }}
       />
     </RoutinesStackNavigator.Navigator>
   );

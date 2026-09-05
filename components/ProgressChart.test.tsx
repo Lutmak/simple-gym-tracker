@@ -96,4 +96,42 @@ describe('ProgressChart', () => {
     // Two datasets reach the chart: the solid line and the dashed step line.
     expect(screen.getByTestId('chart')).toBeTruthy();
   });
+
+  it('never hands react-native-svg an empty or single-value dash pattern (Android crash, 2026-09-05)', () => {
+    // A solid line (no strokeDashArray), the grid (propsForBackgroundLines), and a step line
+    // together exercise every path this chart writes a `strokeDasharray` through. Android's
+    // `DashPathEffect` throws `ArrayIndexOutOfBoundsException` on a zero- or one-length pattern —
+    // `''`, `'0'`, `[]` and `[4]` are all unsafe; `undefined` (no dash effect) and an even-length
+    // pair like `[6, 6]` are the only safe shapes.
+    renderChart({
+      series: [
+        { key: 'a', label: 'Sentadilla', color: '#2A78D6', values: [100, 105, 110] },
+        {
+          key: 'tm',
+          label: 'Máximo de entrenamiento',
+          color: '#2A78D6',
+          values: [95, 95, 100],
+          style: 'step',
+        },
+      ],
+    });
+
+    const withDash = screen.UNSAFE_root.findAll(
+      (node) => node.props !== undefined && 'strokeDasharray' in node.props,
+    );
+    expect(withDash.length).toBeGreaterThan(0);
+
+    for (const node of withDash) {
+      const value = node.props.strokeDasharray as unknown;
+      if (value === undefined || value === null) {
+        continue;
+      }
+      const parts =
+        typeof value === 'string'
+          ? value.split(',').map((part) => part.trim()).filter((part) => part.length > 0)
+          : (value as unknown[]);
+      expect(parts.length).not.toBe(0);
+      expect(parts.length).not.toBe(1);
+    }
+  });
 });

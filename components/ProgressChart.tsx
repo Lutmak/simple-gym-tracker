@@ -89,6 +89,9 @@ const MONTH_SHORT_KEYS = [
 /** Three gridlines regardless of range or data spread (ADR-0047: "three horizontal gridlines"). */
 const GRIDLINE_SEGMENTS = 2;
 
+/** An even-length, >= 2 dash pattern — the minimum Android's `DashPathEffect` accepts. */
+const STEP_DASH = [6, 6];
+
 const formatValue = (value: number): string => String(Number(value.toFixed(1)));
 
 export function ProgressChart({
@@ -212,7 +215,12 @@ export function ProgressChart({
             color: (opacity = 1) => hexWithOpacity(entry.color, opacity),
             strokeWidth: entry.style === 'step' ? 1.5 : 2,
             withDots: entry.style !== 'step',
-            strokeDashArray: entry.style === 'step' ? [4, 4] : [],
+            // react-native-svg's Android DashPathEffect throws on a zero- or one-length dash
+            // array (a solid line must simply omit strokeDashArray, never pass `[]`); a step
+            // line needs an even-length pair, `[6, 6]` (found on the emulator, 2026-09-05 —
+            // `Progreso` crashed the whole app on open with
+            // `ArrayIndexOutOfBoundsException` from `DashPathEffect.<init>`).
+            ...(entry.style === 'step' ? { strokeDashArray: STEP_DASH } : {}),
           })),
         }}
         width={chartWidth}
@@ -234,7 +242,14 @@ export function ProgressChart({
           labelColor: () => tokens.textSecondary,
           useShadowColorFromDataset: true,
           fillShadowGradientOpacity: 0.2,
-          propsForBackgroundLines: { stroke: tokens.divider, strokeWidth: 1, strokeDasharray: [] },
+          // `strokeDasharray` must be present (not omitted) so it overrides chart-kit's
+          // hardcoded "5, 10" default via its own `Object.assign` merge; `undefined`, not `[]`
+          // or `'0'` — see the dataset comment above for why an empty/short array crashes.
+          propsForBackgroundLines: {
+            stroke: tokens.divider,
+            strokeWidth: 1,
+            strokeDasharray: undefined,
+          },
           propsForDots: { r: '3', strokeWidth: '1', stroke: tokens.divider },
         }}
         style={styles.chart}

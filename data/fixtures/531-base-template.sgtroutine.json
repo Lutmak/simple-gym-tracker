@@ -1,0 +1,203 @@
+{
+  "format": "sgt-routine",
+  "version": 1,
+  "routine": {
+    "name": "5/3/1 — Base Template",
+    "progressionRule": "wave",
+    "unit": "kg",
+    "roundingIncrement": 2.5,
+    "restMainSeconds": 180,
+    "restAccessorySeconds": 90,
+    "plannedJokers": 0
+  },
+  "sessions": [
+    {
+      "weekday": 1,
+      "name": "Squat",
+      "exercises": [
+        {
+          "catalogKey": "Barbell_Squat",
+          "catalogName": "Barbell Squat",
+          "role": "main",
+          "targetSets": 3,
+          "targetReps": 5,
+          "loadSource": "training_max_pct",
+          "trainingMaxPct": 0.9,
+          "trainingMaxWeight": 140,
+          "isAmrap": true,
+          "barProfile": "olympic",
+          "warmupsEnabled": true
+        },
+        {
+          "catalogKey": "Dumbbell_Lunges",
+          "catalogName": "Dumbbell Lunges",
+          "role": "accessory",
+          "targetSets": 3,
+          "targetReps": 10,
+          "loadSource": "absolute",
+          "absoluteWeight": 20
+        },
+        {
+          "catalogKey": "Lying_Leg_Curls",
+          "catalogName": "Lying Leg Curls",
+          "role": "accessory",
+          "targetSets": 3,
+          "targetReps": 12,
+          "loadSource": "absolute",
+          "absoluteWeight": 30
+        },
+        {
+          "catalogKey": "Standing_Calf_Raises",
+          "catalogName": "Standing Calf Raises",
+          "role": "accessory",
+          "targetSets": 4,
+          "targetReps": 15,
+          "loadSource": "absolute",
+          "absoluteWeight": 40
+        }
+      ]
+    },
+    {
+      "weekday": 2,
+      "name": "Bench Press",
+      "exercises": [
+        {
+          "catalogKey": "Barbell_Bench_Press_-_Medium_Grip",
+          "catalogName": "Barbell Bench Press - Medium Grip",
+          "role": "main",
+          "targetSets": 3,
+          "targetReps": 5,
+          "loadSource": "training_max_pct",
+          "trainingMaxPct": 0.9,
+          "trainingMaxWeight": 100,
+          "isAmrap": true,
+          "barProfile": "olympic",
+          "warmupsEnabled": true
+        },
+        {
+          "catalogKey": "Bent_Over_Barbell_Row",
+          "catalogName": "Bent Over Barbell Row",
+          "role": "accessory",
+          "targetSets": 4,
+          "targetReps": 8,
+          "loadSource": "absolute",
+          "absoluteWeight": 60,
+          "barProfile": "olympic"
+        },
+        {
+          "catalogKey": "Triceps_Pushdown",
+          "catalogName": "Triceps Pushdown",
+          "role": "accessory",
+          "targetSets": 3,
+          "targetReps": 12,
+          "loadSource": "absolute",
+          "absoluteWeight": 25
+        },
+        {
+          "custom": {
+            "name": "Face Pull",
+            "primaryMuscle": "shoulders",
+            "equipment": "cable",
+            "usesBar": false
+          },
+          "role": "accessory",
+          "targetSets": 3,
+          "targetReps": 15,
+          "loadSource": "absolute",
+          "absoluteWeight": 15
+        }
+      ]
+    },
+    {
+      "weekday": 4,
+      "name": "Deadlift",
+      "exercises": [
+        {
+          "catalogKey": "Barbell_Deadlift",
+          "catalogName": "Barbell Deadlift",
+          "role": "main",
+          "targetSets": 3,
+          "targetReps": 5,
+          "loadSource": "training_max_pct",
+          "trainingMaxPct": 0.9,
+          "trainingMaxWeight": 160,
+          "isAmrap": true,
+          "barProfile": "olympic",
+          "warmupsEnabled": true
+        },
+        {
+          "catalogKey": "Chin-Up",
+          "catalogName": "Chin-Up",
+          "role": "accessory",
+          "targetSets": 3,
+          "targetReps": 8,
+          "loadSource": "bodyweight"
+        },
+        {
+          "catalogKey": "Dumbbell_Bicep_Curl",
+          "catalogName": "Dumbbell Bicep Curl",
+          "role": "accessory",
+          "targetSets": 3,
+          "targetReps": 12,
+          "loadSource": "absolute",
+          "absoluteWeight": 12
+        },
+        {
+          "catalogKey": "Plank",
+          "catalogName": "Plank",
+          "role": "accessory",
+          "targetSets": 3,
+          "targetReps": 1,
+          "loadSource": "bodyweight",
+          "warmupsEnabled": false
+        }
+      ]
+    },
+    {
+      "weekday": 5,
+      "name": "Overhead Press",
+      "exercises": [
+        {
+          "catalogKey": "Barbell_Shoulder_Press",
+          "catalogName": "Barbell Shoulder Press",
+          "role": "main",
+          "targetSets": 3,
+          "targetReps": 5,
+          "loadSource": "training_max_pct",
+          "trainingMaxPct": 0.9,
+          "trainingMaxWeight": 62.5,
+          "isAmrap": true,
+          "barProfile": "olympic",
+          "warmupsEnabled": true
+        },
+        {
+          "catalogKey": "Seated_Cable_Rows",
+          "catalogName": "Seated Cable Rows",
+          "role": "accessory",
+          "targetSets": 4,
+          "targetReps": 10,
+          "loadSource": "absolute",
+          "absoluteWeight": 55
+        },
+        {
+          "catalogKey": "Triceps_Pushdown",
+          "catalogName": "Triceps Pushdown",
+          "role": "accessory",
+          "targetSets": 3,
+          "targetReps": 12,
+          "loadSource": "absolute",
+          "absoluteWeight": 25
+        },
+        {
+          "catalogKey": "Dumbbell_Lunges",
+          "catalogName": "Dumbbell Lunges",
+          "role": "accessory",
+          "targetSets": 3,
+          "targetReps": 10,
+          "loadSource": "absolute",
+          "absoluteWeight": 20
+        }
+      ]
+    }
+  ]
+}

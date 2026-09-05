@@ -13,6 +13,7 @@ const session: RunnerSession = {
   roundingIncrement: 2.5,
   restMainSeconds: 120,
   restAccessorySeconds: 60,
+  mainLiftNames: [],
   exercises: [
     {
       sessionExerciseId: 31,

@@ -1,13 +1,22 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useTranslation } from 'react-i18next';
+import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
-import AppTextInput, { parseNumericInput } from '../components/AppTextInput';
+import { Button } from '../components/Button';
+import { EmptyState } from '../components/EmptyState';
 import { ExerciseSheet } from '../components/ExerciseSheet';
-import { fontSize, radius, spacing, touchTarget } from '../utils/scale';
+import { Field } from '../components/Field';
+import { NumberStepper } from '../components/NumberStepper';
+import { Row } from '../components/Row';
+import { Screen } from '../components/Screen';
+import { Section } from '../components/Section';
+import { SegmentedControl, type SegmentedOption } from '../components/SegmentedControl';
+import { Stat } from '../components/Stat';
+import { fontSize, spacing, tabBar } from '../utils/scale';
 import {
   applyReview,
   editProposalValue,
@@ -18,38 +27,49 @@ import {
   type ReviewData,
   type ReviewProposalView,
 } from '../utils/cycleReview';
+import type { ProposalStatus } from '../utils/progression';
 import type { RoutineDatabase } from '../utils/routineActions';
 import type { RoutinesStackParamList } from '../App';
+
+/**
+ * U5's rebuild of the cycle/week review (SPEC.md U5, ADR-0047 §4): one flat block per lift — no
+ * card holding a bordered table, which was the app's clearest "surface inside a surface" — the
+ * three AMRAP weeks as plain rows, current-versus-proposed as a `Stat` pair, and the three
+ * resolutions (accept/hold/edit) as one `SegmentedControl` per proposal rather than three buttons.
+ * "Editar" reveals a stepper inline instead of committing immediately; the other two commit on tap,
+ * same as before. The confirm/start-next action stays pinned above the tab bar in a fixed footer,
+ * the same fill/scroll/footer split `SessionRunnerScreen` already uses.
+ */
 
 type Props = NativeStackScreenProps<RoutinesStackParamList, 'CycleReview'>;
 
 const formatWeight = (value: number): string => String(Number(value.toFixed(1)));
 
-const weightLabel = (value: number, unit: string): string => `${formatWeight(value)} ${unit}`;
+type ReviewAction = 'accepted' | 'held' | 'edited';
 
-const statusKey = (status: ReviewProposalView['status']): string => {
-  switch (status) {
-    case 'accepted':
-      return 'reviewStatusAccepted';
-    case 'held':
-      return 'reviewStatusHeld';
-    case 'edited':
-      return 'reviewStatusEdited';
-    default:
-      return '';
-  }
-};
+/**
+ * `loadCycleReview` throws a plain `Error` (this codebase's convention — see `utils/cycleReview.ts`
+ * and `utils/routineActions.ts`) when the routine or cycle this screen was opened for no longer
+ * exists — reachable by removing the demo data, or discarding a routine, while this screen sits
+ * deeper in the `Routines` stack than the row that led here. That is not a failed load to retry
+ * with an alert; the thing being reviewed is simply gone, so the screen renders `EmptyState`
+ * with a way back instead of a dead-end error dialog.
+ */
+const isMissingRoutineOrCycle = (error: unknown): boolean =>
+  error instanceof Error &&
+  (error.message.startsWith('Unknown routine') || error.message.startsWith('Unknown cycle'));
 
 export default function CycleReviewScreen({ navigation, route }: Props) {
-  const { theme } = useTheme();
+  const { tokens } = useTheme();
   const { t } = useTranslation();
   const db = useSQLiteContext();
   const { routineId, cycleId } = route.params;
 
   const [review, setReview] = useState<ReviewData | null>(null);
+  const [notFound, setNotFound] = useState(false);
   const [busy, setBusy] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editDraft, setEditDraft] = useState('');
+  const [editValue, setEditValue] = useState<number | null>(null);
   /** R2: the exercise whose shared sheet is open. */
   const [information, setInformation] = useState<{ name: string } | null>(null);
 
@@ -68,6 +88,10 @@ export default function CycleReviewScreen({ navigation, route }: Props) {
     loadCycleReview(routineDb, routineId, cycleId)
       .then(setReview)
       .catch((error) => {
+        if (isMissingRoutineOrCycle(error)) {
+          setNotFound(true);
+          return;
+        }
         console.error('Error loading the review:', error);
         Alert.alert(t('errorTitle'), t('reviewLoadFailed'));
       });
@@ -79,32 +103,67 @@ export default function CycleReviewScreen({ navigation, route }: Props) {
     }, [reload]),
   );
 
+  /**
+   * Patches the one resolved proposal into local state rather than calling
+   * `reload()`. `loadCycleReview` regenerates fresh 'pending' proposals the
+   * moment it sees every row of a due review resolved (its own signal for "a
+   * new week's review has replaced an already-applied one") — indistinguishable,
+   * from the stored rows alone, from "the user just resolved the last one and
+   * has not pressed confirm yet". Reloading after every single resolution used
+   * to walk straight into that: the instant the last pending proposal
+   * resolved, the reload it triggered wiped every decision back to pending
+   * before the confirm button ever had a chance to enable. `reload()` still
+   * runs on focus and after `confirm`/`startNext`, where the cycle's own state
+   * has actually moved on and the guard is safe.
+   */
+  const patchProposal = (proposalId: number, patch: Partial<ReviewProposalView>): void => {
+    setReview((current) =>
+      current === null
+        ? current
+        : {
+            ...current,
+            proposals: current.proposals.map((proposal) =>
+              proposal.proposalId === proposalId ? { ...proposal, ...patch } : proposal,
+            ),
+          },
+    );
+  };
+
   const resolve = (proposalId: number, outcome: 'accepted' | 'held') => {
     resolveProposal(routineDb, proposalId, outcome)
-      .then(reload)
+      .then(() => patchProposal(proposalId, { status: outcome }))
       .catch((error) => console.error('Error resolving proposal:', error));
   };
 
-  const saveEdit = (proposalId: number) => {
-    if (review === null) {
-      return;
-    }
-    const value = parseNumericInput(editDraft);
-    if (value === null || value <= 0) {
-      return;
-    }
-    editProposalValue(routineDb, proposalId, value, review.routine.roundingIncrement)
-      .then(() => {
-        setEditingId(null);
-        setEditDraft('');
-        reload();
-      })
-      .catch((error) => console.error('Error editing proposal:', error));
+  const openEditor = (proposal: ReviewProposalView) => {
+    setEditingId(proposal.proposalId);
+    setEditValue(proposal.proposedTarget);
   };
 
   const cancelEdit = () => {
     setEditingId(null);
-    setEditDraft('');
+    setEditValue(null);
+  };
+
+  const handleAction = (proposal: ReviewProposalView, action: ReviewAction) => {
+    if (action === 'edited') {
+      openEditor(proposal);
+      return;
+    }
+    resolve(proposal.proposalId, action);
+  };
+
+  const saveEdit = (proposalId: number) => {
+    if (review === null || editValue === null || editValue <= 0) {
+      return;
+    }
+    editProposalValue(routineDb, proposalId, editValue, review.routine.roundingIncrement)
+      .then(() => {
+        patchProposal(proposalId, { status: 'edited', proposedTarget: editValue });
+        setEditingId(null);
+        setEditValue(null);
+      })
+      .catch((error) => console.error('Error editing proposal:', error));
   };
 
   const confirm = () => {
@@ -153,8 +212,26 @@ export default function CycleReviewScreen({ navigation, route }: Props) {
       });
   };
 
+  if (notFound) {
+    return (
+      <Screen testID="cycle-review-not-found">
+        <EmptyState
+          icon="alert-circle-outline"
+          title={t('reviewNotFound')}
+          actionLabel={t('sheetBack')}
+          onAction={() => navigation.goBack()}
+          testID="cycle-review-not-found-empty-state"
+        />
+      </Screen>
+    );
+  }
+
   if (review === null) {
-    return <View style={[styles.container, { backgroundColor: theme.background }]} />;
+    return (
+      <Screen fill testID="cycle-review-loading">
+        <View style={styles.container} />
+      </Screen>
+    );
   }
 
   const amrapById = new Map(review.amrap.map((entry) => [entry.sessionExerciseId, entry.rows]));
@@ -162,247 +239,174 @@ export default function CycleReviewScreen({ navigation, route }: Props) {
   const completed = review.cycle.status === 'complete';
   const tmProposals = review.proposals.filter((proposal) => proposal.isTmProposal);
   const exerciseProposals = review.proposals.filter((proposal) => !proposal.isTmProposal);
+  const orderedProposals = [...tmProposals, ...exerciseProposals];
 
-  const renderAmrapTable = (rows: AmrapRow[]) => (
-    <View style={[styles.amrapTable, { borderColor: theme.border }]}>
-      <View style={styles.amrapRow}>
-        <Text style={[styles.amrapHeader, { color: theme.text }]}>{t('reviewAmrapWeek')}</Text>
-        <Text style={[styles.amrapHeader, { color: theme.text }]}>{t('reviewAmrapReps')}</Text>
-        <Text style={[styles.amrapHeader, { color: theme.text }]}>
-          {t('reviewAmrapEstimated1rm')}
-        </Text>
-      </View>
-      {rows.map((row) => (
-        <View key={row.weekNumber} style={styles.amrapRow}>
-          <Text style={[styles.amrapCell, { color: theme.text }]}>{row.weekNumber}</Text>
-          <Text style={[styles.amrapCell, { color: theme.text }]}>{row.reps}</Text>
-          <Text style={[styles.amrapCell, { color: theme.text }]}>
-            {formatWeight(row.estimated1rm)}
-          </Text>
-        </View>
-      ))}
-    </View>
+  const actionOptions: SegmentedOption<ProposalStatus>[] = [
+    { value: 'accepted', label: t('reviewAccept') },
+    { value: 'held', label: t('reviewHold') },
+    { value: 'edited', label: t('reviewEdit') },
+  ];
+
+  const renderAmrapRow = (row: AmrapRow) => (
+    <Row
+      key={row.weekNumber}
+      label={t('reviewAmrapWeekRow', { week: row.weekNumber })}
+      detail={t('reviewAmrapRowDetail', {
+        reps: t('reviewAmrapRepsCount', { count: row.reps }),
+        weight: formatWeight(row.estimated1rm),
+        unit: review.routine.unit,
+      })}
+      divided
+    />
   );
 
-  const renderCard = (proposal: ReviewProposalView) => {
+  const renderProposal = (proposal: ReviewProposalView) => {
     const resolved = proposal.status !== 'pending';
     const isEditing = editingId === proposal.proposalId;
-    const amrapRows = amrapById.get(proposal.sessionExerciseId) ?? [];
+    const amrapRows = proposal.isTmProposal ? (amrapById.get(proposal.sessionExerciseId) ?? []) : [];
+    const trend: 'up' | 'down' | 'flat' =
+      proposal.proposedTarget > proposal.currentTarget
+        ? 'up'
+        : proposal.proposedTarget < proposal.currentTarget
+          ? 'down'
+          : 'flat';
+
     return (
-      <View
-        key={proposal.proposalId}
-        style={[styles.card, { backgroundColor: theme.card, borderColor: theme.border }]}
-      >
+      <Section key={proposal.proposalId} testID={`review-proposal-${proposal.proposalId}`}>
         {/* R2: a proposal about an exercise is one tap from what that exercise is. */}
-        <Pressable
+        <Row
+          label={proposal.exerciseName}
+          right={
+            <Ionicons
+              name="information-circle-outline"
+              size={tabBar.icon}
+              color={tokens.textSecondary}
+            />
+          }
           onPress={() => setInformation({ name: proposal.exerciseName })}
-          accessibilityRole='button'
-          accessibilityLabel={t('exerciseInfoAction')}
-        >
-          <Text style={[styles.cardTitle, { color: theme.text }]}>{proposal.exerciseName}</Text>
-        </Pressable>
-        {proposal.isTmProposal && amrapRows.length > 0 && renderAmrapTable(amrapRows)}
-        <View style={styles.targetRow}>
-          <Text style={[styles.helper, { color: theme.text }]}>
-            {t('reviewCurrentValue', {
-              value: weightLabel(proposal.currentTarget, proposal.unit),
-            })}
-          </Text>
-          <Text style={[styles.helper, { color: theme.text }]}>
-            {t('reviewProposedValue', {
-              value: weightLabel(proposal.proposedTarget, proposal.unit),
-            })}
-          </Text>
+          divided
+        />
+        {amrapRows.length > 0 && amrapRows.map(renderAmrapRow)}
+        <View style={styles.statPair}>
+          <Stat
+            label={t('reviewCurrentLabel')}
+            value={formatWeight(proposal.currentTarget)}
+            unit={proposal.unit}
+          />
+          <Stat
+            label={t('reviewProposedLabel')}
+            value={formatWeight(proposal.proposedTarget)}
+            unit={proposal.unit}
+            trend={trend}
+          />
         </View>
-        <Text style={[styles.reason, { color: theme.text }]}>{proposal.reason}</Text>
+        <Text style={[styles.reason, { color: tokens.textSecondary }]}>{proposal.reason}</Text>
         {proposal.advisory && (
-          <Text style={[styles.advisoryNote, { color: theme.text }]} maxFontSizeMultiplier={1.5}>
+          <Text style={[styles.advisory, { color: tokens.warning }]} maxFontSizeMultiplier={1.5}>
             {t('reviewAdvisory')}
           </Text>
         )}
-        {isEditing ? (
+        <SegmentedControl<ProposalStatus>
+          options={actionOptions}
+          value={isEditing ? 'edited' : proposal.status}
+          onChange={(action) => handleAction(proposal, action as ReviewAction)}
+          disabled={resolved}
+          testID={`review-proposal-${proposal.proposalId}-actions`}
+        />
+        {isEditing && (
           <View style={styles.editArea}>
-            <AppTextInput
-              variant="numeric"
-              style={styles.editInput}
-              defaultValue={String(proposal.proposedTarget)}
-              onRawChange={setEditDraft}
-              keyboardType="decimal-pad"
-              placeholder={t('reviewEnterOwnValue')}
-              autoFocus
-            />
-            <View style={styles.buttonRow}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.secondaryButton,
-                  styles.grow,
-                  { borderColor: theme.border },
-                  pressed && styles.pressed,
-                ]}
-                onPress={cancelEdit}
-              >
-                <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
-                  {t('Cancel')}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  styles.grow,
-                  { backgroundColor: theme.buttonBackground },
-                  pressed && styles.pressed,
-                ]}
+            <Field label={t('reviewEnterOwnValue')}>
+              <NumberStepper
+                value={editValue}
+                onChange={setEditValue}
+                step={review.routine.roundingIncrement}
+                min={0}
+                testID={`review-proposal-${proposal.proposalId}-value`}
+              />
+            </Field>
+            <View style={styles.editActions}>
+              <Row label={t('Cancel')} onPress={cancelEdit} divided />
+              <Button
+                label={t('Save')}
                 onPress={() => saveEdit(proposal.proposalId)}
-              >
-                <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-                  {t('Save')}
-                </Text>
-              </Pressable>
+                disabled={editValue === null || editValue <= 0}
+                testID={`review-proposal-${proposal.proposalId}-save`}
+              />
             </View>
           </View>
-        ) : resolved ? (
-          <View style={[styles.statusChip, { backgroundColor: theme.background }]}>
-            <Text
-              style={[styles.statusChipText, { color: theme.text }]}
-              maxFontSizeMultiplier={1.5}
-            >
-              {t(statusKey(proposal.status))}
-            </Text>
-          </View>
-        ) : (
-          <View style={styles.buttonRow}>
-            <Pressable
-              style={({ pressed }) => [
-                styles.primaryButton,
-                styles.grow,
-                { backgroundColor: theme.buttonBackground },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => resolve(proposal.proposalId, 'accepted')}
-            >
-              <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-                {t('reviewAccept')}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                styles.grow,
-                { borderColor: theme.border },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => resolve(proposal.proposalId, 'held')}
-            >
-              <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
-                {t('reviewHold')}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [
-                styles.secondaryButton,
-                styles.grow,
-                { borderColor: theme.border },
-                pressed && styles.pressed,
-              ]}
-              onPress={() => {
-                setEditDraft(String(proposal.proposedTarget));
-                setEditingId(proposal.proposalId);
-              }}
-            >
-              <Text style={[styles.secondaryButtonText, { color: theme.text }]}>
-                {t('reviewEdit')}
-              </Text>
-            </Pressable>
-          </View>
         )}
-      </View>
+      </Section>
     );
   };
 
+  const title = review.atCycleEnd
+    ? t('cycleReviewCycleTitle', { cycle: review.cycle.cycleNumber + 1 })
+    : t('cycleReviewWeekTitle', { week: review.cycle.currentWeek + 1 });
+
   return (
-    <View style={[styles.container, { backgroundColor: theme.background }]}>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-        <Text style={[styles.title, { color: theme.text }]}>{review.routine.name}</Text>
-        <Text style={[styles.header, { color: theme.text }]}>
-          {t('cycleReviewHeader', {
-            cycle: review.cycle.cycleNumber,
-            week: review.cycle.currentWeek,
-          })}
+    <Screen fill testID="cycle-review-screen">
+      <View style={styles.container}>
+        <Text style={[styles.overline, { color: tokens.textSecondary }]}>
+          {review.routine.name}
         </Text>
+        <Text style={[styles.title, { color: tokens.textPrimary }]}>{title}</Text>
 
-        {review.proposals.length === 0 && (
-          <Text style={[styles.helper, { color: theme.text }]}>
-            {t('reviewNothingToPropose')}
-          </Text>
-        )}
-
-        {tmProposals.length > 0 && (
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            {t('reviewTmSection')}
-          </Text>
-        )}
-        {tmProposals.map(renderCard)}
-        {exerciseProposals.map(renderCard)}
-
-        {completed && !busy && (
-          <Text style={[styles.helper, { color: theme.text }]}>{t('reviewCycleComplete')}</Text>
-        )}
-      </ScrollView>
-
-      <View style={[styles.actionBar, { backgroundColor: theme.card, borderColor: theme.border }]}>
-        {completed ? (
-          <>
-            <Pressable
-              style={({ pressed }) => [
-                styles.primaryButton,
-                styles.grow,
-                { backgroundColor: theme.buttonBackground },
-                pressed && styles.pressed,
-                busy && styles.pressed,
-              ]}
-              disabled={busy}
-              onPress={startNext}
-            >
-              <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-                {t('reviewStartNextCycle')}
-              </Text>
-            </Pressable>
-            <Text style={[styles.finishHelper, { color: theme.text }]}>
-              {t('reviewNextCycleHint')}
+        <ScrollView
+          style={styles.body}
+          contentContainerStyle={styles.bodyContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {review.proposals.length === 0 && (
+            <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+              {t('reviewNothingToPropose')}
             </Text>
-          </>
-        ) : (
-          <>
-            <Pressable
-              style={({ pressed }) => [
-                styles.primaryButton,
-                styles.grow,
-                { backgroundColor: theme.buttonBackground },
-                pressed && styles.pressed,
-                (!allResolved || busy) && styles.pressed,
-              ]}
-              disabled={!allResolved || busy}
-              onPress={confirm}
-            >
-              <Text style={[styles.primaryButtonText, { color: theme.buttonText }]}>
-                {review.atCycleEnd ? t('reviewConfirmCycle') : t('reviewConfirm')}
+          )}
+
+          {orderedProposals.map(renderProposal)}
+
+          {completed && !busy && (
+            <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+              {t('reviewCycleComplete')}
+            </Text>
+          )}
+        </ScrollView>
+
+        <View style={[styles.footer, { borderTopColor: tokens.divider }]}>
+          {completed ? (
+            <>
+              <Button
+                label={t('reviewStartNextCycle')}
+                onPress={startNext}
+                disabled={busy}
+                style={styles.footerButton}
+                testID="review-start-next-cycle"
+              />
+              <Text style={[styles.footerHint, { color: tokens.textSecondary }]}>
+                {t('reviewNextCycleHint')}
               </Text>
-            </Pressable>
-            {!allResolved && (
-              <Text style={[styles.finishHelper, { color: theme.text }]}>
-                {t('reviewResolveHint')}
-              </Text>
-            )}
-          </>
-        )}
+            </>
+          ) : (
+            <>
+              <Button
+                label={review.atCycleEnd ? t('reviewConfirmCycle') : t('reviewConfirm')}
+                onPress={confirm}
+                disabled={!allResolved || busy}
+                style={styles.footerButton}
+                testID="review-confirm"
+              />
+              {!allResolved && (
+                <Text style={[styles.footerHint, { color: tokens.textSecondary }]}>
+                  {t('reviewResolveHint')}
+                </Text>
+              )}
+            </>
+          )}
+        </View>
       </View>
 
       {/* R2: the shared exercise sheet. */}
-      <ExerciseSheet
-        exercise={information}
-        onClose={() => setInformation(null)}
-      />
-    </View>
+      <ExerciseSheet exercise={information} onClose={() => setInformation(null)} />
+    </Screen>
   );
 }
 
@@ -410,140 +414,56 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  content: {
-    padding: spacing.gutter,
-    paddingBottom: spacing.section * 2,
+  overline: {
+    fontSize: fontSize.caption,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   title: {
     fontSize: fontSize.screenTitle,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  header: {
-    fontSize: fontSize.helper,
-    opacity: 0.7,
-    textAlign: 'center',
+    fontWeight: '700',
     marginTop: spacing.label,
     marginBottom: spacing.section,
   },
-  sectionTitle: {
-    fontSize: fontSize.sectionTitle,
-    fontWeight: '900',
-    marginTop: spacing.section,
-    marginBottom: spacing.card,
+  body: {
+    flex: 1,
   },
-  card: {
-    borderWidth: 1,
-    borderRadius: radius.card,
-    padding: spacing.card,
-    marginBottom: spacing.cardGap,
-  },
-  cardTitle: {
-    fontSize: fontSize.cardTitle,
-    fontWeight: '700',
-  },
-  targetRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: spacing.card,
-    marginTop: spacing.card,
+  bodyContent: {
+    paddingBottom: spacing.section,
   },
   helper: {
     fontSize: fontSize.helper,
-    opacity: 0.7,
-    marginTop: spacing.label,
+    marginBottom: spacing.section,
+  },
+  statPair: {
+    flexDirection: 'row',
+    gap: spacing.section,
+    marginTop: spacing.cardGap,
   },
   reason: {
     fontSize: fontSize.helper,
-    opacity: 0.7,
-    marginTop: spacing.label,
+    marginTop: spacing.cardGap,
   },
-  advisoryNote: {
+  advisory: {
     fontSize: fontSize.helper,
-    opacity: 0.8,
     marginTop: spacing.label,
-  },
-  amrapTable: {
-    marginTop: spacing.card,
-    borderWidth: 1,
-    borderRadius: radius.control,
-  },
-  amrapRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.label,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(128, 128, 128, 0.3)',
-  },
-  amrapHeader: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-  },
-  amrapCell: {
-    fontSize: fontSize.caption,
   },
   editArea: {
-    marginTop: spacing.card,
+    marginTop: spacing.cardGap,
   },
-  editInput: {
-    minHeight: touchTarget.control,
+  editActions: {
+    gap: spacing.cardGap,
   },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: spacing.inline,
-    marginTop: spacing.card,
+  footer: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: spacing.cardGap,
+    gap: spacing.label,
   },
-  primaryButton: {
-    borderRadius: radius.control,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.card,
-    minHeight: touchTarget.control,
-    alignItems: 'center',
-    justifyContent: 'center',
+  footerButton: {
+    alignSelf: 'stretch',
   },
-  secondaryButton: {
-    borderRadius: radius.control,
-    borderWidth: 1,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.card,
-    minHeight: touchTarget.control,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  grow: {
-    flex: 1,
-  },
-  pressed: {
-    opacity: 0.5,
-  },
-  primaryButtonText: {
-    fontSize: fontSize.button,
-    fontWeight: '700',
-  },
-  secondaryButtonText: {
-    fontSize: fontSize.button,
-    fontWeight: '600',
-  },
-  statusChip: {
-    alignSelf: 'flex-start',
-    borderRadius: radius.pill,
-    paddingHorizontal: spacing.card,
-    paddingVertical: spacing.label,
-    marginTop: spacing.card,
-  },
-  statusChipText: {
-    fontSize: fontSize.caption,
-    fontWeight: '700',
-  },
-  actionBar: {
-    borderTopWidth: 1,
-    padding: spacing.card,
-  },
-  finishHelper: {
+  footerHint: {
     fontSize: fontSize.helper,
-    opacity: 0.7,
     textAlign: 'center',
-    marginTop: spacing.label,
   },
 });

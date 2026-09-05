@@ -54,6 +54,7 @@ export function buildFreeRunnerSession(
     restMainSeconds: DEFAULT_FREE_REST_SECONDS,
     restAccessorySeconds: DEFAULT_FREE_REST_SECONDS,
     exercises: [],
+    mainLiftNames: [],
   };
 }
 

@@ -189,6 +189,7 @@ describe('runnerTargetsFor — the runner receives the cycle week', () => {
     restMainSeconds: 180,
     restAccessorySeconds: 90,
     exercises: [exercise],
+    mainLiftNames: [],
   });
 
   it.each([
@@ -664,6 +665,25 @@ describe('loadRunnerSession', () => {
     expect(loaded.exercises[1].role).toBe('accessory');
     expect(loaded.exercises[1].barProfile).toBeNull();
   });
+
+  it(
+    "carries every main lift of the ROUTINE, not just today's session — U5's " +
+      "mainLiftColours needs the routine-wide rank so the same lift keeps the same series " +
+      'colour on every screen, and this session is Squat Day, which has only one main lift of its own',
+    async () => {
+      const { executor } = connect();
+      const session = await fixture(executor);
+
+      const loaded = await loadRunnerSession(executor, session.weekSessionId, TODAY);
+
+      expect(loaded.mainLiftNames).toEqual([
+        'Barbell Full Squat',
+        'Barbell Bench Press - Medium Grip',
+        'Barbell Deadlift',
+        'Barbell Shoulder Press',
+      ]);
+    },
+  );
 
   it('refuses a session that is not pending', async () => {
     const { executor } = connect();

@@ -976,6 +976,83 @@ export async function undoDiscardSession(
      WHERE week_session_id = ? AND status = 'discarded';`,
     [weekSessionId],
   );
+  // U5: un-discarding a session un-resolves the week it was propping up, so
+  // `current_week` — which F4's `advanceCycleWeek` only ever moved forward —
+  // must be free to move back down again here. See `recedeCycleWeek`.
+  await recedeCycleWeek(db, weekSessionId);
+}
+
+interface CycleWeekResolutionRow {
+  weekNumber: number;
+  status: QueueWeekSessionRow['status'];
+}
+
+/**
+ * The latest week of a cycle whose sessions are ALL resolved (no pending
+ * row left), capped at `weeks`. The one calculation both `advanceCycleWeek`
+ * and `recedeCycleWeek` write from, so the definition of "resolved through
+ * week N" cannot drift between the forward and backward path.
+ */
+export function latestResolvedCycleWeek(
+  rows: readonly CycleWeekResolutionRow[],
+  weeks: number,
+): number {
+  const hasPendingByWeek = new Map<number, boolean>();
+  for (const row of rows) {
+    hasPendingByWeek.set(
+      row.weekNumber,
+      (hasPendingByWeek.get(row.weekNumber) ?? false) || row.status === 'pending',
+    );
+  }
+  let latestResolved = 0;
+  for (const [week, hasPending] of hasPendingByWeek) {
+    if (!hasPending && week > latestResolved) {
+      latestResolved = week;
+    }
+  }
+  return Math.min(latestResolved, weeks);
+}
+
+interface CycleWeekTarget {
+  cycleId: number;
+  currentWeek: number;
+  /** `latestResolvedCycleWeek` for this cycle right now. */
+  target: number;
+}
+
+/** Loads what `current_week` currently is and what it should be, for the cycle `weekSessionId` belongs to. Null for a non-active cycle — neither direction touches a completed one. */
+async function loadCycleWeekTarget(
+  db: RoutineDatabase,
+  weekSessionId: number,
+): Promise<CycleWeekTarget | null> {
+  const cycleRow = await db.get(
+    `SELECT c.cycle_id, c.current_week, c.weeks, c.status
+     FROM WeekSessions ws
+     JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+     JOIN Cycles c ON c.cycle_id = cw.cycle_id
+     WHERE ws.week_session_id = ?;`,
+    [weekSessionId],
+  );
+  if (cycleRow === undefined || str(cycleRow.status) !== 'active') {
+    return null;
+  }
+  const cycleId = num(cycleRow.cycle_id);
+  const weeks = num(cycleRow.weeks);
+  const weekRows = await db.getAll(
+    `SELECT cw.week_number AS week_number, ws.status AS status
+     FROM CycleWeeks cw
+     JOIN WeekSessions ws ON ws.cycle_week_id = cw.cycle_week_id
+     WHERE cw.cycle_id = ?;`,
+    [cycleId],
+  );
+  const target = latestResolvedCycleWeek(
+    weekRows.map((row) => ({
+      weekNumber: num(row.week_number),
+      status: str(row.status) as QueueWeekSessionRow['status'],
+    })),
+    weeks,
+  );
+  return { cycleId, currentWeek: num(cycleRow.current_week), target };
 }
 
 /**
@@ -992,55 +1069,42 @@ export async function undoDiscardSession(
  * could never even be detected as complete (`current_week >= weeks`) if its
  * very first week's review was ever skipped.
  *
- * `current_week` is set to the LATEST week of this cycle with zero pending
- * sessions, capped at the cycle's own `weeks` — never past it: reaching a
- * genuinely new cycle needs the accepted training maxes from a review
- * (`utils/cycleReview.ts` `startNextCycle`), not a bare increment. Applying
- * a review (`applyReview`) can still move it forward on its own, ahead of
- * this — the two cooperate, both only ever moving it forward.
+ * `current_week` is set to `latestResolvedCycleWeek`, capped at the cycle's
+ * own `weeks` — never past it: reaching a genuinely new cycle needs the
+ * accepted training maxes from a review (`utils/cycleReview.ts`
+ * `startNextCycle`), not a bare increment. Applying a review (`applyReview`)
+ * can still move it forward on its own, ahead of this — the two cooperate,
+ * both only ever moving it forward. Only `recedeCycleWeek` moves it back.
  */
 export async function advanceCycleWeek(
   db: RoutineDatabase,
   weekSessionId: number,
 ): Promise<void> {
-  const cycleRow = await db.get(
-    `SELECT c.cycle_id, c.current_week, c.weeks, c.status
-     FROM WeekSessions ws
-     JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
-     JOIN Cycles c ON c.cycle_id = cw.cycle_id
-     WHERE ws.week_session_id = ?;`,
-    [weekSessionId],
+  const state = await loadCycleWeekTarget(db, weekSessionId);
+  if (state === null || state.target <= state.currentWeek) {
+    return;
+  }
+  await db.run(
+    `UPDATE Cycles SET current_week = ? WHERE cycle_id = ? AND current_week < ?;`,
+    [state.target, state.cycleId, state.target],
   );
-  if (cycleRow === undefined || str(cycleRow.status) !== 'active') {
-    return;
-  }
-  const cycleId = num(cycleRow.cycle_id);
-  const currentWeek = num(cycleRow.current_week);
-  const weeks = num(cycleRow.weeks);
-  if (currentWeek >= weeks) {
-    return;
-  }
+}
 
-  const weekRows = await db.getAll(
-    `SELECT cw.week_number AS week_number,
-            SUM(CASE WHEN ws.status = 'pending' THEN 1 ELSE 0 END) AS pending
-     FROM CycleWeeks cw
-     JOIN WeekSessions ws ON ws.cycle_week_id = cw.cycle_week_id
-     WHERE cw.cycle_id = ?
-     GROUP BY cw.week_number;`,
-    [cycleId],
-  );
-  let latestResolved = 0;
-  for (const row of weekRows) {
-    if (num(row.pending) === 0 && num(row.week_number) > latestResolved) {
-      latestResolved = num(row.week_number);
-    }
+/**
+ * `undoDiscardSession`'s reversal of `advanceCycleWeek` (U5): un-discarding a
+ * session turns its week's status back to pending, so a week that used to
+ * read as fully resolved may no longer be. `advanceCycleWeek` never lowers
+ * `current_week` — every one of its other callers only ever resolves a row
+ * forward — so this is the one path allowed to write it back down, to
+ * whatever `latestResolvedCycleWeek` says is true now.
+ */
+async function recedeCycleWeek(db: RoutineDatabase, weekSessionId: number): Promise<void> {
+  const state = await loadCycleWeekTarget(db, weekSessionId);
+  if (state === null || state.target === state.currentWeek) {
+    return;
   }
-  const target = Math.min(latestResolved, weeks);
-  if (target > currentWeek) {
-    await db.run(
-      `UPDATE Cycles SET current_week = ? WHERE cycle_id = ? AND current_week < ?;`,
-      [target, cycleId, target],
-    );
-  }
+  await db.run(`UPDATE Cycles SET current_week = ? WHERE cycle_id = ?;`, [
+    state.target,
+    state.cycleId,
+  ]);
 }

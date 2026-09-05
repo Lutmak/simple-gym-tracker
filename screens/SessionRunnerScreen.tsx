@@ -29,7 +29,8 @@ import { Section } from '../components/Section';
 import { SegmentedControl } from '../components/SegmentedControl';
 import { Sheet } from '../components/Sheet';
 import { Timer } from '../components/Timer';
-import { fontSize, spacing, tabBar, touchTarget } from '../utils/scale';
+import { dataMark, fontSize, spacing, tabBar, touchTarget } from '../utils/scale';
+import { mainLiftColours } from '../utils/liftColours';
 import {
   BAR_PROFILES,
   STANDARD_PLATES,
@@ -540,6 +541,20 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
   }
 
   const planUnit = currentExercise?.unitOverride ?? session.unit;
+  // U5: the main lift's own series colour, so its header row reads the same identity as its hero
+  // row on Inicio and its line in Progreso's chart (ADR-0047). `session.mainLiftNames` is the
+  // ROUTINE's main lifts (every session's, not just today's) in the routine's own `sort_order` —
+  // ranking a lift within today's session alone would give every day's first main lift the same
+  // colour, which is exactly the cross-day identity this exists to avoid.
+  const mainLiftColourByName = mainLiftColours(
+    session.mainLiftNames.map((name) => ({ name, role: 'main' as const })),
+  );
+  const currentExerciseColourIndex =
+    currentExercise === undefined ? undefined : mainLiftColourByName.get(currentExercise.name);
+  const currentExerciseColour =
+    currentExerciseColourIndex === undefined
+      ? undefined
+      : tokens.data.series[currentExerciseColourIndex];
   const totalRows =
     currentExercise === undefined
       ? 0
@@ -736,11 +751,12 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
             <Text
               style={[styles.position, { color: tokens.textSecondary }]}
             >
-              {mode === 'free'
+              {mode === 'free' || currentExercise === undefined
                 ? t('freeLogging')
                 : t('runnerExercisePosition', {
                     n: exerciseIndex + 1,
                     total: session.exercises.length,
+                    role: t(currentExercise.role === 'main' ? 'roleMain' : 'roleAccessory'),
                   })}
             </Text>
             <View style={styles.elapsed}>
@@ -779,6 +795,12 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
               testID="runner-exercise-information"
             >
               <View style={styles.exerciseNameRow}>
+                {currentExerciseColour !== undefined && (
+                  <View
+                    style={[styles.liftSwatch, { backgroundColor: currentExerciseColour }]}
+                    testID="runner-exercise-lift-colour"
+                  />
+                )}
                 <Text style={[styles.exerciseName, { color: tokens.textPrimary }]} numberOfLines={2}>
                   {currentExercise.name}
                 </Text>
@@ -1581,6 +1603,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.inline,
+  },
+  liftSwatch: {
+    width: dataMark.dot,
+    height: dataMark.dot,
+    borderRadius: dataMark.dot / 2,
   },
   exerciseName: {
     flex: 1,

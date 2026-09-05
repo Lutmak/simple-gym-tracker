@@ -78,4 +78,15 @@ describe('mainLiftColours — fixed series slots for a routine main lifts', () =
     expect(colours.get('Bench')).toBe(1);
     expect(colours.get('Deadlift')).toBe(2);
   });
+
+  // U5's distinguishing case: a list with no main lifts at all (every row is an accessory),
+  // not just a single accessory — the runner's own caller can hand this module a whole session
+  // of pure accessory work.
+  it('U5: an all-accessory list gets no colours at all', () => {
+    const colours = mainLiftColours([
+      { name: 'Curl', role: 'accessory' },
+      { name: 'Lat Pulldown', role: 'accessory' },
+    ]);
+    expect(colours.size).toBe(0);
+  });
 });

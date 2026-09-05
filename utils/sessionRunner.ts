@@ -76,6 +76,12 @@ export interface RunnerSession {
   restMainSeconds: number;
   restAccessorySeconds: number;
   exercises: RunnerExercise[];
+  /**
+   * Every main lift of the ROUTINE (not just this session), in the routine's own `sort_order` —
+   * what `mainLiftColours` needs to give a lift the same series colour on every screen. Empty for
+   * a free-log session, which has no routine to be consistent with.
+   */
+  mainLiftNames: string[];
 }
 
 export interface LoggedSet {
@@ -603,7 +609,7 @@ export async function loadRunnerSession(
 ): Promise<RunnerSession> {
   const row = await db.get(
     `SELECT ws.week_session_id, ws.status, ws.resolved_on_date, cw.week_number,
-            s.session_id, s.name AS session_name,
+            s.session_id, s.name AS session_name, r.routine_id,
             r.name AS workout_name, r.unit, r.progression_rule,
             r.rounding_increment,
             r.rest_main_seconds, r.rest_accessory_seconds
@@ -628,6 +634,23 @@ export async function loadRunnerSession(
      FROM SessionExercises
      WHERE session_id = ? ORDER BY sort_order;`,
     [Number(row.session_id)],
+  );
+
+  // U5: a lift's series colour (`mainLiftColours`) must agree with every other screen of this
+  // routine, which means ranking it among the ROUTINE's main lifts, not just this one day's —
+  // `sort_order` is global across every session of a routine (F3's seed and the wave setup both
+  // number it that way), so the earliest sort_order a main lift's name appears under is its
+  // stable rank. A single day almost never repeats a main lift by name, so grouping by name
+  // alone is enough; two sessions coincidentally sharing an accessory's name never matters here
+  // because only role = 'main' rows are read.
+  const mainLiftRows = await db.getAll(
+    `SELECT e.exercise_name AS name, MIN(e.sort_order) AS first_sort_order
+     FROM SessionExercises e
+     JOIN Sessions s2 ON s2.session_id = e.session_id
+     WHERE s2.routine_id = ? AND e.role = 'main'
+     GROUP BY e.exercise_name
+     ORDER BY first_sort_order;`,
+    [Number(row.routine_id)],
   );
 
   const num = (value: unknown): number => Number(value);
@@ -671,5 +694,6 @@ export async function loadRunnerSession(
           ? null
           : num(exercise.warmups_enabled) === 1,
     })),
+    mainLiftNames: mainLiftRows.map((lift) => str(lift.name)),
   };
 }

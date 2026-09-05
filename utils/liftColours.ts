@@ -1,19 +1,19 @@
 /**
- * A routine's main lifts, coloured (ADR-0047 §4.1, SPEC.md U2/U3/U4).
+ * A routine's main lifts, coloured (ADR-0047 §4.1, SPEC.md U2/U3/U4/U5).
  *
  * "The same lift is the same colour on every chart, tile and row of its routine" only holds if
  * the assignment is made the same way everywhere: Inicio's hero dot, Progreso's strength chart
- * and legend, and Rutinas' day-block markers must all agree on which of the four
- * `theme.data.series` slots belongs to Squat. This module is that one place.
+ * and legend, Rutinas' day-block markers, and the runner's per-set plan line must all agree on
+ * which of the four `theme.data.series` slots belongs to Squat. This module is that one place.
  *
  * Order is the routine's own session order, then in-session `sort_order` — a main lift's plan
  * position, not its name or a database id — because that is the order a user reads the routine
  * in. This module does not re-derive that order itself: each caller is already walking its rows
  * in some display order of its own (a screen rendering day blocks, a chart already built from
- * lifts loaded in `sort_order`), so it trusts the order it is given rather than duplicating a
- * second, possibly disagreeing, definition of "the routine's order". Callers whose rows are not
- * already in that order (session `sort_order` then exercise `sort_order`) must sort before
- * calling.
+ * lifts loaded in `sort_order`, the runner ranking lifts across all sessions by global
+ * `sort_order`), so it trusts the order it is given rather than duplicating a second, possibly
+ * disagreeing, definition of "the routine's order". Callers whose rows are not already in that
+ * order (session `sort_order` then exercise `sort_order`) must sort before calling.
  *
  * Identity is the exercise's name (or catalog key), not a row id: two `SessionExercises` rows
  * are two different database rows even when they are the same lift shown on two different days

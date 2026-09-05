@@ -312,7 +312,7 @@ export default function ExerciseCatalogPicker({
             options={filterOptions}
             value={bodyPart}
             onChange={setBodyPart}
-            wrap
+            scroll
             testID="picker-body-part-filter"
           />
         </View>

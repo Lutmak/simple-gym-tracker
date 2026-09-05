@@ -1,89 +1,147 @@
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from './AppTextInput';
-import { fontSize, spacing } from '../utils/scale';
-import type { InicioDay, InicioDayStatus } from '../utils/inicio';
+import { hexWithOpacity, type DataStateKey } from '../utils/theme';
+import { fontSize, spacing, touchTarget } from '../utils/scale';
+import type { InicioDay, InicioDayStatus, InicioSessionTarget } from '../utils/inicio';
 
-type Props = {
+/**
+ * "Esta semana"'s week strip (SPEC.md U2, ADR-0047 §4.1): a coloured disc per day, told apart the
+ * same two ways Progreso's calendar uses — a tinted `data.state` fill and a glyph, never colour
+ * alone — with today rung in `textPrimary` independently of whatever state the day also carries.
+ *
+ * Unlike the calendar there is **no legend row**: seven cells are the whole point, and a legend
+ * under them would be exactly the "box under the box" this iteration is removing elsewhere. A
+ * long-press names the day instead, in a one-line caption that appears under the row and clears
+ * itself — a tooltip without inventing a tooltip primitive.
+ *
+ * Only a resolved day (`completed`/`moved`/`discarded`) is tappable, opening the same session
+ * sheet the calendar does (`day.target !== null` — computed once in `utils/inicio.ts`, not
+ * re-derived here); `pending` and `rest` are inert, nothing has happened there to open.
+ */
+
+const GLYPH: Record<InicioDayStatus, string> = {
+  completed: '✓',
+  moved: '→',
+  discarded: '✕',
+  pending: '○',
+  rest: '·',
+};
+
+/** `pending`/`rest` carry no `data.state` entry — an unhappened day is the absence of colour. */
+const STATE_KEY: Partial<Record<InicioDayStatus, DataStateKey>> = {
+  completed: 'done',
+  moved: 'moved',
+  discarded: 'discarded',
+};
+
+const DISC_FILL_OPACITY = 0.22;
+const CAPTION_TIMEOUT_MS = 2500;
+
+export type WeekOverviewProps = {
   days: readonly InicioDay[];
   todayStamp: number;
   weekdayLabels: readonly string[];
-  legend: readonly { label: string; status: InicioDayStatus }[];
+  statusLabels: Readonly<Record<InicioDayStatus, string>>;
+  onSelectDay: (target: InicioSessionTarget) => void;
+  testID?: string;
 };
 
-const symbolFor = (status: InicioDayStatus): string => {
-  switch (status) {
-    case 'completed':
-      return '✓';
-    case 'moved':
-      return '→';
-    case 'discarded':
-      return '✕';
-    case 'pending':
-      return '○';
-    case 'rest':
-      return '·';
-  }
-};
-
-export function WeekOverview({ days, todayStamp, weekdayLabels, legend }: Props) {
+export function WeekOverview({
+  days,
+  todayStamp,
+  weekdayLabels,
+  statusLabels,
+  onSelectDay,
+  testID,
+}: WeekOverviewProps) {
   const { tokens } = useTheme();
+  const [captionIndex, setCaptionIndex] = useState<number | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const colorFor = (status: InicioDayStatus): string => {
-    switch (status) {
-      case 'completed':
-        return tokens.success;
-      case 'discarded':
-        return tokens.warning;
-      case 'moved':
-        return tokens.accent;
-      case 'pending':
-      case 'rest':
-        return tokens.textSecondary;
+  useEffect(
+    () => () => {
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current);
+      }
+    },
+    [],
+  );
+
+  const showCaption = (index: number) => {
+    if (timeoutRef.current !== null) {
+      clearTimeout(timeoutRef.current);
     }
+    setCaptionIndex(index);
+    timeoutRef.current = setTimeout(() => setCaptionIndex(null), CAPTION_TIMEOUT_MS);
   };
 
+  const discFill = (status: InicioDayStatus): string | null => {
+    const key = STATE_KEY[status];
+    return key === undefined ? null : hexWithOpacity(tokens.data.state[key], DISC_FILL_OPACITY);
+  };
+
+  const glyphColor = (status: InicioDayStatus): string =>
+    status === 'completed' || status === 'moved' ? tokens.textPrimary : tokens.textSecondary;
+
+  const caption = captionIndex === null ? null : days[captionIndex];
+
   return (
-    <View>
+    <View testID={testID}>
       <View style={styles.dayRow}>
-        {days.map((day, index) => (
-          <View
-            key={day.stamp}
-            style={[
-              styles.day,
-              { borderColor: day.stamp === todayStamp ? tokens.accent : tokens.divider },
-              day.stamp === todayStamp && styles.today,
-            ]}
-            accessibilityLabel={`${weekdayLabels[index]} ${symbolFor(day.status)}`}
-          >
-            <Text
-              style={[styles.weekday, { color: tokens.textSecondary }]}
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+        {days.map((day, index) => {
+          const isToday = day.stamp === todayStamp;
+          const fill = discFill(day.status);
+          const label = `${weekdayLabels[index]} · ${statusLabels[day.status]}`;
+          return (
+            <Pressable
+              key={day.stamp}
+              disabled={day.target === null}
+              onPress={day.target === null ? undefined : () => onSelectDay(day.target as InicioSessionTarget)}
+              onLongPress={() => showCaption(index)}
+              accessibilityRole={day.target === null ? undefined : 'button'}
+              accessibilityLabel={label}
+              style={({ pressed }) => [
+                styles.cell,
+                pressed && day.target !== null && { backgroundColor: tokens.inputFill },
+              ]}
+              testID={testID === undefined ? undefined : `${testID}-day-${day.stamp}`}
             >
-              {weekdayLabels[index]}
-            </Text>
-            <Text
-              style={[styles.symbol, { color: colorFor(day.status) }]}
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            >
-              {symbolFor(day.status)}
-            </Text>
-          </View>
-        ))}
+              <Text
+                style={[styles.weekday, { color: tokens.textSecondary }]}
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+              >
+                {weekdayLabels[index]}
+              </Text>
+              <View
+                style={[
+                  styles.disc,
+                  fill !== null && { backgroundColor: fill },
+                  isToday && { borderColor: tokens.textPrimary, borderWidth: 2 },
+                ]}
+              >
+                <Text
+                  style={[styles.glyph, { color: glyphColor(day.status) }]}
+                  maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                >
+                  {GLYPH[day.status]}
+                </Text>
+              </View>
+            </Pressable>
+          );
+        })}
       </View>
-      <View style={styles.legend}>
-        {legend.map((item) => (
-          <View key={item.status} style={styles.legendItem}>
-            <Text style={[styles.legendSymbol, { color: colorFor(item.status) }]}>
-              {symbolFor(item.status)}
-            </Text>
-            <Text style={[styles.legendLabel, { color: tokens.textSecondary }]}>
-              {item.label}
-            </Text>
-          </View>
-        ))}
-      </View>
+      {caption !== null && (
+        <Text
+          style={[styles.caption, { color: tokens.textSecondary }]}
+          testID={testID === undefined ? undefined : `${testID}-caption`}
+        >
+          {`${weekdayLabels[captionIndex as number]} · ${statusLabels[caption.status]}${
+            caption.sessionName === null ? '' : ` · ${caption.sessionName}`
+          }`}
+        </Text>
+      )}
     </View>
   );
 }
@@ -91,44 +149,33 @@ export function WeekOverview({ days, todayStamp, weekdayLabels, legend }: Props)
 const styles = StyleSheet.create({
   dayRow: {
     flexDirection: 'row',
-    gap: spacing.inline,
   },
-  day: {
+  cell: {
     flex: 1,
-    aspectRatio: 1,
-    borderWidth: 1,
     alignItems: 'center',
-    justifyContent: 'center',
     gap: spacing.inline,
-  },
-  today: {
-    borderWidth: 2,
+    paddingVertical: spacing.label,
   },
   weekday: {
     fontSize: fontSize.caption,
     fontWeight: '600',
   },
-  symbol: {
-    fontSize: fontSize.cardTitle,
-    fontWeight: '700',
-  },
-  legend: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    columnGap: spacing.card,
-    rowGap: spacing.label,
-    marginTop: spacing.card,
-  },
-  legendItem: {
-    flexDirection: 'row',
+  disc: {
+    width: touchTarget.icon,
+    height: touchTarget.icon,
+    borderRadius: touchTarget.icon / 2,
     alignItems: 'center',
-    gap: spacing.inline,
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
-  legendSymbol: {
+  glyph: {
     fontSize: fontSize.body,
     fontWeight: '700',
   },
-  legendLabel: {
+  caption: {
     fontSize: fontSize.caption,
+    marginTop: spacing.label,
+    textAlign: 'center',
   },
 });

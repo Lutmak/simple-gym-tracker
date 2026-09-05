@@ -11,28 +11,35 @@ import { useSettings } from '../context/SettingsContext';
 import { Button } from '../components/Button';
 import { EmptyState } from '../components/EmptyState';
 import { ExerciseSheet } from '../components/ExerciseSheet';
+import { Hero } from '../components/Hero';
 import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { Section } from '../components/Section';
+import { SessionDetailSheet, type SessionDetailTarget } from '../components/SessionDetailSheet';
 import { Sheet } from '../components/Sheet';
+import { Stat } from '../components/Stat';
 import { WeekOverview } from '../components/WeekOverview';
 import { Calendar } from '../components/Calendar';
-import { fontSize, spacing, tabBar } from '../utils/scale';
+import { dataMark, fontSize, spacing, tabBar } from '../utils/scale';
 import {
   dayStampOf,
   loadMoveDayPlan,
   resolveDiscardSession,
   resolveDoTodaySession,
   resolveMoveSession,
+  resolvePullForwardSession,
   undoDiscardSession,
   type MoveDayPlan,
+  type QueuedExercise,
   type QueuedSession,
 } from '../utils/today';
 import {
   datePartsOfStamp,
   loadInicioData,
+  truncateHeroExercises,
   type InicioData,
   type InicioDayStatus,
+  type InicioSessionTarget,
 } from '../utils/inicio';
 import type { RoutineDatabase } from '../utils/routineActions';
 import type { InicioStackParamList, RootTabParamList } from '../App';
@@ -78,13 +85,13 @@ const MONTH_KEYS = [
 
 const formatWeight = (value: number): string => String(Number(value.toFixed(1)));
 
-const legendStatuses: readonly InicioDayStatus[] = [
-  'completed',
-  'moved',
-  'discarded',
-  'pending',
-  'rest',
-];
+const WEEK_STATUS_KEY: Record<InicioDayStatus, string> = {
+  completed: 'inicioWeekCompleted',
+  moved: 'inicioWeekMoved',
+  discarded: 'inicioWeekDiscarded',
+  pending: 'inicioWeekPending',
+  rest: 'inicioWeekRest',
+};
 
 type ResolutionStep = 'outcomes' | 'move';
 
@@ -107,11 +114,14 @@ export default function InicioScreen({ navigation, route }: Props) {
   const [calendarVisible, setCalendarVisible] = useState(false);
   /** R2: the exercise whose shared sheet is open. */
   const [information, setInformation] = useState<string | null>(null);
+  /** U2: a resolved week-strip day's session sheet (`components/SessionDetailSheet.tsx`). */
+  const [detailTarget, setDetailTarget] = useState<SessionDetailTarget | null>(null);
   const [resolving, setResolving] = useState(false);
   const [resolutionError, setResolutionError] = useState<string | null>(null);
   const [pendingReopenId, setPendingReopenId] = useState<number | null>(null);
   const [pendingReopenSession, setPendingReopenSession] = useState<QueuedSession | null>(null);
   const [undoDiscard, setUndoDiscard] = useState<UndoDiscard | null>(null);
+  const [pullingForward, setPullingForward] = useState(false);
 
   const routineDb: RoutineDatabase = {
     run: (sql: string, params?: readonly unknown[]) => db.runAsync(sql, (params ?? []) as never[]),
@@ -152,6 +162,7 @@ export default function InicioScreen({ navigation, route }: Props) {
       setPendingReopenSession(null);
       setResolutionSession(null);
       setResolutionSheetVisible(false);
+      setDetailTarget(null);
     });
     return unsubscribe;
   }, [navigation]);
@@ -206,10 +217,12 @@ export default function InicioScreen({ navigation, route }: Props) {
 
   const todayStamp = dayStampOf(new Date());
   const weekdayLabels = data.week.days.map((day) => t(WEEKDAY_SHORT_KEYS[day.weekday]));
-  const legend = legendStatuses.map((status) => ({
-    status,
-    label: t(`inicioWeek${status[0].toUpperCase()}${status.slice(1)}`),
-  }));
+  const weekStatusLabels = Object.fromEntries(
+    (Object.entries(WEEK_STATUS_KEY) as [InicioDayStatus, string][]).map(([status, key]) => [
+      status,
+      t(key),
+    ]),
+  ) as Record<InicioDayStatus, string>;
 
   const formatDate = (stamp: number): string => {
     const date = datePartsOfStamp(stamp);
@@ -239,6 +252,26 @@ export default function InicioScreen({ navigation, route }: Props) {
   // H2 consumes this route request to mount the standard resolution Sheet.
   const openSessionResolution = (weekSessionId: number) =>
     navigation.navigate('InicioIndex', { resolutionWeekSessionId: weekSessionId });
+  /** A resolved week-strip cell opens the same session sheet the Progreso calendar does. */
+  const openSessionDetail = (target: InicioSessionTarget) =>
+    setDetailTarget({ kind: 'session', ...target });
+
+  /** §3.3 — "adelantar": the rest-day hero's own shortcut to the tab bar's rest-day sheet action. */
+  const pullForward = async () => {
+    if (pullingForward) {
+      return;
+    }
+    setPullingForward(true);
+    try {
+      const weekSessionId = await resolvePullForwardSession(routineDb, todayStamp);
+      bump();
+      startSession(weekSessionId);
+    } catch (error) {
+      console.error('Error pulling the next session forward:', error);
+    } finally {
+      setPullingForward(false);
+    }
+  };
 
   const closeResolution = () => {
     setPendingReopenId(null);
@@ -525,26 +558,37 @@ export default function InicioScreen({ navigation, route }: Props) {
     );
   };
 
-  const renderAnswer = () => {
-    if (data.queue.routine === null) {
-      return (
-        <EmptyState
-          title={t('inicioNoRoutineMessage')}
-          actionLabel={t('goToRoutines')}
-          onAction={openRoutines}
-          testID="inicio-no-routine"
-        />
-      );
+  /** ADR-0047 §4.1: the main lift's own series colour, next to its row — null for an accessory. */
+  const exerciseColor = (exercise: QueuedExercise): string | null => {
+    if (exercise.role !== 'main') {
+      return null;
     }
+    const index = data.mainLiftColours.get(exercise.name) ?? 0;
+    return tokens.data.series[index];
+  };
 
-    if (data.queue.head !== null && data.queue.resolution === 'unresolved') {
-      const session = data.queue.head;
+  /** SPEC.md U2: "HOY · viernes 4 de septiembre" — the missed day's own date when unresolved. */
+  const overline = (): string => {
+    const { queue } = data;
+    if (queue.head !== null && queue.resolution === 'unresolved') {
+      return `${t('inicioUnresolved')} · ${formatDate(queue.head.date)}`;
+    }
+    if (queue.head === null && queue.review !== null) {
+      return t('inicioReviewOverline');
+    }
+    return `${t('inicioToday')} · ${formatDate(todayStamp)}`;
+  };
+
+  const renderHero = () => {
+    const { queue } = data;
+
+    if (queue.head !== null && queue.resolution === 'unresolved') {
+      const session = queue.head;
       const resolutionChoices = session.doTodayAvailable
         ? t('inicioResolutionChoices')
         : t('inicioResolutionChoicesWithoutToday');
       return (
         <View testID="inicio-unresolved">
-          <Text style={[styles.overline, { color: tokens.textSecondary }]}>{t('inicioUnresolved')}</Text>
           <Text style={[styles.sessionTitle, { color: tokens.textPrimary }]}>{session.name}</Text>
           <Text style={[styles.helper, { color: tokens.textSecondary }]}>
             {formatDate(session.date)} · {t('inicioNotLogged')}
@@ -561,10 +605,9 @@ export default function InicioScreen({ navigation, route }: Props) {
       );
     }
 
-    if (data.queue.head !== null && data.queue.resolution === 'due') {
-      const session = data.queue.head;
-      const exercises = session.exercises.slice(0, 5);
-      const remaining = session.exercises.length - exercises.length;
+    if (queue.head !== null && queue.resolution === 'due') {
+      const session = queue.head;
+      const { shown, remaining } = truncateHeroExercises(session.exercises);
       const summary = data.durationMinutes === null
         ? t('inicioExerciseCount', { count: session.exercises.length })
         : t('inicioExerciseCountWithDuration', {
@@ -573,27 +616,37 @@ export default function InicioScreen({ navigation, route }: Props) {
           });
       return (
         <View testID="inicio-due">
-          <Text style={[styles.overline, { color: tokens.textSecondary }]}>{t('inicioToday')}</Text>
           <Text style={[styles.sessionTitle, { color: tokens.textPrimary }]}>{session.name}</Text>
           <Text style={[styles.helper, { color: tokens.textSecondary }]}>{summary}</Text>
           <View style={styles.exerciseList}>
-            {exercises.map((exercise) => (
-              <Row
-                key={exercise.name}
-                label={exercise.name}
-                detail={`${exercise.targetSets} × ${exercise.isAmrap ? `${exercise.targetReps}+` : exercise.targetReps}`}
-                right={
-                  <Text style={[styles.weight, { color: tokens.textPrimary }]}>
-                    {exercise.targetWeight === null
-                      ? '—'
-                      : `${formatWeight(exercise.targetWeight)} ${exercise.unit}`}
-                  </Text>
-                }
-                /* R2: today's plan is one tap from what each exercise actually is. */
-                onPress={() => setInformation(exercise.name)}
-                divided
-              />
-            ))}
+            {shown.map((exercise) => {
+              const color = exerciseColor(exercise);
+              return (
+                <Row
+                  key={exercise.name}
+                  label={exercise.name}
+                  detail={`${exercise.targetSets} × ${exercise.isAmrap ? `${exercise.targetReps}+` : exercise.targetReps}`}
+                  right={
+                    <View style={styles.exerciseRight}>
+                      <Text style={[styles.weight, { color: tokens.textPrimary }]}>
+                        {exercise.targetWeight === null
+                          ? '—'
+                          : `${formatWeight(exercise.targetWeight)} ${exercise.unit}`}
+                      </Text>
+                      {color !== null && (
+                        <View
+                          style={[styles.seriesDot, { backgroundColor: color }]}
+                          testID={`inicio-exercise-dot-${exercise.name}`}
+                        />
+                      )}
+                    </View>
+                  }
+                  /* R2: today's plan is one tap from what each exercise actually is. */
+                  onPress={() => setInformation(exercise.name)}
+                  divided
+                />
+              );
+            })}
             {remaining > 0 && (
               <Text style={[styles.helper, { color: tokens.textSecondary }]}>
                 {t('inicioMoreExercises', { count: remaining })}
@@ -611,13 +664,10 @@ export default function InicioScreen({ navigation, route }: Props) {
 
     // §3.4/F4: a completed, unreviewed cycle has nothing left pending until
     // the review seeds the next one — this is Inicio's answer for it.
-    if (data.queue.review !== null) {
-      const review = data.queue.review;
+    if (queue.review !== null) {
+      const review = queue.review;
       return (
         <View testID="inicio-review">
-          <Text style={[styles.overline, { color: tokens.textSecondary }]}>
-            {t('inicioReviewOverline')}
-          </Text>
           <Text style={[styles.sessionTitle, { color: tokens.textPrimary }]}>
             {t('inicioReviewTitle', { cycle: review.cycleNumber })}
           </Text>
@@ -638,44 +688,107 @@ export default function InicioScreen({ navigation, route }: Props) {
       );
     }
 
+    // Rest day: the hero states it plainly and offers the one shortcut off it (§3.3).
+    const nextUpcoming = data.upcomingSessions[0] ?? null;
     return (
       <View testID="inicio-rest">
-        <Text style={[styles.overline, { color: tokens.textSecondary }]}>{t('inicioToday')}</Text>
         <Text style={[styles.sessionTitle, { color: tokens.textPrimary }]}>{t('inicioRestDay')}</Text>
-        {data.queue.upcoming !== null && (
+        {nextUpcoming !== null && (
           <Text style={[styles.helper, { color: tokens.textSecondary }]}>
             {t('inicioNextSession', {
-              weekday: t(WEEKDAY_FULL_KEYS[data.queue.upcoming.weekday]),
-              name: data.queue.upcoming.name,
+              weekday: t(WEEKDAY_FULL_KEYS[nextUpcoming.weekday]),
+              name: nextUpcoming.name,
             })}
           </Text>
+        )}
+        {queue.upcoming !== null && queue.upcoming.weekSessionId !== null && (
+          <Row
+            label={t('restDayPullForward')}
+            detail={t('restDayPullForwardDetail')}
+            detailBelow
+            right={<Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />}
+            onPress={() => void pullForward()}
+            disabled={pullingForward}
+            testID="inicio-adelantar"
+          />
         )}
       </View>
     );
   };
 
+  if (data.queue.routine === null) {
+    return (
+      <Screen testID="inicio-screen">
+        <EmptyState
+          title={t('inicioNoRoutineMessage')}
+          actionLabel={t('goToRoutines')}
+          onAction={openRoutines}
+          testID="inicio-no-routine"
+        />
+      </Screen>
+    );
+  }
+
   return (
     <>
       <Screen scroll testID="inicio-screen">
-        <Section testID="inicio-answer">
-          {renderAnswer()}
-        </Section>
-        <Section title={t('inicioWeekTitle')} testID="inicio-week">
+        <Text style={[styles.overline, { color: tokens.textSecondary }]} testID="inicio-overline">
+          {overline()}
+        </Text>
+        <Hero testID="inicio-hero">{renderHero()}</Hero>
+
+        <Section
+          title={`${t('inicioWeekTitle')} · ${t('inicioWeekSessionCount', {
+            completed: data.week.completed,
+            planned: data.week.planned,
+          })}`}
+          testID="inicio-week"
+        >
           <WeekOverview
             days={data.week.days}
             todayStamp={todayStamp}
             weekdayLabels={weekdayLabels}
-            legend={legend}
+            statusLabels={weekStatusLabels}
+            onSelectDay={openSessionDetail}
+            testID="inicio-week-overview"
           />
         </Section>
-        <Text style={[styles.streak, { color: tokens.textPrimary }]} testID="inicio-streak">
-          {t('inicioStreak', {
-            count: data.streak.weeks,
-            weeks: data.streak.weeks,
-            completed: data.streak.current.completed,
-            planned: data.streak.current.planned,
-          })}
-        </Text>
+
+        <View style={styles.statsRow} testID="inicio-stats">
+          <Stat
+            value={String(data.streak.weeks)}
+            label={t('inicioStatStreakLabel', { count: data.streak.weeks })}
+            testID="inicio-stat-streak"
+          />
+          <Stat
+            value={data.cycleStats.adherencePercent === null ? '—' : String(data.cycleStats.adherencePercent)}
+            unit={data.cycleStats.adherencePercent === null ? undefined : '%'}
+            label={t('inicioStatAdherenceLabel')}
+            testID="inicio-stat-adherence"
+          />
+          <Stat
+            value={String(data.cycleStats.cyclesCompleted)}
+            label={t('inicioStatCyclesLabel', { count: data.cycleStats.cyclesCompleted })}
+            testID="inicio-stat-cycles"
+          />
+        </View>
+
+        {data.upcomingSessions.length > 0 && (
+          <Section title={t('inicioUpcomingTitle')} testID="inicio-upcoming">
+            {data.upcomingSessions.map((session, index) => (
+              <Text
+                key={`${session.weekSessionId ?? 'plan'}-${session.date}-${index}`}
+                style={[styles.upcomingLine, { color: tokens.textPrimary }]}
+              >
+                {t('inicioUpcomingLine', {
+                  weekday: t(WEEKDAY_FULL_KEYS[session.weekday]),
+                  name: session.name,
+                })}
+              </Text>
+            ))}
+          </Section>
+        )}
+
         {undoDiscard !== null && (
           <Row
             label={t('inicioUndoDiscard', { name: undoDiscard.sessionName })}
@@ -686,6 +799,17 @@ export default function InicioScreen({ navigation, route }: Props) {
         )}
       </Screen>
       {renderResolutionSheet()}
+
+      {/* U2/P1/P2: a resolved week-strip cell opens the same sheet the Progreso calendar does. */}
+      <SessionDetailSheet
+        target={detailTarget}
+        visible={detailTarget !== null && information === null}
+        onClose={() => setDetailTarget(null)}
+        onOpenExercise={(exerciseName) => setInformation(exerciseName)}
+        onEdited={() => void reload()}
+        formatDate={formatDate}
+        testID="inicio-session-detail"
+      />
 
       {/* R2: the shared exercise sheet, the same one the runner and the editor open. */}
       <ExerciseSheet
@@ -702,11 +826,11 @@ const styles = StyleSheet.create({
     fontSize: fontSize.caption,
     fontWeight: '700',
     textTransform: 'uppercase',
+    marginBottom: spacing.cardGap,
   },
   sessionTitle: {
     fontSize: fontSize.screenTitle,
     fontWeight: '700',
-    marginTop: spacing.label,
   },
   helper: {
     fontSize: fontSize.helper,
@@ -715,17 +839,31 @@ const styles = StyleSheet.create({
   exerciseList: {
     marginTop: spacing.card,
   },
+  exerciseRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.inline,
+  },
   weight: {
     fontSize: fontSize.body,
     fontWeight: '600',
+  },
+  seriesDot: {
+    width: dataMark.dot,
+    height: dataMark.dot,
+    borderRadius: dataMark.dot / 2,
   },
   fullButton: {
     alignSelf: 'stretch',
     marginTop: spacing.card,
   },
-  streak: {
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.section,
+  },
+  upcomingLine: {
     fontSize: fontSize.body,
-    fontWeight: '600',
   },
   sheetDate: {
     fontSize: fontSize.helper,

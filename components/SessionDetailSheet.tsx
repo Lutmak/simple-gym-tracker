@@ -12,6 +12,7 @@ import { SegmentedControl } from './SegmentedControl';
 import { Sheet } from './Sheet';
 import { fontSize, spacing, tabBar } from '../utils/scale';
 import {
+  formatPlanLine,
   loadFreeLogDetail,
   loadWeekDetail,
   sessionDetailsOfWeek,
@@ -275,13 +276,10 @@ export function SessionDetailSheet({
     const planLine =
       planned === null
         ? t('progressAddedExercise')
-        : t('progressPlanLine', {
-            sets: planned.targetSets,
-            reps: planned.isAmrap ? `${planned.targetReps}+` : planned.targetReps,
-            load:
-              planned.targetWeight === null
-                ? t('loadBodyweight')
-                : `${formatWeight(planned.targetWeight)} ${planned.unit}`,
+        : formatPlanLine(planned.sets, planned.unit, planned.loadSource, {
+            label: t('progressPlanLabel'),
+            unlearnedWeight: t('runnerWeightToLearn'),
+            bodyweight: t('loadBodyweight'),
           });
 
     return (

@@ -22,7 +22,7 @@ import type {
   RoutineUnit,
 } from './routineActions';
 import { groupByUnit } from './chart';
-import { nominalSessionStamp, targetWeightFor } from './today';
+import { nominalSessionStamp, targetSetsFor, type PlannedTargetSet } from './today';
 
 export type WeekSessionStatus = 'pending' | 'completed' | 'moved' | 'discarded';
 export type CycleStatus = 'planned' | 'active' | 'complete';
@@ -102,10 +102,14 @@ export interface PlannedExercise {
   role: 'main' | 'accessory';
   targetSets: number;
   targetReps: number;
-  /** Concrete target weight in `unit`; null for bodyweight. */
+  /** Concrete target weight in `unit`; null for bodyweight. First work set's, kept for callers that only want one number. */
   targetWeight: number | null;
   unit: RoutineUnit;
   isAmrap: boolean;
+  /** Why a null weight reads "bodyweight" rather than "not learned yet" (U5's `formatPlanLine`). */
+  loadSource: RoutineLoadSource;
+  /** Every planned work set's own target for the week being viewed — a wave exercise's sets differ (U5). */
+  sets: PlannedTargetSet[];
 }
 
 export interface PlannedSession {
@@ -365,6 +369,59 @@ export function sessionExercises(detail: SessionDetail): SessionExerciseView[] {
     }
   }
   return views;
+}
+
+export interface PlanLineLabels {
+  /** The line's leading word — "Planificado"/"Planned". */
+  label: string;
+  /** What a set whose weight is not yet learned reads instead of a number (ADR-0034). */
+  unlearnedWeight: string;
+  /** What a bodyweight exercise's set reads instead of a number. */
+  bodyweight: string;
+}
+
+/**
+ * The session detail sheet's plan line (SPEC.md U5): that week's actual per-set targets, e.g.
+ * "Planificado: 37.5 · 43 · 49 kg × 5+" — every set's own load when they differ, which is the
+ * ordinary case for a wave exercise every single week, collapsed to one number when every set
+ * really does share it (an accessory's flat weight). Never the training-max-ish single figure a
+ * caller gets by asking `targetWeightFor` for one number without a week — that number sits next
+ * to sets whose real target is not it, which is the defect this replaces.
+ */
+export function formatPlanLine(
+  sets: readonly PlannedTargetSet[],
+  unit: RoutineUnit,
+  loadSource: RoutineLoadSource,
+  labels: PlanLineLabels,
+): string {
+  if (sets.length === 0) {
+    return labels.label;
+  }
+  const missingWeightLabel = loadSource === 'bodyweight' ? labels.bodyweight : labels.unlearnedWeight;
+  const formatSetWeight = (weight: number): string => String(Number(weight.toFixed(1)));
+  const knownWeights = sets
+    .map((set) => set.targetWeight)
+    .filter((weight): weight is number => weight !== null);
+  const weightsUniform =
+    knownWeights.length === sets.length &&
+    knownWeights.every((weight) => weight === knownWeights[0]);
+
+  const loadText =
+    knownWeights.length === 0
+      ? missingWeightLabel
+      : weightsUniform
+        ? `${formatSetWeight(knownWeights[0])} ${unit}`
+        : `${sets
+            .map((set) => (set.targetWeight === null ? missingWeightLabel : formatSetWeight(set.targetWeight)))
+            .join(' · ')} ${unit}`;
+
+  const firstReps = sets[0].targetReps;
+  const repsUniform = sets.every((set) => set.targetReps === firstReps);
+  const repsText = repsUniform
+    ? `${firstReps}${sets.some((set) => set.isAmrap) ? '+' : ''}`
+    : sets.map((set) => `${set.targetReps}${set.isAmrap ? '+' : ''}`).join('/');
+
+  return `${labels.label}: ${loadText} × ${repsText}`;
 }
 
 const num = (value: unknown): number => Number(value);
@@ -649,15 +706,21 @@ export async function loadWeekDetail(
       plannedBySession.set(row.sessionId, session);
       planned.push(session);
     }
+    // U5: computed against THIS week's wave, not the flat fallback
+    // `targetWeightFor` gives without a week number — that fallback reads a
+    // training-max-ish figure next to sets that actually differ.
+    const sets = targetSetsFor(row, roundingIncrement, weekNumber);
     session.exercises.push({
       sessionExerciseId: row.sessionExerciseId,
       name: row.name,
       role: row.role,
       targetSets: row.targetSets,
       targetReps: row.targetReps,
-      targetWeight: targetWeightFor(row, roundingIncrement),
+      targetWeight: sets[0]?.targetWeight ?? null,
       unit: row.unitOverride ?? routineUnit,
       isAmrap: row.isAmrap,
+      loadSource: row.loadSource,
+      sets,
     });
   }
 

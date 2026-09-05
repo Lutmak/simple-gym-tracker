@@ -6,6 +6,7 @@ import {
   buildLiftSeries,
   computeWeekAdherence,
   cycleAdherence,
+  formatPlanLine,
   hasChartableSeries,
   hasProgressFocus,
   loadFreeLogDetail,
@@ -231,6 +232,12 @@ describe('pure core', () => {
           targetWeight: 100,
           unit: 'kg',
           isAmrap: false,
+          loadSource: 'training_max_pct',
+          sets: [
+            { targetReps: 5, targetWeight: 100, isAmrap: false },
+            { targetReps: 5, targetWeight: 100, isAmrap: false },
+            { targetReps: 5, targetWeight: 100, isAmrap: false },
+          ],
         },
         {
           sessionExerciseId: 2,
@@ -241,6 +248,12 @@ describe('pure core', () => {
           targetWeight: null,
           unit: 'kg',
           isAmrap: false,
+          loadSource: 'bodyweight',
+          sets: [
+            { targetReps: 60, targetWeight: null, isAmrap: false },
+            { targetReps: 60, targetWeight: null, isAmrap: false },
+            { targetReps: 60, targetWeight: null, isAmrap: false },
+          ],
         },
       ],
       logged: [
@@ -396,14 +409,22 @@ describe('demo data through the db edges', () => {
     expect(week.planned).toHaveLength(4);
     const squatDay = week.planned[0];
     expect(squatDay?.name).toBe('Squat Day');
+    // U5: the first work set's own wave weight (65% of a 120 kg TM), not the
+    // flat ~90%-of-TM figure `targetWeightFor` gave without a week number.
     expect(squatDay?.exercises[0]).toMatchObject({
       name: 'Barbell Full Squat',
       targetSets: 3,
       targetReps: 5,
-      targetWeight: 107.5,
+      targetWeight: 77.5,
       unit: 'kg',
       isAmrap: true,
+      loadSource: 'training_max_pct',
     });
+    expect(squatDay?.exercises[0]?.sets).toEqual([
+      { targetReps: 5, targetWeight: 77.5, isAmrap: false },
+      { targetReps: 5, targetWeight: 90, isAmrap: false },
+      { targetReps: 5, targetWeight: 102.5, isAmrap: true },
+    ]);
     expect(squatDay?.exercises[1]?.name).toBe('Bent Over Two-Dumbbell Row');
 
     // The logged side covers the moved session too — it was performed.
@@ -517,5 +538,88 @@ describe('demo data through the db edges', () => {
     ]);
     expect(week.logged).toHaveLength(3);
     expect(week.planned).toHaveLength(4);
+  });
+});
+
+describe('formatPlanLine — the session detail sheet\'s per-set plan line (SPEC.md U5)', () => {
+  it('lists every set\'s own weight when a wave week\'s sets actually differ', () => {
+    expect(
+      formatPlanLine(
+        [
+          { targetReps: 5, targetWeight: 37.5, isAmrap: false },
+          { targetReps: 5, targetWeight: 42.5, isAmrap: false },
+          { targetReps: 5, targetWeight: 47.5, isAmrap: true },
+        ],
+        'kg',
+        'training_max_pct',
+        { label: 'Planificado', unlearnedWeight: 'peso por aprender', bodyweight: 'peso corporal' },
+      ),
+    ).toBe('Planificado: 37.5 · 42.5 · 47.5 kg × 5+');
+  });
+
+  it('collapses to one number when every set really does share the same weight', () => {
+    expect(
+      formatPlanLine(
+        [
+          { targetReps: 10, targetWeight: 100, isAmrap: false },
+          { targetReps: 10, targetWeight: 100, isAmrap: false },
+          { targetReps: 10, targetWeight: 100, isAmrap: false },
+        ],
+        'kg',
+        'absolute',
+        { label: 'Planificado', unlearnedWeight: 'peso por aprender', bodyweight: 'peso corporal' },
+      ),
+    ).toBe('Planificado: 100 kg × 10');
+  });
+
+  it('lists reps per set too when they differ, e.g. a 5/3/1+ wave week', () => {
+    expect(
+      formatPlanLine(
+        [
+          { targetReps: 5, targetWeight: 90, isAmrap: false },
+          { targetReps: 3, targetWeight: 102, isAmrap: false },
+          { targetReps: 1, targetWeight: 114, isAmrap: true },
+        ],
+        'kg',
+        'training_max_pct',
+        { label: 'Planned', unlearnedWeight: 'weight to learn', bodyweight: 'Bodyweight' },
+      ),
+    ).toBe('Planned: 90 · 102 · 114 kg × 5/3/1+');
+  });
+
+  it('reads "peso por aprender" for an unlearned training max, never a fabricated number', () => {
+    expect(
+      formatPlanLine(
+        [
+          { targetReps: 5, targetWeight: null, isAmrap: false },
+          { targetReps: 5, targetWeight: null, isAmrap: false },
+          { targetReps: 5, targetWeight: null, isAmrap: true },
+        ],
+        'kg',
+        'training_max_pct',
+        { label: 'Planificado', unlearnedWeight: 'peso por aprender', bodyweight: 'peso corporal' },
+      ),
+    ).toBe('Planificado: peso por aprender × 5+');
+  });
+
+  it('reads the bodyweight label instead, for a bodyweight exercise', () => {
+    expect(
+      formatPlanLine(
+        [{ targetReps: 12, targetWeight: null, isAmrap: false }],
+        'kg',
+        'bodyweight',
+        { label: 'Planificado', unlearnedWeight: 'peso por aprender', bodyweight: 'peso corporal' },
+      ),
+    ).toBe('Planificado: peso corporal × 12');
+  });
+
+  it('is just the label with no sets planned', () => {
+    expect(
+      formatPlanLine([], 'kg', 'absolute', {
+        label: 'Planificado',
+        unlearnedWeight: 'peso por aprender',
+        bodyweight: 'peso corporal',
+      }),
+    ).toBe('Planificado');
   });
 });

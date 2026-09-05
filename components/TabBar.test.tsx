@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -19,17 +19,24 @@ import type { SessionQueueState } from '../utils/today';
  * `expo-sqlite` or React Navigation.
  */
 
+// A stable object, not a fresh one per call: the bar's own effects depend on `db` and
+// `navigation` by reference (`reload`'s `useCallback([db])`, the `state`-listener effect's
+// `[navigation, reload]`). A mock that hands back a new object every render never lets those
+// stabilize, so the load-on-every-render effect never stops firing — the real cause of the
+// "not wrapped in act(...)" warning this task fixes, not just something to await around.
+const mockDb = {
+  runAsync: jest.fn(),
+  getFirstAsync: jest.fn(),
+  getAllAsync: jest.fn(),
+};
 jest.mock('expo-sqlite', () => ({
-  useSQLiteContext: () => ({
-    runAsync: jest.fn(),
-    getFirstAsync: jest.fn(),
-    getAllAsync: jest.fn(),
-  }),
+  useSQLiteContext: () => mockDb,
 }));
 
 const mockNavigate = jest.fn();
+const mockNavigation = { navigate: mockNavigate, addListener: () => () => {} };
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: mockNavigate, addListener: () => () => {} }),
+  useNavigation: () => mockNavigation,
 }));
 
 jest.mock('../utils/today', () => {
@@ -75,7 +82,13 @@ const barProps = (): BottomTabBarProps =>
     insets: { top: 0, bottom: 0, left: 0, right: 0 },
   }) as unknown as BottomTabBarProps;
 
-const renderBar = () => {
+// `render` mounts synchronously, but the bar's own initial load resolves the mocked
+// `loadSessionQueue` promise on a later microtask, outside that synchronous `act`. Awaiting an
+// async `act` here flushes that microtask (and the two `setState` calls it makes) before this
+// resolves, so the queue load is always settled by the time a test's first assertion runs — this
+// is the fix for the "not wrapped in act(...)" warning (SPEC.md, Phase F carryover), not a filter
+// over the console.
+const renderBar = async (): Promise<void> => {
   render(
     <SafeAreaProvider
       initialMetrics={{
@@ -90,6 +103,10 @@ const renderBar = () => {
       </ThemeProvider>
     </SafeAreaProvider>,
   );
+  // `render` returns once mounted, before the bar's own `reload()` promise (the mocked
+  // `loadSessionQueue`) settles — an empty async `act` flushes that pending microtask and the two
+  // `setState` calls it makes, inside `act`, before any test's first assertion runs.
+  await act(async () => {});
 };
 
 /** Waits for the centre button's icon to become `name` — the async queue/review load settling. */

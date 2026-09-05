@@ -58,4 +58,24 @@ describe('mainLiftColours — fixed series slots for a routine main lifts', () =
     expect(mainLiftColours([]).size).toBe(0);
     expect(mainLiftColours([{ name: 'Curl', role: 'accessory' }]).size).toBe(0);
   });
+
+  // U2's cases: it builds a session-order-then-in-session-order sorted array before calling
+  // (utils/inicio.ts's computeMainLiftColours), so here the array is already in that order and
+  // slot assignment follows array position, matching the module's "trusts the order it is given"
+  // contract.
+  it('assigns slot 0 to the first session\'s main lift', () => {
+    const colours = mainLiftColours([{ name: 'Squat', role: 'main' }]);
+    expect(colours.get('Squat')).toBe(0);
+  });
+
+  it('U2: orders by session order first, then in-session order (pre-sorted by the caller)', () => {
+    const colours = mainLiftColours([
+      { name: 'Squat', role: 'main' }, // session 0, exercise 0
+      { name: 'Bench', role: 'main' }, // session 1, exercise 0
+      { name: 'Deadlift', role: 'main' }, // session 1, exercise 1
+    ]);
+    expect(colours.get('Squat')).toBe(0);
+    expect(colours.get('Bench')).toBe(1);
+    expect(colours.get('Deadlift')).toBe(2);
+  });
 });

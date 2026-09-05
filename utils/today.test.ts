@@ -536,6 +536,7 @@ describe('computeSessionQueue with a cycle, pure', () => {
             unitOverride: null,
             isAmrap: true,
             sortOrder: 1,
+            role: 'main',
           },
         ],
       },

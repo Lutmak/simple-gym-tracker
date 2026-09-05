@@ -174,6 +174,8 @@ export interface QueueExerciseRow {
   unitOverride: RoutineUnit | null;
   isAmrap: boolean;
   sortOrder: number;
+  /** §3.1 — the 5/3/1 main lift vs. accessory role; U2 uses it for the series-colour dot. */
+  role: 'main' | 'accessory';
 }
 
 export interface QueueCycleRow {
@@ -226,6 +228,8 @@ export interface QueuedExercise {
   unit: RoutineUnit;
   isAmrap: boolean;
   sortOrder: number;
+  /** §3.1 — the 5/3/1 main lift vs. accessory role; U2 uses it for the series-colour dot. */
+  role: 'main' | 'accessory';
 }
 
 export interface QueuedSession {
@@ -365,6 +369,7 @@ function buildHead(
         unit: exercise.unitOverride ?? routineUnit,
         isAmrap: lastTarget?.isAmrap ?? exercise.isAmrap,
         sortOrder: exercise.sortOrder,
+        role: exercise.role,
       };
     }),
   };
@@ -490,9 +495,10 @@ export function computeSessionQueue(
 /**
  * Plan-based fallback when nothing is pending anywhere: the next session by
  * weekday order, never today itself — a session is only actionable once a
- * week row exists for it.
+ * week row exists for it. Exported so `utils/inicio.ts` can chain it past the
+ * end of a seeded cycle for the "PRÓXIMAS" list's second entry (SPEC.md U2).
  */
-function nextPlanSession(
+export function nextPlanSession(
   sessions: readonly QueueSessionRow[],
   todayStamp: number,
 ): UpcomingSession | null {
@@ -781,6 +787,7 @@ const toExerciseRow = (row: Record<string, unknown>): QueueExerciseRow => ({
   unitOverride: nullableStr(row.unit_override) as RoutineUnit | null,
   isAmrap: num(row.is_amrap) === 1,
   sortOrder: num(row.sort_order),
+  role: str(row.role) as QueueExerciseRow['role'],
 });
 
 const toCycleRow = (row: Record<string, unknown>): QueueCycleRow => ({
@@ -846,7 +853,7 @@ export async function loadSessionQueueInput(db: RoutineDatabase): Promise<Sessio
   const exerciseRows = await db.getAll(
     `SELECT e.session_id, e.exercise_name AS name, e.target_sets, e.target_reps, e.load_source,
             e.absolute_weight, e.training_max_weight, e.training_max_pct, e.unit_override,
-            e.is_amrap, e.sort_order
+            e.is_amrap, e.sort_order, e.role
      FROM SessionExercises e JOIN Sessions s ON s.session_id = e.session_id
      WHERE s.routine_id = ? ORDER BY e.sort_order;`,
     [routine.routineId],

@@ -223,6 +223,27 @@ describe('buildWaveRoutineRows — valid input to CHECK-valid rows', () => {
     expect(accessories.map((accessory) => accessory.sortOrder)).toEqual([2, 3]);
   });
 
+  it('persists the deload switch, the TM increments and each main lift\'s category (§3.1/§3.2, F3)', () => {
+    const withDeload = buildWaveRoutineRows(
+      draft({ includeDeload: true, upperTmIncrement: 1.25, lowerTmIncrement: 7.5 }),
+    );
+    expect(withDeload.routine).toMatchObject({
+      cycleWeeks: 4,
+      tmIncrementUpper: 1.25,
+      tmIncrementLower: 7.5,
+    });
+
+    const withoutDeload = buildWaveRoutineRows(draft({ includeDeload: false }));
+    expect(withoutDeload.routine.cycleWeeks).toBe(3);
+
+    const mains = withDeload.exercises.filter((exercise) => exercise.role === 'main');
+    // day({ category: 'lower' }) / day({ category: 'upper' }) per the draft's
+    // own days — the setup screen's category answer, not a guess made later.
+    expect(mains.map((main) => main.category)).toEqual(['lower', 'upper', 'lower', 'upper']);
+    const accessories = withDeload.exercises.filter((exercise) => exercise.role === 'accessory');
+    expect(accessories.every((accessory) => accessory.category === null)).toBe(true);
+  });
+
   it('applies the advanced TM percentage to every main lift', () => {
     const rows = buildWaveRoutineRows(draft({ tmPercentage: 0.85 }));
     for (const main of rows.exercises.filter((exercise) => exercise.role === 'main')) {

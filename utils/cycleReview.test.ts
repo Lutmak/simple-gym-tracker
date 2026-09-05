@@ -19,6 +19,7 @@ import {
 } from './cycleReview';
 import { activatePresetRoutine, type RoutineDatabase } from './routineActions';
 import { buildPlannedDraft, loadRunnerSession, saveSessionLog, type RunnerSession } from './sessionRunner';
+import { writeWaveRoutine, type WaveDayDraft, type WaveSetupDraft } from './waveSetup';
 
 type TestExecutor = SchemaExecutor & {
   get: RoutineDatabase['get'];
@@ -257,6 +258,7 @@ describe('plannedWorkSets — extra sets never reach a proposal or the AMRAP vie
     trainingMaxPct: null,
     unitOverride: null,
     isAmrap: true,
+    category: null,
     ...overrides,
   });
 
@@ -748,6 +750,124 @@ describe('F2 — the shipped 531 preset does not corrupt its own review', () => 
         expect(proposal.reason).toContain('70 kg');
         expect(proposal.reason).not.toContain('100 kg');
       }
+    },
+  );
+});
+
+describe('F3 — setup fields that do nothing (§3.1, §3.2)', () => {
+  const singleLiftDraft = (overrides: Partial<WaveSetupDraft> = {}): WaveSetupDraft => ({
+    name: 'F3 Test',
+    unit: 'kg',
+    roundingIncrement: 2.5,
+    roundingDirection: 'nearest',
+    tmPercentage: 0.9,
+    includeDeload: false,
+    warmupsEnabled: true,
+    upperTmIncrement: 1.25,
+    lowerTmIncrement: 5,
+    assistanceBias: 'hybrid',
+    days: [
+      {
+        key: 'd1',
+        weekday: 1,
+        liftName: 'Squat',
+        catalogExerciseId: null,
+        category: 'upper',
+        trainingMax: 120,
+        assistanceStartWeight: null,
+        assistance: [],
+      } satisfies WaveDayDraft,
+    ],
+    ...overrides,
+  });
+
+  const acceptWeekReview = async (
+    executor: TestExecutor,
+    routineId: number,
+    cycleId: number,
+  ): Promise<void> => {
+    await generateReview(executor, routineId, cycleId);
+    const pending = await executor.getAll<{ proposal_id: number }>(
+      `SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = ? AND status = 'pending';`,
+      [cycleId],
+    );
+    for (const { proposal_id: proposalId } of pending) {
+      await resolveProposal(executor, proposalId, 'accepted');
+    }
+    await applyReview(executor, routineId, cycleId);
+  };
+
+  /** Logs the routine's one session for a given week with an AMRAP result. */
+  const logWeek = async (
+    executor: TestExecutor,
+    cycleId: number,
+    weekNumber: number,
+    amrapReps: number,
+    stamp: number,
+  ): Promise<void> => {
+    const weekSession = await executor.get(
+      `SELECT ws.week_session_id FROM WeekSessions ws
+       JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+       WHERE cw.cycle_id = ? AND cw.week_number = ? AND ws.status = 'pending'
+       ORDER BY ws.week_session_id LIMIT 1;`,
+      [cycleId, weekNumber],
+    );
+    if (weekSession === undefined) {
+      throw new Error(`No pending week session for week ${weekNumber}`);
+    }
+    const weekSessionId = Number(weekSession.week_session_id);
+    const session = await loadRunnerSession(executor, weekSessionId, stamp);
+    await saveSessionLog(executor, weekSessionId, session, [
+      [
+        { reps: 5, weight: 100 },
+        { reps: 5, weight: 100 },
+        { reps: amrapReps, weight: 100 },
+      ],
+    ]);
+  };
+
+  it(
+    'persists a custom TM increment and the setup category instead of discarding them; the ' +
+      'review opens after week 3 when the deload switch is off',
+    async () => {
+      const { executor } = connect();
+      await runSchema(executor);
+      const routineId = await writeWaveRoutine(executor, singleLiftDraft());
+      const cycleRow = await executor.get(
+        `SELECT cycle_id FROM Cycles WHERE routine_id = ? AND status = 'active';`,
+        [routineId],
+      );
+      if (cycleRow === undefined) {
+        throw new Error('Routine did not seed a cycle');
+      }
+      const cycleId = Number(cycleRow.cycle_id);
+
+      const day = Math.floor(Date.UTC(2026, 7, 14, 12, 0, 0) / 1000);
+      // Weeks 1 and 2's AMRAPs exactly meet their targets (5, then 3); accept
+      // each review to advance the cycle through the real applyReview path.
+      await logWeek(executor, cycleId, 1, 5, day);
+      await acceptWeekReview(executor, routineId, cycleId);
+      await logWeek(executor, cycleId, 2, 3, day + 7 * 86400);
+      await acceptWeekReview(executor, routineId, cycleId);
+      // Week 3's target is 1 — a 3-week (deload-off) cycle ends here; no
+      // week 4 was ever seeded (`cycleSeed.test.ts` proves that separately).
+      await logWeek(executor, cycleId, 3, 1, day + 14 * 86400);
+
+      const review = await loadCycleReview(executor, routineId, cycleId);
+      expect(review.atCycleEnd).toBe(true);
+      expect(review.amrap).toHaveLength(1);
+      expect(review.amrap[0].rows).toHaveLength(3);
+
+      const tmProposal = review.proposals.find((proposal) => proposal.isTmProposal);
+      if (tmProposal === undefined) {
+        throw new Error('No TM proposal generated at cycle end');
+      }
+      // 120 kg would infer 'lower' (>= the 100 kg threshold) and default to
+      // +5 kg — the setup screen's explicit 'upper' category must win over
+      // that guess, and the routine's own 1.25 kg upper increment must be
+      // what's actually added, not the 2.5 kg upper default.
+      expect(tmProposal.currentTarget).toBe(120);
+      expect(tmProposal.proposedTarget).toBe(121.25);
     },
   );
 });

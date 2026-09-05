@@ -139,6 +139,10 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
   );`,
 
   // Plan. A routine is an ordered set of training days plus a progression rule.
+  // tm_increment_upper/lower and cycle_weeks are §3.1/§3.2 (F3): a wave
+  // routine's own training-max increments and deload choice, actually read at
+  // cycle end instead of being validated and thrown away. NULL increments mean
+  // the wave engine's own unit default (2.5/5 kg, 5/10 lb).
   `CREATE TABLE IF NOT EXISTS Routines (
     routine_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     routine_key TEXT UNIQUE,
@@ -151,7 +155,10 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     rest_accessory_seconds INTEGER NOT NULL CHECK (rest_accessory_seconds >= 0),
     is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0, 1)),
     created_at INTEGER NOT NULL,
-    planned_jokers INTEGER NOT NULL DEFAULT 0 CHECK (planned_jokers >= 0)
+    planned_jokers INTEGER NOT NULL DEFAULT 0 CHECK (planned_jokers >= 0),
+    tm_increment_upper REAL CHECK (tm_increment_upper IS NULL OR tm_increment_upper > 0),
+    tm_increment_lower REAL CHECK (tm_increment_lower IS NULL OR tm_increment_lower > 0),
+    cycle_weeks INTEGER NOT NULL DEFAULT 4 CHECK (cycle_weeks IN (3, 4))
   );`,
 
   `CREATE UNIQUE INDEX IF NOT EXISTS Routines_single_active
@@ -187,6 +194,10 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     -- R3/§3.6: NULL means "whatever this role does by default" — on for a main
     -- lift, off for an accessory. 0/1 is the user overriding that per exercise.
     warmups_enabled INTEGER CHECK (warmups_enabled IS NULL OR warmups_enabled IN (0, 1)),
+    -- §3.1/F3: the 5/3/1 upper/lower role, chosen at setup, actually used for
+    -- the cycle-end TM increment instead of being guessed from the load.
+    -- NULL = inferred from the training max, same as before this column existed.
+    category TEXT CHECK (category IS NULL OR category IN ('upper', 'lower')),
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
     UNIQUE (session_id, sort_order),
@@ -377,6 +388,12 @@ export async function ensureSessionExercisesColumns(
   if (!columns.some((column) => column.name === 'bar_weight')) {
     await executor.exec('ALTER TABLE SessionExercises ADD COLUMN bar_weight REAL;');
   }
+  if (!columns.some((column) => column.name === 'category')) {
+    await executor.exec(
+      `ALTER TABLE SessionExercises ADD COLUMN category TEXT
+       CHECK (category IS NULL OR category IN ('upper', 'lower'));`,
+    );
+  }
 }
 
 /** The R2 custom-exercise columns on Catalog_Exercises (origin + the bar answer). */
@@ -426,6 +443,33 @@ export async function ensureRoutinesPlannedJokers(
     await executor.exec(
       `ALTER TABLE Routines ADD COLUMN planned_jokers INTEGER NOT NULL DEFAULT 0
        CHECK (planned_jokers >= 0);`,
+    );
+  }
+}
+
+/** The F3 (§3.1/§3.2) TM-increment and deload-cycle-length columns on Routines. */
+export async function ensureRoutinesWaveSetupColumns(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(Routines);',
+  );
+  if (!columns.some((column) => column.name === 'tm_increment_upper')) {
+    await executor.exec(
+      `ALTER TABLE Routines ADD COLUMN tm_increment_upper REAL
+       CHECK (tm_increment_upper IS NULL OR tm_increment_upper > 0);`,
+    );
+  }
+  if (!columns.some((column) => column.name === 'tm_increment_lower')) {
+    await executor.exec(
+      `ALTER TABLE Routines ADD COLUMN tm_increment_lower REAL
+       CHECK (tm_increment_lower IS NULL OR tm_increment_lower > 0);`,
+    );
+  }
+  if (!columns.some((column) => column.name === 'cycle_weeks')) {
+    await executor.exec(
+      `ALTER TABLE Routines ADD COLUMN cycle_weeks INTEGER NOT NULL DEFAULT 4
+       CHECK (cycle_weeks IN (3, 4));`,
     );
   }
 }
@@ -530,6 +574,7 @@ export async function runSchema(executor: SchemaExecutor): Promise<void> {
   await ensureSessionExercisesColumns(executor);
   await ensureCatalogExerciseOriginColumns(executor);
   await ensureRoutinesPlannedJokers(executor);
+  await ensureRoutinesWaveSetupColumns(executor);
   await ensureLoggedExercisesRoleColumn(executor);
   await seedCatalog(executor);
   await seedPresetRoutines(executor);

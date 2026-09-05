@@ -152,7 +152,7 @@ const logOneSession = async (executor: TestExecutor, routineId: number): Promise
   return Number(weekSession.week_session_id);
 };
 
-const waveDraft = (): WaveSetupDraft => ({
+const waveDraft = (overrides: Partial<WaveSetupDraft> = {}): WaveSetupDraft => ({
   name: 'My 5/3/1',
   unit: 'kg',
   roundingIncrement: 2.5,
@@ -185,6 +185,7 @@ const waveDraft = (): WaveSetupDraft => ({
       assistance: [],
     },
   ],
+  ...overrides,
 });
 
 describe('activation seeds the first cycle', () => {
@@ -282,6 +283,25 @@ describe('activation seeds the first cycle', () => {
     expect(cycleRows(db, routineId)[0]).toMatchObject({ cycle_number: 1, weeks: DEFAULT_CYCLE_WEEKS });
     expect(weekSessionsOf(db, routineId)).toBe(2 * DEFAULT_CYCLE_WEEKS);
   });
+
+  it('seeds a 3-week cycle with no week 4 when the deload switch is off (§3.2, F3)', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    const routineId = await writeWaveRoutine(executor, waveDraft({ includeDeload: false }));
+
+    expect(cycleRows(db, routineId)).toHaveLength(1);
+    expect(cycleRows(db, routineId)[0]).toMatchObject({ cycle_number: 1, weeks: 3 });
+    expect(
+      count(
+        db,
+        'CycleWeeks',
+        'cycle_id IN (SELECT cycle_id FROM Cycles WHERE routine_id = ?)',
+        routineId,
+      ),
+    ).toBe(3);
+    expect(weekSessionsOf(db, routineId)).toBe(2 * 3);
+  });
 });
 
 describe('activation is idempotent and never rewrites history', () => {
@@ -336,17 +356,19 @@ describe('activation is idempotent and never rewrites history', () => {
     const { routineId } = await activatePresetRoutine(executor, 'newbie-gains', 'kg', new Map());
     const weekSessionId = await logOneSession(executor, routineId);
     const firstCycleWeekSessions = weekSessionsOf(db, routineId);
-    // A three-week cycle proves the next one inherits the week count rather
-    // than falling back to the default.
-    db.prepare("UPDATE Cycles SET status = 'complete', weeks = 3 WHERE routine_id = ?;").run(
-      routineId,
-    );
+    // The completed cycle stays a 4-week cycle (untouched history); the
+    // routine's OWN cycle_weeks (§3.2, F3) is set to 3 afterwards, proving the
+    // next cycle reads the routine's CURRENT setting — not the previous
+    // cycle's own length — so a deload switch flipped between cycles takes
+    // effect on the very next one.
+    db.prepare("UPDATE Cycles SET status = 'complete' WHERE routine_id = ?;").run(routineId);
+    db.prepare('UPDATE Routines SET cycle_weeks = 3 WHERE routine_id = ?;').run(routineId);
 
     await activateRoutineById(executor, routineId);
 
     const cycles = cycleRows(db, routineId);
     expect(cycles).toHaveLength(2);
-    expect(cycles[0]).toMatchObject({ cycle_number: 1, status: 'complete', weeks: 3 });
+    expect(cycles[0]).toMatchObject({ cycle_number: 1, status: 'complete', weeks: 4 });
     expect(cycles[1]).toMatchObject({ cycle_number: 2, status: 'active', weeks: 3, current_week: 1 });
 
     const sessionCount = count(db, 'Sessions', 'routine_id = ?', routineId);

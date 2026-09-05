@@ -42,6 +42,7 @@ const cycle = (
   proposalStatus: ProposalStatus | null = null,
 ): CycleHistory => ({
   cycleNumber: 1,
+  weeks: 4,
   exercises: {
     [squat.identifier]: { sets, proposalStatus },
   },
@@ -214,6 +215,7 @@ describe('progression — linear rule', () => {
     const proposals = proposeNextTargets(routine({}, [squat, pullUps]), [
       {
         cycleNumber: 1,
+        weeks: 4,
         exercises: {
           [squat.identifier]: {
             sets: [set(5, 100), set(5, 100), set(5, 100)],

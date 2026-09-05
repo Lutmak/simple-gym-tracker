@@ -20,7 +20,7 @@
  */
 
 import { defaultBarProfileForEquipment, type BarProfileKey } from './barProfiles';
-import { ensureActiveCycle } from './cycleSeed';
+import { DEFAULT_CYCLE_WEEKS, ensureActiveCycle } from './cycleSeed';
 import { usableWeight } from './learnedWeights';
 
 export type RoutineUnit = 'kg' | 'lb';
@@ -61,6 +61,11 @@ export interface RoutineSource {
   recommendedDays: number | null;
   /** How many jokers a wave routine plans ahead (§3.4); 0 = off. */
   plannedJokers: number;
+  /** Per-routine TM increments (§3.1); null = the wave engine's own unit default. */
+  tmIncrementUpper: number | null;
+  tmIncrementLower: number | null;
+  /** The cycle length a NEW cycle of this routine seeds with (§3.2): 3 or 4 weeks. */
+  cycleWeeks: number;
 }
 
 export interface SessionSource {
@@ -93,6 +98,8 @@ export interface ExerciseSource {
   barWeight: number | null;
   /** The user's per-exercise warm-up answer; null = the role's default (§3.6). */
   warmupsEnabled: boolean | null;
+  /** The 5/3/1 upper/lower role (§3.1); null = inferred from the training max. */
+  category: 'upper' | 'lower' | null;
 }
 
 export interface RoutineSourceBundle {
@@ -119,6 +126,9 @@ export interface RoutineCopyRows {
     isActive: boolean;
     createdAt: number;
     plannedJokers: number;
+    tmIncrementUpper: number | null;
+    tmIncrementLower: number | null;
+    cycleWeeks: number;
   };
   sessions: { weekday: number; name: string; sortOrder: number }[];
   exercises: {
@@ -138,6 +148,7 @@ export interface RoutineCopyRows {
     barProfile: BarProfileKey | null;
     barWeight: number | null;
     warmupsEnabled: boolean | null;
+    category: 'upper' | 'lower' | null;
   }[];
 }
 
@@ -203,6 +214,7 @@ export function buildRoutineCopyRows(
         exercise.barProfile ?? defaultBarProfileForEquipment(exercise.equipment),
       barWeight: exercise.barWeight,
       warmupsEnabled: exercise.warmupsEnabled,
+      category: exercise.category,
     };
   });
 
@@ -224,6 +236,9 @@ export function buildRoutineCopyRows(
       isActive: copy.isActive,
       createdAt: Date.now(),
       plannedJokers: source.routine.plannedJokers,
+      tmIncrementUpper: source.routine.tmIncrementUpper,
+      tmIncrementLower: source.routine.tmIncrementLower,
+      cycleWeeks: source.routine.cycleWeeks,
     },
     sessions: source.sessions.map((session) => ({
       weekday: session.weekday,
@@ -281,6 +296,7 @@ const toExerciseSource = (row: Record<string, unknown>): ExerciseSource => ({
   barProfile: nullableStr(row.bar_profile) as BarProfileKey | null,
   barWeight: nullableNum(row.bar_weight),
   warmupsEnabled: nullableBool(row.warmups_enabled),
+  category: nullableStr(row.category) as 'upper' | 'lower' | null,
 });
 
 export async function loadPresetRoutineSource(
@@ -306,7 +322,7 @@ export async function loadPresetRoutineSource(
     `SELECT e.preset_session_exercise_id AS exercise_id, e.preset_session_id AS session_id,
             e.catalog_exercise_id, e.exercise_name AS name, e.role, e.target_sets,
             e.target_reps, e.load_source, e.training_max_pct, e.is_amrap, e.sort_order,
-            c.equipment, NULL AS warmups_enabled
+            c.equipment, NULL AS warmups_enabled, NULL AS category
      FROM Preset_SessionExercises e
      JOIN Preset_Sessions s ON s.preset_session_id = e.preset_session_id
      LEFT JOIN Catalog_Exercises c ON c.exercise_key = e.catalog_exercise_id
@@ -327,6 +343,11 @@ export async function loadPresetRoutineSource(
       isActive: false,
       description: nullableStr(routineRow.description),
       philosophy: nullableStr(routineRow.philosophy),
+      // Presets don't collect these (F3 is the wave setup wizard's own
+      // fields); a preset activation always gets the wave engine's defaults.
+      tmIncrementUpper: null,
+      tmIncrementLower: null,
+      cycleWeeks: DEFAULT_CYCLE_WEEKS,
       recommendedDays: nullableNum(routineRow.recommended_days),
       plannedJokers: 0,
     },
@@ -342,7 +363,7 @@ export async function loadRoutineSourceById(
   const routineRow = await db.get(
     `SELECT routine_id, routine_key, name, origin, progression_rule, unit,
             rounding_increment, rest_main_seconds, rest_accessory_seconds, is_active,
-            planned_jokers
+            planned_jokers, tm_increment_upper, tm_increment_lower, cycle_weeks
      FROM Routines WHERE routine_id = ?;`,
     [routineId],
   );
@@ -360,7 +381,7 @@ export async function loadRoutineSourceById(
             e.exercise_name AS name, e.role, e.target_sets, e.target_reps, e.load_source,
             e.training_max_pct, e.training_max_weight, e.absolute_weight, e.unit_override,
             e.is_amrap, e.sort_order, e.bar_profile, e.bar_weight, e.warmups_enabled,
-            NULL AS equipment
+            e.category, NULL AS equipment
      FROM SessionExercises e
      JOIN Sessions s ON s.session_id = e.session_id
      WHERE s.routine_id = ? ORDER BY s.sort_order, e.sort_order;`,
@@ -382,6 +403,9 @@ export async function loadRoutineSourceById(
       philosophy: null,
       recommendedDays: null,
       plannedJokers: nullableNum(routineRow.planned_jokers) ?? 0,
+      tmIncrementUpper: nullableNum(routineRow.tm_increment_upper),
+      tmIncrementLower: nullableNum(routineRow.tm_increment_lower),
+      cycleWeeks: nullableNum(routineRow.cycle_weeks) ?? DEFAULT_CYCLE_WEEKS,
     },
     sessions: sessionRows.map(toSessionSource),
     exercises: exerciseRows.map(toExerciseSource),
@@ -397,8 +421,9 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
     await db.run(
       `INSERT INTO Routines
          (routine_key, name, origin, progression_rule, unit, rounding_increment,
-          rest_main_seconds, rest_accessory_seconds, is_active, created_at, planned_jokers)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          rest_main_seconds, rest_accessory_seconds, is_active, created_at, planned_jokers,
+          tm_increment_upper, tm_increment_lower, cycle_weeks)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         rows.routine.routineKey,
         rows.routine.name,
@@ -411,6 +436,9 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
         rows.routine.isActive ? 1 : 0,
         rows.routine.createdAt,
         rows.routine.plannedJokers,
+        rows.routine.tmIncrementUpper,
+        rows.routine.tmIncrementLower,
+        rows.routine.cycleWeeks,
       ],
     );
     const routineIdRow = await db.get('SELECT last_insert_rowid() AS id;', []);
@@ -441,8 +469,9 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
         `INSERT INTO SessionExercises
            (session_id, catalog_exercise_id, exercise_name, role, target_sets, target_reps,
             load_source, training_max_pct, training_max_weight, absolute_weight,
-            unit_override, is_amrap, sort_order, bar_profile, bar_weight, warmups_enabled)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+            unit_override, is_amrap, sort_order, bar_profile, bar_weight, warmups_enabled,
+            category)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           sessionId,
           exercise.catalogExerciseId,
@@ -460,6 +489,7 @@ async function insertCopyRows(db: RoutineDatabase, rows: RoutineCopyRows): Promi
           exercise.barProfile,
           exercise.barWeight,
           exercise.warmupsEnabled === null ? null : exercise.warmupsEnabled ? 1 : 0,
+          exercise.category,
         ],
       );
     }

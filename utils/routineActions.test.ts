@@ -65,6 +65,9 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
       philosophy: 'Fewer days, more focus.',
       recommendedDays: 2,
       plannedJokers: 0,
+      tmIncrementUpper: null,
+      tmIncrementLower: null,
+      cycleWeeks: 4,
     },
     sessions: [
       { sessionId: 11, weekday: 1, name: 'Upper', sortOrder: 1 },
@@ -90,6 +93,7 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         barProfile: null,
         barWeight: null,
         warmupsEnabled: null,
+        category: null,
       },
       {
         exerciseId: 102,
@@ -110,6 +114,7 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         barProfile: null,
         barWeight: null,
         warmupsEnabled: null,
+        category: null,
       },
       {
         exerciseId: 103,
@@ -130,6 +135,7 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
         barProfile: null,
         barWeight: null,
         warmupsEnabled: null,
+        category: null,
       },
     ],
   });

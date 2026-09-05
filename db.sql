@@ -127,6 +127,10 @@ CREATE INDEX IF NOT EXISTS Catalog_Exercise_Muscles_muscle
 -- weekday uses Date.getDay(): 0 = Sunday … 6 = Saturday.
 -- planned_jokers (SPECS.md §3.4): how many jokers a wave routine plans ahead,
 -- 0 = off. Only meaningful for progression_rule 'wave'; other rules ignore it.
+-- tm_increment_upper/lower and cycle_weeks (§3.1/§3.2, F3): a wave routine's
+-- own training-max increments and deload choice. NULL increments mean the
+-- wave engine's own unit default (2.5/5 kg, 5/10 lb); cycle_weeks is 3 (no
+-- deload week) or 4.
 
 CREATE TABLE IF NOT EXISTS Routines (
     routine_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -140,7 +144,10 @@ CREATE TABLE IF NOT EXISTS Routines (
     rest_accessory_seconds INTEGER NOT NULL CHECK (rest_accessory_seconds >= 0),
     is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0, 1)),
     created_at INTEGER NOT NULL,
-    planned_jokers INTEGER NOT NULL DEFAULT 0 CHECK (planned_jokers >= 0)
+    planned_jokers INTEGER NOT NULL DEFAULT 0 CHECK (planned_jokers >= 0),
+    tm_increment_upper REAL CHECK (tm_increment_upper IS NULL OR tm_increment_upper > 0),
+    tm_increment_lower REAL CHECK (tm_increment_lower IS NULL OR tm_increment_lower > 0),
+    cycle_weeks INTEGER NOT NULL DEFAULT 4 CHECK (cycle_weeks IN (3, 4))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS Routines_single_active
@@ -191,6 +198,10 @@ CREATE TABLE IF NOT EXISTS SessionExercises (
     -- R3/§3.6: NULL means "whatever this role does by default" — on for a main
     -- lift, off for an accessory. 0/1 is the user overriding that per exercise.
     warmups_enabled INTEGER CHECK (warmups_enabled IS NULL OR warmups_enabled IN (0, 1)),
+    -- §3.1/F3: the 5/3/1 upper/lower role, chosen at setup, actually used for
+    -- the cycle-end TM increment instead of being guessed from the load. NULL
+    -- = inferred from the training max, same as before this column existed.
+    category TEXT CHECK (category IS NULL OR category IN ('upper', 'lower')),
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
     UNIQUE (session_id, sort_order),

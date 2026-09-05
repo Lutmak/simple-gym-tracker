@@ -43,6 +43,11 @@ export interface ReviewRoutine {
   unit: RoutineUnit;
   roundingIncrement: number;
   progressionRule: ReviewRule;
+  /** Per-routine TM increments (§3.1); null = the wave engine's own unit default. */
+  tmIncrementUpper: number | null;
+  tmIncrementLower: number | null;
+  /** The cycle length (§3.2) a NEW cycle of this routine seeds with: 3 or 4 weeks. */
+  cycleWeeks: number;
 }
 
 export interface ReviewCycle {
@@ -66,6 +71,8 @@ export interface ReviewExercise {
   trainingMaxPct: number | null;
   unitOverride: LoadUnit | null;
   isAmrap: boolean;
+  /** The 5/3/1 upper/lower role (§3.1); null = inferred from the training max. */
+  category: 'upper' | 'lower' | null;
 }
 
 export interface PerformedSetGroup {
@@ -176,6 +183,8 @@ export function buildRoutineLike(
     unit: routine.unit,
     roundingIncrement: routine.roundingIncrement,
     progressionRule: routine.progressionRule,
+    tmIncrementUpper: routine.tmIncrementUpper,
+    tmIncrementLower: routine.tmIncrementLower,
     exercises: exercises.map((exercise) => ({
       identifier: exercise.sessionExerciseId,
       name: exercise.name,
@@ -186,6 +195,7 @@ export function buildRoutineLike(
       absoluteWeight: exercise.absoluteWeight,
       trainingMaxWeight: exercise.trainingMaxWeight,
       trainingMaxPct: exercise.trainingMaxPct,
+      ...(exercise.category === null ? {} : { category: exercise.category }),
     })),
   };
 }
@@ -226,6 +236,7 @@ export function buildCycleHistory(
       for (let weekNumber = 1; weekNumber <= cycle.weeks; weekNumber += 1) {
         const entry: CycleHistory = {
           cycleNumber: cycle.cycleNumber,
+          weeks: cycle.weeks,
           exercises: {},
         };
         for (const exercise of exercises) {
@@ -251,7 +262,7 @@ export function buildCycleHistory(
   }
 
   return cyclesAsc.map((cycle) => {
-    const entry: CycleHistory = { cycleNumber: cycle.cycleNumber, exercises: {} };
+    const entry: CycleHistory = { cycleNumber: cycle.cycleNumber, weeks: cycle.weeks, exercises: {} };
     for (const exercise of exercises) {
       const cycleSets = setGroups
         .filter(
@@ -336,6 +347,15 @@ const amrapMisses = (rows: readonly AmrapRow[]): number => {
 };
 
 /**
+ * A cycle's AMRAP weeks are always its first three (§3.2, F3) — true whether
+ * it has a 4th (deload) week or not, since a deload-off cycle's week 3 is
+ * still a normal AMRAP week, not a renumbered deload. Never `cycle.weeks - 1`:
+ * that assumed every cycle has exactly one non-AMRAP week at the end, which
+ * is false for a 3-week cycle (none) and would silently drop its week 3.
+ */
+const AMRAP_WEEK_COUNT = 3;
+
+/**
  * The AMRAP sets of one exercise in one cycle: the last logged set of each
  * week with at least three sets. Weeks up to `maxWeek` only — the deload week
  * is a fixed-target week and carries no AMRAP result.
@@ -407,6 +427,7 @@ const toExercise = (row: Record<string, unknown>): ReviewExercise => ({
   trainingMaxPct: nullableNum(row.training_max_pct),
   unitOverride: nullableStr(row.unit_override) as LoadUnit | null,
   isAmrap: num(row.is_amrap) === 1,
+  category: nullableStr(row.category) as ReviewExercise['category'],
 });
 
 const toProposalRow = (row: Record<string, unknown>): ProposalRow => ({
@@ -451,6 +472,9 @@ async function loadReviewSource(
     unit: source.routine.unit as RoutineUnit,
     roundingIncrement: source.routine.roundingIncrement,
     progressionRule: source.routine.progressionRule,
+    tmIncrementUpper: source.routine.tmIncrementUpper,
+    tmIncrementLower: source.routine.tmIncrementLower,
+    cycleWeeks: source.routine.cycleWeeks,
   };
   const exercises: ReviewExercise[] = source.exercises.map((exercise) => ({
     sessionExerciseId: exercise.exerciseId,
@@ -465,6 +489,7 @@ async function loadReviewSource(
     trainingMaxPct: exercise.trainingMaxPct,
     unitOverride: exercise.unitOverride,
     isAmrap: exercise.isAmrap,
+    category: exercise.category,
   }));
 
   const cycleRows = await db.getAll(
@@ -641,7 +666,7 @@ export function buildReviewData(source: ReviewSource): ReviewData {
             cycle.cycleNumber,
             row.exerciseName,
             exercise.role,
-            cycle.weeks - 1,
+            AMRAP_WEEK_COUNT,
           )
         : [];
     return {
@@ -677,7 +702,7 @@ export function buildReviewData(source: ReviewSource): ReviewData {
           cycle.cycleNumber,
           proposal.exerciseName,
           exercise.role,
-          cycle.weeks - 1,
+          AMRAP_WEEK_COUNT,
         ),
       });
     }
@@ -848,10 +873,12 @@ export async function applyReview(
 /**
  * Explicitly generates the next cycle after a completed review, through the
  * shared `createCycle` (utils/cycleSeed.ts): a new Cycles row (status
- * 'active', current week 1) with the reviewed cycle's weeks structure, all
- * CycleWeeks, and one pending WeekSessions row per session per week. The
- * confirmed plan values — absolute weights or training maxes — are already in
- * SessionExercises, which is where the new week's targets derive from.
+ * 'active', current week 1) with the ROUTINE'S CURRENT `cycle_weeks` (§3.2) —
+ * not the just-completed cycle's own length, so a deload switch flipped since
+ * then is honoured — all CycleWeeks, and one pending WeekSessions row per
+ * session per week. The confirmed plan values — absolute weights or training
+ * maxes — are already in SessionExercises, which is where the new week's
+ * targets derive from.
  */
 export async function startNextCycle(
   db: RoutineDatabase,
@@ -868,7 +895,7 @@ export async function startNextCycle(
     const newCycleId = await createCycle(
       db,
       routineId,
-      source.cycle.weeks,
+      source.routine.cycleWeeks,
       Math.floor(Date.now() / 1000),
     );
     await db.run('COMMIT;');

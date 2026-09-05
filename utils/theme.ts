@@ -33,6 +33,46 @@
 
 export type ThemeMode = 'light' | 'dark';
 
+/**
+ * The five states a calendar/week-strip day cell can be in (ADR-0047 §4.1). `planned` carries no
+ * fill on purpose — an un-happened day is the *absence* of colour, rung by `divider` instead — so
+ * it has no entry here; a consumer paints a `planned` cell with `divider` and nothing else. `today`
+ * is not a state either: it is a ring in `textPrimary`, drawn independently of whatever state (if
+ * any) the day also carries.
+ */
+export type DataStateKey = 'done' | 'moved' | 'discarded' | 'free';
+
+/**
+ * Data tokens (ADR-0047, SPEC.md §3.6/§4.1) — the one place chrome's monochrome rule is allowed to
+ * lift, and only for data: which lift, which session state. Nothing else may read from here.
+ *
+ * `series` is a fixed-order categorical palette (blue, orange, teal, amber) assigned to a
+ * routine's main lifts by `sort_order` — slot 0 is always the routine's first main lift, on every
+ * chart, tile and row of that routine, never reassigned per screen. `state` covers the five
+ * session states a calendar or week-strip cell can be in; `done`/`moved`/`discarded`/`free` carry
+ * a fill, `planned` does not (see `DataStateKey`).
+ *
+ * Every hex below is validated with the `dataviz` skill's `validate_palette.js` against this
+ * file's own `surface` (not the skill's reference surface, which differs slightly): all eight
+ * chromatic values clear >= 3:1 contrast in their theme, and the four `series` hues clear the
+ * adjacent-pair CVD floor (>= 8 target, normal-vision >= 15) in both themes. The measured numbers
+ * are recorded in `utils/theme.test.ts` and in the U1 deliverable, not repeated here — a comment
+ * is not a test.
+ *
+ * The one documented gap: four *simultaneous* lines on one chart (U3's plan) is closer to the
+ * validator's `--pairs all` regime than to `adjacent`, and slot 2 (orange) vs slot 4 (amber) fails
+ * that stricter check in both themes — the skill's own reference palette documents the same
+ * limitation past three slots. The mitigation is the one ADR-0047 already requires: colour is
+ * never the only cue. A legend names every series in words, and a caller drawing more than one
+ * series must show it.
+ */
+export interface DataTokens {
+  /** Fixed order, assigned by a routine's `sort_order` — never reassigned, never cycled. */
+  series: readonly [string, string, string, string];
+  /** Session/day states that carry a fill. `planned` is deliberately absent — see `DataStateKey`. */
+  state: Readonly<Record<DataStateKey, string>>;
+}
+
 export interface ThemeTokens {
   /** The mode this set belongs to. Kept on the set so one value decides everything. */
   mode: ThemeMode;
@@ -60,6 +100,8 @@ export interface ThemeTokens {
   disabled: string;
   /** The dimmed backdrop behind a sheet. */
   scrim: string;
+  /** Categorical series and session-state colours (ADR-0047) — data only, never chrome. */
+  data: DataTokens;
 }
 
 export const lightTokens: ThemeTokens = {
@@ -76,6 +118,15 @@ export const lightTokens: ThemeTokens = {
   divider: 'rgba(0, 0, 0, 0.12)',
   disabled: 'rgba(0, 0, 0, 0.25)',
   scrim: 'rgba(0, 0, 0, 0.5)',
+  data: {
+    series: ['#2A78D6', '#EB6834', '#08704A', '#C98500'],
+    state: {
+      done: '#1F7A1F',
+      moved: '#2A78D6',
+      discarded: '#B45309',
+      free: '#4A3AA7',
+    },
+  },
 };
 
 export const darkTokens: ThemeTokens = {
@@ -92,6 +143,15 @@ export const darkTokens: ThemeTokens = {
   divider: 'rgba(255, 255, 255, 0.15)',
   disabled: 'rgba(255, 255, 255, 0.25)',
   scrim: 'rgba(0, 0, 0, 0.6)',
+  data: {
+    series: ['#3987E5', '#D95926', '#199E70', '#C98500'],
+    state: {
+      done: '#2FA82F',
+      moved: '#3987E5',
+      discarded: '#B87A00',
+      free: '#9085E9',
+    },
+  },
 };
 
 export function getTokens(mode: ThemeMode): ThemeTokens {

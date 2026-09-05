@@ -102,3 +102,12 @@ export const tabIndicator = {
   width: 24,
   height: 3,
 } as const;
+
+/**
+ * Data-identity marks (ADR-0047): the small colour swatches that carry a `data` token — a `Stat`
+ * tile's colour dot, a chart legend dot. Never a chart mark itself (points/lines size from the
+ * chart library), only the flat UI dots that sit beside text.
+ */
+export const dataMark = {
+  dot: 8,
+} as const;

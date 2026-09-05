@@ -31,6 +31,7 @@ import {
   defaultRoundingIncrement,
   estimateTrainingMax,
   isRecommendedWaveAdvanced,
+  nextRoundingIncrementForUnit,
   recommendedWaveAdvanced,
   ROUNDING_INCREMENT_OPTIONS,
   warmupRampFor,
@@ -267,9 +268,11 @@ export default function FiveThreeOneSetupScreen({ navigation, route }: Props) {
       return {
         ...current,
         unit: nextUnit,
-        roundingIncrement: ROUNDING_INCREMENT_OPTIONS[nextUnit].includes(current.roundingIncrement)
-          ? current.roundingIncrement
-          : defaultRoundingIncrement(nextUnit),
+        roundingIncrement: nextRoundingIncrementForUnit(
+          current.unit,
+          current.roundingIncrement,
+          nextUnit,
+        ),
         advanced: {
           ...current.advanced,
           upperTmIncrement:
@@ -744,8 +747,6 @@ export default function FiveThreeOneSetupScreen({ navigation, route }: Props) {
               hint={t('assistanceVolumeHint', {
                 sets: biasDefaults.sets,
                 reps: biasDefaults.reps,
-                recommendedSets: ASSISTANCE_BIAS_DEFAULTS.hybrid.sets,
-                recommendedReps: ASSISTANCE_BIAS_DEFAULTS.hybrid.reps,
               })}
             >
               <SegmentedControl<AssistanceBias>

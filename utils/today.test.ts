@@ -450,6 +450,7 @@ describe('computeSessionQueue with a cycle, pure', () => {
     sessionId: 1,
     status,
     resolvedOnDate,
+    nominalDate: null,
   });
 
   test('nothing pending on a rest day: no head, the plan preview is upcoming', () => {
@@ -550,8 +551,8 @@ describe('computeSessionQueue with a cycle, pure', () => {
     const today = dayStampFromYmd('2026-05-06');
     const state = computeSessionQueue(
       input([
-        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-        { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null , nominalDate: null},
+        { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null , nominalDate: null},
       ]),
       today,
     );
@@ -583,8 +584,8 @@ describe('resolution transformations, pure', () => {
   });
 
   const baseRows: QueueWeekSessionRow[] = [
-    { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-    { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+    { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null , nominalDate: null},
+    { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null , nominalDate: null},
   ];
 
   test('a moved session landing on a day that already has one is rejected', () => {
@@ -595,7 +596,7 @@ describe('resolution transformations, pure', () => {
   test('a move onto a resolved session\'s day is also rejected', () => {
     const rows: QueueWeekSessionRow[] = [
       { ...baseRows[0] },
-      { ...baseRows[1], status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-06') },
+      { ...baseRows[1], status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-06') , nominalDate: null},
     ];
     const outcome = applyMove(input(rows), 1, dayStampFromYmd('2026-05-06'));
     expect(outcome).toEqual({ ok: false, reason: 'dayOccupied' });
@@ -612,7 +613,7 @@ describe('resolution transformations, pure', () => {
         weekNumber: 1,
         sessionId: 1,
         status: 'moved',
-        resolvedOnDate: target,
+        resolvedOnDate: target, nominalDate: null
       });
       expect(outcome.weekSessions[1]).toEqual(baseRows[1]);
     }
@@ -621,7 +622,7 @@ describe('resolution transformations, pure', () => {
   test('do it today is rejected while another session occupies today', () => {
     const rows: QueueWeekSessionRow[] = [
       { ...baseRows[0] },
-      { ...baseRows[1], status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-06') },
+      { ...baseRows[1], status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-06') , nominalDate: null},
     ];
     const outcome = applyDoToday(input(rows), 1, dayStampFromYmd('2026-05-06'));
     expect(outcome).toEqual({ ok: false, reason: 'dayOccupied' });
@@ -630,8 +631,8 @@ describe('resolution transformations, pure', () => {
   test('do it today onto a free day keeps the session pending and due today', () => {
     const today = dayStampFromYmd('2026-05-06');
     const rows: QueueWeekSessionRow[] = [
-      { ...baseRows[0], resolvedOnDate: null },
-      { ...baseRows[1], weekNumber: 1, status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-04') },
+      { ...baseRows[0], resolvedOnDate: null , nominalDate: null},
+      { ...baseRows[1], weekNumber: 1, status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-04') , nominalDate: null},
     ];
     const outcome = applyDoToday(input(rows), 1, today);
     expect(outcome.ok).toBe(true);
@@ -642,7 +643,7 @@ describe('resolution transformations, pure', () => {
         weekNumber: 1,
         sessionId: 1,
         status: 'pending',
-        resolvedOnDate: today,
+        resolvedOnDate: today, nominalDate: null
       });
       const state = computeSessionQueue(input(outcome.weekSessions), today);
       expect(state.resolution).toBe('due');
@@ -660,7 +661,7 @@ describe('resolution transformations, pure', () => {
         weekNumber: 1,
         sessionId: 1,
         status: 'discarded',
-        resolvedOnDate: dayStampFromYmd('2026-05-04'),
+        resolvedOnDate: dayStampFromYmd('2026-05-04'), nominalDate: null
       });
       const state = computeSessionQueue(input(outcome.weekSessions), dayStampFromYmd('2026-05-06'));
       expect(state.head?.weekSessionId).toBe(2);
@@ -670,7 +671,7 @@ describe('resolution transformations, pure', () => {
 
   test('resolving a session that is not pending is rejected', () => {
     const rows: QueueWeekSessionRow[] = [
-      { ...baseRows[0], status: 'moved', resolvedOnDate: dayStampFromYmd('2026-05-06') },
+      { ...baseRows[0], status: 'moved', resolvedOnDate: dayStampFromYmd('2026-05-06') , nominalDate: null},
       { ...baseRows[1] },
     ];
     expect(applyMove(input(rows), 1, dayStampFromYmd('2026-05-07'))).toEqual({
@@ -718,7 +719,7 @@ describe('resolution transformations, pure', () => {
     expect(undone).toEqual({
       ok: true,
       weekSessions: [
-        { ...baseRows[0], status: 'pending', resolvedOnDate: null },
+        { ...baseRows[0], status: 'pending', resolvedOnDate: null , nominalDate: null},
         baseRows[1],
       ],
     });
@@ -740,8 +741,8 @@ describe('queue boundaries', () => {
       ],
       exercises: [],
       weekSessions: [
-        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-        { weekSessionId: 2, cycleId: 1, weekNumber: 4, sessionId: 2, status: 'pending', resolvedOnDate: null },
+        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null , nominalDate: null},
+        { weekSessionId: 2, cycleId: 1, weekNumber: 4, sessionId: 2, status: 'pending', resolvedOnDate: null , nominalDate: null},
       ],
     };
     const state = computeSessionQueue(input, dayStampFromYmd('2026-06-08'));
@@ -764,9 +765,9 @@ describe('queue boundaries', () => {
       ],
       exercises: [],
       weekSessions: [
-        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-        { weekSessionId: 2, cycleId: 2, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-        { weekSessionId: 3, cycleId: 2, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null , nominalDate: null},
+        { weekSessionId: 2, cycleId: 2, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null , nominalDate: null},
+        { weekSessionId: 3, cycleId: 2, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null , nominalDate: null},
       ],
     };
     const state = computeSessionQueue(input, dayStampFromYmd('2026-05-18'));

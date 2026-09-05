@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSQLiteContext } from 'expo-sqlite';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -33,6 +33,7 @@ import {
 import {
   DEFAULT_TARGET_REPS,
   DEFAULT_TARGET_SETS,
+  editRemovalWarning,
   EditRoutineValidationError,
   saveRoutineEdit,
   type EditRoutine,
@@ -432,21 +433,11 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
       ?.navigate('Progress', { exercise: exerciseName });
   };
 
-  const handleSave = async () => {
-    if (draft === null || busy) {
-      return;
-    }
+  const performSave = async (editRoutine: EditRoutine) => {
     setBusy(true);
     setError(null);
     try {
-      await saveRoutineEdit(
-        routineDb,
-        routineId,
-        toEditRoutine(draft, {
-          routineName: originalName.current || t('routineNewDefaultName'),
-          weekdayName: (weekday) => t(WEEKDAY_FULL_KEYS[weekday]),
-        }),
-      );
+      await saveRoutineEdit(routineDb, routineId, editRoutine);
       navigation.goBack();
     } catch (failure) {
       if (failure instanceof EditRoutineValidationError) {
@@ -460,6 +451,52 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleSave = async () => {
+    if (draft === null || busy) {
+      return;
+    }
+    const editRoutine = toEditRoutine(draft, {
+      routineName: originalName.current || t('routineNewDefaultName'),
+      weekdayName: (weekday) => t(WEEKDAY_FULL_KEYS[weekday]),
+    });
+
+    // F7: a removed day or exercise that already has real bookkeeping in the
+    // active cycle (a completed week session's cycle position, a pending
+    // proposal) asks once before saving — stating what stays (the logs) and
+    // what is lost, never silently.
+    const warning = await editRemovalWarning(routineDb, routineId, editRoutine);
+    if (warning.days.length > 0 || warning.exercises.length > 0) {
+      const parts: string[] = [];
+      if (warning.days.length > 0) {
+        parts.push(
+          t('editRemovalWarningDays', {
+            count: warning.days.length,
+            names: warning.days.join(', '),
+          }),
+        );
+      }
+      if (warning.exercises.length > 0) {
+        parts.push(
+          t('editRemovalWarningExercises', {
+            count: warning.exercises.length,
+            names: warning.exercises.join(', '),
+          }),
+        );
+      }
+      Alert.alert(t('editRemovalWarningTitle'), parts.join('\n\n'), [
+        { text: t('editRemovalWarningCancel'), style: 'cancel' },
+        {
+          text: t('editRemovalWarningConfirm'),
+          style: 'destructive',
+          onPress: () => void performSave(editRoutine),
+        },
+      ]);
+      return;
+    }
+
+    await performSave(editRoutine);
   };
 
   const goBack = () => {

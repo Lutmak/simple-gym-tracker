@@ -238,6 +238,12 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
   // session links to its log, a moved one records the date it was moved to, a discarded
   // one records the date it was discarded (§3.6). The link to Workout_Log never cascades:
   // deleting a log must never destroy plan bookkeeping.
+  // nominal_date (F7): the session's planned day, SNAPSHOT at cycle-seed time
+  // instead of derived live from Sessions.weekday. A later weekday edit
+  // restamps only this row's value when it is still 'pending' (utils/editRoutine.ts);
+  // an already-resolved row's displayed plan position never changes underneath
+  // it. NULL on a row from before this column existed — utils/today.ts falls
+  // back to the old live computation for those, unchanged.
   `CREATE TABLE IF NOT EXISTS WeekSessions (
     week_session_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     cycle_week_id INTEGER NOT NULL,
@@ -245,6 +251,7 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'moved', 'discarded')),
     resolved_on_date INTEGER,
     completed_log_id INTEGER,
+    nominal_date INTEGER,
     FOREIGN KEY (cycle_week_id) REFERENCES CycleWeeks(cycle_week_id) ON DELETE CASCADE,
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (completed_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE SET NULL,
@@ -432,6 +439,18 @@ export async function ensureLoggedExercisesRoleColumn(
   }
 }
 
+/** The F7 nominal_date snapshot column on WeekSessions, for databases created before it. */
+export async function ensureWeekSessionsNominalDateColumn(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(WeekSessions);',
+  );
+  if (!columns.some((column) => column.name === 'nominal_date')) {
+    await executor.exec('ALTER TABLE WeekSessions ADD COLUMN nominal_date INTEGER;');
+  }
+}
+
 /** The M2 planned-jokers column on Routines. */
 export async function ensureRoutinesPlannedJokers(
   executor: SchemaExecutor,
@@ -576,6 +595,7 @@ export async function runSchema(executor: SchemaExecutor): Promise<void> {
   await ensureRoutinesPlannedJokers(executor);
   await ensureRoutinesWaveSetupColumns(executor);
   await ensureLoggedExercisesRoleColumn(executor);
+  await ensureWeekSessionsNominalDateColumn(executor);
   await seedCatalog(executor);
   await seedPresetRoutines(executor);
 }

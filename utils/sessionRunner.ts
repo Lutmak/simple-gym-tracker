@@ -27,12 +27,11 @@
  */
 
 import { warmupSets } from './fiveThreeOne';
-import { advanceCycleWeek } from './cycleSeed';
 import { inferBaselineWeight, baselineColumn } from './learnedWeights';
 import { proposeJokerWeight } from './jokers';
 import { canSaveBarProfile, type BarProfileKey } from './barProfiles';
 import { loadSessionFinishContext, type SessionFinishContext } from './sessionFinish';
-import { targetSetsFor, targetWeightFor, type PlannedTargetSet } from './today';
+import { advanceCycleWeek, targetSetsFor, targetWeightFor, type PlannedTargetSet } from './today';
 import type {
   RoutineDatabase,
   RoutineLoadSource,

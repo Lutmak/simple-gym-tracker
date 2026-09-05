@@ -19,6 +19,7 @@ import {
   type BarProfileKey,
 } from './barProfiles';
 import { usableWeight } from './learnedWeights';
+import { nominalSessionStamp } from './today';
 import type {
   RoutineDatabase,
   RoutineLoadSource,
@@ -265,6 +266,138 @@ export function buildEditRows(draft: EditRoutine): EditRoutineRows {
 }
 
 /**
+ * F7 — a weekday edit must not rewrite the displayed plan-position of a
+ * session that already happened. WeekSessions snapshots its nominal date at
+ * cycle-seed time (`nominal_date`, utils/cycleSeed.ts); this restamps that
+ * snapshot for a session's STILL-PENDING WeekSessions rows only, recomputed
+ * from each row's own cycle start and week number against the session's NEW
+ * weekday. An already-resolved row (completed, moved, discarded) is left
+ * alone — the day it actually happened on never changes underneath it. Safe
+ * to call unconditionally after every existing-session update, whether the
+ * weekday actually changed or not: recomputing to the same weekday yields
+ * the same stamp already stored.
+ */
+async function restampPendingWeekSessions(
+  db: RoutineDatabase,
+  sessionId: number,
+  weekday: number,
+): Promise<void> {
+  const rows = await db.getAll(
+    `SELECT ws.week_session_id AS week_session_id, cw.week_number AS week_number,
+            c.started_at AS started_at
+     FROM WeekSessions ws
+     JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+     JOIN Cycles c ON c.cycle_id = cw.cycle_id
+     WHERE ws.session_id = ? AND ws.status = 'pending' AND c.started_at IS NOT NULL;`,
+    [sessionId],
+  );
+  for (const row of rows) {
+    const weekSessionId = Number(row.week_session_id);
+    const weekNumber = Number(row.week_number);
+    const startedAt = Number(row.started_at);
+    const nominalDate = nominalSessionStamp(startedAt, weekNumber, weekday);
+    await db.run(
+      'UPDATE WeekSessions SET nominal_date = ? WHERE week_session_id = ?;',
+      [nominalDate, weekSessionId],
+    );
+  }
+}
+
+export interface EditRemovalWarning {
+  /** Session names being removed that have logged history in the active cycle. */
+  days: string[];
+  /** Exercise names being removed that have a stored proposal in the active cycle. */
+  exercises: string[];
+}
+
+/**
+ * F7 — what an edit is about to discard, if the routine has an active cycle:
+ * a day or exercise being removed that already has real bookkeeping against
+ * it there. Raw Weight_Log/Workout_Log rows are never at risk either way
+ * (§3.2, ADR-0006) — this is about what the CYCLE's own bookkeeping loses
+ * when its Sessions/SessionExercises row is cascade-deleted: a completed
+ * WeekSessions row's link to its cycle/week tile (a day), or a stored
+ * Progression_Proposal (an exercise). Call this BEFORE `saveRoutineEdit` so
+ * the screen can confirm once, naming both what's kept and what's lost; an
+ * empty result means nothing needs confirming.
+ */
+export async function editRemovalWarning(
+  db: RoutineDatabase,
+  routineId: number,
+  draft: EditRoutine,
+): Promise<EditRemovalWarning> {
+  const keptSessionIds = new Set(
+    draft.sessions.map((session) => session.sessionId).filter((id): id is number => id !== null),
+  );
+  const keptExerciseIds = new Set(
+    draft.sessions
+      .flatMap((session) => session.exercises)
+      .map((exercise) => exercise.exerciseId)
+      .filter((id): id is number => id !== null),
+  );
+
+  const activeCycle = await db.get(
+    `SELECT cycle_id FROM Cycles WHERE routine_id = ? AND status = 'active'
+     ORDER BY cycle_number DESC LIMIT 1;`,
+    [routineId],
+  );
+  if (activeCycle === undefined) {
+    return { days: [], exercises: [] };
+  }
+  const cycleId = Number(activeCycle.cycle_id);
+
+  const sessionRows = await db.getAll(
+    'SELECT session_id, name FROM Sessions WHERE routine_id = ?;',
+    [routineId],
+  );
+  const days: string[] = [];
+  const removedSessionIds = new Set<number>();
+  for (const row of sessionRows) {
+    const sessionId = Number(row.session_id);
+    if (keptSessionIds.has(sessionId)) {
+      continue;
+    }
+    removedSessionIds.add(sessionId);
+    const hasHistory = await db.get(
+      `SELECT 1 AS present FROM WeekSessions ws
+       JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+       WHERE cw.cycle_id = ? AND ws.session_id = ? AND ws.status <> 'pending' LIMIT 1;`,
+      [cycleId, sessionId],
+    );
+    if (hasHistory !== undefined) {
+      days.push(String(row.name));
+    }
+  }
+
+  // Only an exercise whose session SURVIVES can be individually removed —
+  // one whose whole day is going away is already named in `days` above, so
+  // it is never checked again here.
+  const exerciseRows = await db.getAll(
+    `SELECT e.session_exercise_id, e.exercise_name, e.session_id
+     FROM SessionExercises e JOIN Sessions s ON s.session_id = e.session_id
+     WHERE s.routine_id = ?;`,
+    [routineId],
+  );
+  const exercises: string[] = [];
+  for (const row of exerciseRows) {
+    const exerciseId = Number(row.session_exercise_id);
+    const sessionId = Number(row.session_id);
+    if (keptExerciseIds.has(exerciseId) || removedSessionIds.has(sessionId)) {
+      continue;
+    }
+    const hasProposal = await db.get(
+      'SELECT 1 AS present FROM Progression_Proposal WHERE cycle_id = ? AND session_exercise_id = ? LIMIT 1;',
+      [cycleId, exerciseId],
+    );
+    if (hasProposal !== undefined) {
+      exercises.push(String(row.exercise_name));
+    }
+  }
+
+  return { days, exercises };
+}
+
+/**
  * Rewrites the routine's plan in one transaction, preserving the identity of
  * every kept row: draft rows that carry a source id are UPDATEd in place,
  * rows without an id (new days / exercises) are INSERTed, and rows not in the
@@ -344,6 +477,9 @@ export async function saveRoutineEdit(
         if (!existing) {
           throw new Error(`Draft references unknown session ${session.sessionId}`);
         }
+        // F7: restamp this session's still-pending WeekSessions rows to the
+        // (possibly new) weekday; already-resolved rows are untouched.
+        await restampPendingWeekSessions(db, session.sessionId, session.weekday);
         resolvedSessionIds.push(session.sessionId);
       }
     }

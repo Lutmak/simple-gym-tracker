@@ -246,6 +246,11 @@ CREATE TABLE IF NOT EXISTS CycleWeeks (
 
 -- One row per session per week. completed_log_id is a non-destructive link to
 -- history: deleting a log nulls it (SET NULL), never the other way round.
+-- nominal_date (F7): the session's planned day, snapshot at cycle-seed time
+-- instead of derived live from Sessions.weekday. A later weekday edit
+-- restamps only this row's value when it is still 'pending'; an
+-- already-resolved row's displayed plan position never changes underneath
+-- it. NULL on a row from before this column existed.
 CREATE TABLE IF NOT EXISTS WeekSessions (
     week_session_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     cycle_week_id INTEGER NOT NULL,
@@ -253,6 +258,7 @@ CREATE TABLE IF NOT EXISTS WeekSessions (
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'moved', 'discarded')),
     resolved_on_date INTEGER,
     completed_log_id INTEGER,
+    nominal_date INTEGER,
     FOREIGN KEY (cycle_week_id) REFERENCES CycleWeeks(cycle_week_id) ON DELETE CASCADE,
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (completed_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE SET NULL,

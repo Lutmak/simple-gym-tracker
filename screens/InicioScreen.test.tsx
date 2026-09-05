@@ -320,7 +320,7 @@ describe('Inicio — rest day', () => {
 describe('Inicio — the week strip opens the session sheet', () => {
   it('passes the tapped day\'s target to SessionDetailSheet', async () => {
     const target = { routineId: 1, cycleId: 1, cycleNumber: 1, weekNumber: 1, sessionId: 3 };
-    const days = [0, 1, 2, 3, 4, 5, 6].map(restDay);
+    const days: InicioData['week']['days'] = [0, 1, 2, 3, 4, 5, 6].map(restDay);
     days[0] = { ...days[0], status: 'completed', sessionName: 'Squat Day', target };
 
     await renderScreen(baseData({ week: { startStamp: 1000, days, planned: 1, completed: 1, moved: 0, discarded: 0, pending: 0 } }));

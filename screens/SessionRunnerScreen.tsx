@@ -631,11 +631,15 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
     if (sameAsTarget && target.isAmrap) {
       return `${t('runnerMaxReps')} · ${weight}`;
     }
-    if (sameAsTarget) {
-      return `${target.targetReps} ${t('Reps')} · ${weight}`;
+    // The target-reps annotation is only worth showing when reps themselves differ from the
+    // plan — repeating "5 reps · target 5 reps · 95 kg" when only the weight changed told the
+    // user nothing new about their reps (found on the fresh-install walkthrough, 2026-09-04).
+    const repsLabel = `${logged.reps} ${t('runnerRepsNoun')}`;
+    if (logged.reps === target.targetReps) {
+      return `${repsLabel} · ${weight}`;
     }
-    const targetReps = `${target.targetReps}${target.isAmrap ? '+' : ''} ${t('Reps')}`;
-    return `${logged.reps} ${t('Reps')} · ${t('runnerTargetWord')} ${targetReps} · ${weight}`;
+    const targetRepsLabel = `${target.targetReps}${target.isAmrap ? '+' : ''} ${t('runnerRepsNoun')}`;
+    return `${repsLabel} · ${t('runnerTargetWord')} ${targetRepsLabel} · ${weight}`;
   };
 
   const belowTargetNote = (setIndex: number, logged: LoggedSet): string | null => {
@@ -705,7 +709,7 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
             style={[styles.rowDetail, { color: tokens.textSecondary }]}
           >
             {currentExercise.isPlanned === false
-              ? `${logged.reps} ${t('Reps')} · ${
+              ? `${logged.reps} ${t('runnerRepsNoun')} · ${
                   logged.weight === null
                     ? t('loadBodyweight')
                     : `${formatWeight(logged.weight)} ${logged.unit ?? planUnit}`
@@ -858,7 +862,7 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
                         return (
                           <Row
                             key={`${exerciseIndex}:warmup:${warmupIndex}`}
-                            label={`${formatWeight(warmup.weight)} ${planUnit} · ${warmup.reps} ${t('Reps')}`}
+                            label={`${warmup.reps} ${t('runnerRepsNoun')} · ${formatWeight(warmup.weight)} ${planUnit}`}
                             onPress={() => toggleWarmup(warmupIndex)}
                             right={
                               <Ionicons
@@ -1305,7 +1309,7 @@ function RunnerSetEditor({
 
   const targetReps = target.isAmrap
     ? t('runnerMaxReps')
-    : `${target.targetReps} ${t('Reps')}`;
+    : `${target.targetReps} ${t('runnerRepsNoun')}`;
   const targetWeight =
     target.targetWeight === null
       ? exercise.loadSource === 'bodyweight'

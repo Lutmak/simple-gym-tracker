@@ -914,9 +914,13 @@ describe('saveSessionLog — learned baselines (§3.2)', () => {
 
   it('writes the linear starting load from the first logged set when the plan value is NULL', async () => {
     const { db, executor } = connect();
-    const session = await fixture(executor);
+    const loaded1 = await fixture(executor);
     db.prepare('UPDATE SessionExercises SET absolute_weight = NULL WHERE session_exercise_id = ?;')
-      .run(row(session).sessionExerciseId);
+      .run(row(loaded1).sessionExerciseId);
+    // Reload: the runner always works from a fresh read, and `learnedBaselinesFor` (U6) reads
+    // the plan value it was just handed — a stale in-memory session disagreeing with the row
+    // just mutated under it is not a case the runner is ever actually in.
+    const session = await loadRunnerSession(executor, loaded1.weekSessionId, TODAY);
 
     await saveSessionLog(executor, session.weekSessionId, session, withSquatWeight(session, 100));
 
@@ -1081,9 +1085,10 @@ describe('saveSessionLog — learned baselines (§3.2)', () => {
 
   it('converts a set logged in the other unit once, for the plan — the log row keeps its unit', async () => {
     const { db, executor } = connect();
-    const session = await fixture(executor);
+    const loaded1 = await fixture(executor);
     db.prepare('UPDATE SessionExercises SET absolute_weight = NULL WHERE session_exercise_id = ?;')
-      .run(row(session).sessionExerciseId);
+      .run(row(loaded1).sessionExerciseId);
+    const session = await loadRunnerSession(executor, loaded1.weekSessionId, TODAY);
 
     const draft = withSquatWeight(session, 100);
     draft[1][0] = { reps: 10, weight: 100, unit: 'lb' };

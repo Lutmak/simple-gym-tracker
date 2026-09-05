@@ -27,6 +27,7 @@
  */
 
 import { warmupSets } from './fiveThreeOne';
+import { advanceCycleWeek } from './cycleSeed';
 import { inferBaselineWeight, baselineColumn } from './learnedWeights';
 import { proposeJokerWeight } from './jokers';
 import { canSaveBarProfile, type BarProfileKey } from './barProfiles';
@@ -545,6 +546,9 @@ export async function saveSessionLog(
         throw new Error('saveSessionLog: week session is not pending');
       }
     }
+    // §3.4/F4: current_week advances the moment this was the week's last
+    // pending session, regardless of whether any week's review was opened.
+    await advanceCycleWeek(db, weekSessionId);
 
     const finishContext = await loadSessionFinishContext(db, weekSessionId);
 

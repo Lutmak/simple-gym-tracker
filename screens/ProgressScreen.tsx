@@ -364,6 +364,17 @@ export default function ProgressScreen({ navigation, route }: Props) {
     });
   };
 
+  /** §3.4/F4 — the current-cycle block's link to its pending review. */
+  const openReview = (cycle: ProgressCycle) => {
+    if (selectedId === null) {
+      return;
+    }
+    navigation.navigate('Routines', {
+      screen: 'CycleReview',
+      params: { routineId: selectedId, cycleId: cycle.cycleId },
+    });
+  };
+
   const openDay = (entry: ProgressCalendarDay) => {
     setDetailTarget(
       entry.target.kind === 'session'
@@ -390,6 +401,10 @@ export default function ProgressScreen({ navigation, route }: Props) {
       return cycle.completedAt === null
         ? `${t('progressCycleDone')} · ${sessions}`
         : `${t('progressCycleDoneOn', { date: formatDate(cycle.completedAt) })} · ${sessions}`;
+    }
+    // §3.4/F4: the cycle's last week resolved, still unreviewed.
+    if (cycle.status === 'active' && cycle.currentWeek >= cycle.weeks) {
+      return `${t('inicioReviewOverline')} · ${sessions}`;
     }
     if (cycle.status === 'active') {
       return `${t('progressCycleWeekOf', {
@@ -562,6 +577,15 @@ export default function ProgressScreen({ navigation, route }: Props) {
         testID={`progress-cycle-${view.cycle.cycleNumber}`}
       >
         {view.weeks.map((week) => renderWeekRow(view.cycle, week))}
+        {view.cycle.status === 'active' && view.cycle.currentWeek >= view.cycle.weeks && (
+          <Row
+            label={t('sessionSummaryReview')}
+            right={<Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />}
+            onPress={() => openReview(view.cycle)}
+            divided
+            testID={`progress-cycle-${view.cycle.cycleNumber}-review`}
+          />
+        )}
       </Section>
     ));
   };

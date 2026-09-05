@@ -19,6 +19,7 @@ const state = (overrides: Partial<SessionQueueState>): SessionQueueState => ({
   head: null,
   resolution: null,
   upcoming: null,
+  review: null,
   ...overrides,
 });
 
@@ -27,11 +28,16 @@ describe('centreActionFor', () => {
     expect(centreActionFor(state({ routine: null }))).toEqual({
       label: 'freeLog',
       weekSessionId: null,
+      cycleId: null,
     });
   });
 
   it('offers free logging when nothing is pending or scheduled', () => {
-    expect(centreActionFor(state({}))).toEqual({ label: 'freeLog', weekSessionId: null });
+    expect(centreActionFor(state({}))).toEqual({
+      label: 'freeLog',
+      weekSessionId: null,
+      cycleId: null,
+    });
   });
 
   it('offers free logging when nothing is pending but the next session is upcoming', () => {
@@ -41,7 +47,7 @@ describe('centreActionFor', () => {
           upcoming: { weekSessionId: null, sessionId: null, name: 'Día A', weekday: 3, date: 200 },
         }),
       ),
-    ).toEqual({ label: 'freeLog', weekSessionId: null });
+    ).toEqual({ label: 'freeLog', weekSessionId: null, cycleId: null });
   });
 
   it('offers to resolve an unresolved past session', () => {
@@ -52,7 +58,7 @@ describe('centreActionFor', () => {
           resolution: 'unresolved',
         }),
       ),
-    ).toEqual({ label: 'resolve', weekSessionId: 7 });
+    ).toEqual({ label: 'resolve', weekSessionId: 7, cycleId: null });
   });
 
   it('offers to start the head when it sits on its nominal day', () => {
@@ -63,7 +69,7 @@ describe('centreActionFor', () => {
           resolution: 'due',
         }),
       ),
-    ).toEqual({ label: 'start', weekSessionId: 7 });
+    ).toEqual({ label: 'start', weekSessionId: 7, cycleId: null });
   });
 
   it('offers to continue the head when it was moved onto today', () => {
@@ -74,6 +80,16 @@ describe('centreActionFor', () => {
           resolution: 'due',
         }),
       ),
-    ).toEqual({ label: 'continue', weekSessionId: 7 });
+    ).toEqual({ label: 'continue', weekSessionId: 7, cycleId: null });
+  });
+
+  it('names the cycle awaiting review when nothing is pending (§3.4, F4)', () => {
+    expect(
+      centreActionFor(
+        state({
+          review: { cycleId: 9, cycleNumber: 3, completedSessions: 16, totalSessions: 16 },
+        }),
+      ),
+    ).toEqual({ label: 'freeLog', weekSessionId: null, cycleId: 9 });
   });
 });

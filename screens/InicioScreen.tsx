@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
+import type { NavigationProp } from '@react-navigation/native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useTranslation } from 'react-i18next';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -221,6 +222,18 @@ export default function InicioScreen({ navigation, route }: Props) {
   };
 
   const openRoutines = () => navigation.getParent()?.navigate('Routines');
+  /** §3.4/F4 — the cycle-review link from Inicio's own answer block. */
+  const openReview = () => {
+    if (data === null || data.queue.routine === null || data.queue.review === null) {
+      return;
+    }
+    navigation
+      .getParent<NavigationProp<RootTabParamList>>()
+      ?.navigate('Routines', {
+        screen: 'CycleReview',
+        params: { routineId: data.queue.routine.routineId, cycleId: data.queue.review.cycleId },
+      });
+  };
   const startSession = (weekSessionId: number) =>
     navigation.navigate('StartSession', { weekSessionId });
   // H2 consumes this route request to mount the standard resolution Sheet.
@@ -591,6 +604,35 @@ export default function InicioScreen({ navigation, route }: Props) {
             label={session.originDate === session.date ? t('inicioStartSession') : t('continueSession')}
             onPress={() => startSession(session.weekSessionId)}
             style={styles.fullButton}
+          />
+        </View>
+      );
+    }
+
+    // §3.4/F4: a completed, unreviewed cycle has nothing left pending until
+    // the review seeds the next one — this is Inicio's answer for it.
+    if (data.queue.review !== null) {
+      const review = data.queue.review;
+      return (
+        <View testID="inicio-review">
+          <Text style={[styles.overline, { color: tokens.textSecondary }]}>
+            {t('inicioReviewOverline')}
+          </Text>
+          <Text style={[styles.sessionTitle, { color: tokens.textPrimary }]}>
+            {t('inicioReviewTitle', { cycle: review.cycleNumber })}
+          </Text>
+          <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+            {t('inicioReviewSummary', {
+              completed: review.completedSessions,
+              total: review.totalSessions,
+              next: review.cycleNumber + 1,
+            })}
+          </Text>
+          <Button
+            label={t('sessionSummaryReview')}
+            onPress={openReview}
+            style={styles.fullButton}
+            testID="inicio-review-open"
           />
         </View>
       );

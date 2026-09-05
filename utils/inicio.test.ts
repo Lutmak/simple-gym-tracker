@@ -12,7 +12,7 @@ const dayStamp = (ymd: string): number => {
 
 const input = (weekSessions: InicioInput['weekSessions']): InicioInput => ({
   routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
-  cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStamp('2026-08-10') }],
+  cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStamp('2026-08-10'), currentWeek: 1, weeks: 4, status: 'active' }],
   sessions: [
     { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
     { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
@@ -150,7 +150,7 @@ describe('Inicio streak', () => {
       weekSessions: InicioInput['weekSessions'],
     ): InicioInput => ({
       routine: { routineId: 1, name: 'Two days', unit: 'kg', roundingIncrement: 2.5 },
-      cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStamp('2026-08-10') }],
+      cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStamp('2026-08-10'), currentWeek: 1, weeks: 4, status: 'active' }],
       sessions: [
         { sessionId: 1, weekday: 1, name: 'Upper', sortOrder: 1 },
         { sessionId: 2, weekday: 4, name: 'Lower', sortOrder: 2 },

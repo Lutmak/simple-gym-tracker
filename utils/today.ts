@@ -21,6 +21,7 @@
 
 import { calcSetWeight, waveForWeek } from './fiveThreeOne';
 import { roundTo } from './progression';
+import { advanceCycleWeek } from './cycleSeed';
 import type { RoutineDatabase, RoutineLoadSource, RoutineUnit } from './routineActions';
 
 export const DAY_SECONDS = 86400;
@@ -180,6 +181,10 @@ export interface QueueCycleRow {
   cycleId: number;
   cycleNumber: number;
   startedAt: number | null;
+  /** §3.4 — carried so the queue can report a pending cycle review itself. */
+  currentWeek: number;
+  weeks: number;
+  status: 'active' | 'complete';
 }
 
 export interface QueueWeekSessionRow {
@@ -257,6 +262,22 @@ export interface SessionQueueState {
   resolution: 'due' | 'unresolved' | null;
   /** The next session after the head — what resolving the head reveals. */
   upcoming: UpcomingSession | null;
+  /**
+   * §3.4 — the active routine's latest cycle is complete (its last week's
+   * sessions are all resolved) and still unreviewed. Set independently of
+   * `head`/`resolution`: in practice they are mutually exclusive, since a
+   * cycle in this state has nothing left pending until the next one is
+   * seeded, but nothing here assumes that.
+   */
+  review: QueueReviewEntry | null;
+}
+
+export interface QueueReviewEntry {
+  cycleId: number;
+  cycleNumber: number;
+  /** How many of the cycle's own sessions (every week) are resolved. */
+  completedSessions: number;
+  totalSessions: number;
 }
 
 export interface QueueRow {
@@ -355,13 +376,43 @@ function queueOrder(rows: readonly QueueRow[], todayStamp: number): QueueRow[] {
   return [...inProgress, ...pending.filter((row) => !inProgressIds.has(row.weekSession.weekSessionId))];
 }
 
+/**
+ * §3.4 — the active routine's latest cycle, complete and unreviewed: its last
+ * week's sessions are all resolved (`current_week` reaches `weeks` the moment
+ * that happens, independent of whether any week's review was ever opened —
+ * see `advanceCycleWeek` in `utils/cycleSeed.ts`) and the cycle itself has
+ * not yet been closed out by `applyReview`/`startNextCycle` (`status` stays
+ * 'active' until then).
+ */
+function reviewEntryFor(input: SessionQueueInput): QueueReviewEntry | null {
+  const latestCycle = [...input.cycles]
+    .filter((cycle) => cycle.status === 'active')
+    .sort((a, b) => b.cycleNumber - a.cycleNumber)[0];
+  if (latestCycle === undefined || latestCycle.currentWeek < latestCycle.weeks) {
+    return null;
+  }
+  const cycleWeekSessions = input.weekSessions.filter(
+    (row) => row.cycleId === latestCycle.cycleId,
+  );
+  const completedSessions = cycleWeekSessions.filter((row) => row.status !== 'pending').length;
+  if (completedSessions < cycleWeekSessions.length) {
+    return null;
+  }
+  return {
+    cycleId: latestCycle.cycleId,
+    cycleNumber: latestCycle.cycleNumber,
+    completedSessions,
+    totalSessions: cycleWeekSessions.length,
+  };
+}
+
 export function computeSessionQueue(
   input: SessionQueueInput,
   todayStamp: number,
 ): SessionQueueState {
   const routine = input.routine;
   if (routine === null) {
-    return { routine: null, head: null, resolution: null, upcoming: null };
+    return { routine: null, head: null, resolution: null, upcoming: null, review: null };
   }
 
   const rows = buildQueueRows(input);
@@ -422,7 +473,7 @@ export function computeSessionQueue(
           date: effectiveDay(upcomingRow),
         };
 
-  return { routine, head, resolution, upcoming };
+  return { routine, head, resolution, upcoming, review: reviewEntryFor(input) };
 }
 
 /**
@@ -686,6 +737,9 @@ const toCycleRow = (row: Record<string, unknown>): QueueCycleRow => ({
   cycleId: num(row.cycle_id),
   cycleNumber: num(row.cycle_number),
   startedAt: nullableNum(row.started_at),
+  currentWeek: num(row.current_week),
+  weeks: num(row.weeks),
+  status: str(row.status) as QueueCycleRow['status'],
 });
 
 const toWeekSessionRow = (row: Record<string, unknown>): QueueWeekSessionRow => ({
@@ -715,7 +769,7 @@ export async function loadSessionQueueInput(db: RoutineDatabase): Promise<Sessio
   };
 
   const cycleRows = await db.getAll(
-    `SELECT cycle_id, cycle_number, started_at
+    `SELECT cycle_id, cycle_number, started_at, current_week, weeks, status
      FROM Cycles WHERE routine_id = ? ORDER BY cycle_number;`,
     [routine.routineId],
   );
@@ -806,6 +860,7 @@ export async function resolveMoveSession(
      WHERE week_session_id = ? AND status = 'pending';`,
     [targetStamp, weekSessionId],
   );
+  await advanceCycleWeek(db, weekSessionId);
 }
 
 export async function resolveDiscardSession(
@@ -828,6 +883,7 @@ export async function resolveDiscardSession(
      WHERE week_session_id = ? AND status = 'pending';`,
     [discarded.resolvedOnDate, weekSessionId],
   );
+  await advanceCycleWeek(db, weekSessionId);
 }
 
 export async function undoDiscardSession(

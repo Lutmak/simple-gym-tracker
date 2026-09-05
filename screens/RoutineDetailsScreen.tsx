@@ -28,6 +28,7 @@ import {
   type RoutineSourceBundle,
   type RoutineUnit,
 } from '../utils/routineActions';
+import { loadReviewEntry, type ReviewEntry } from '../utils/cycleReview';
 import {
   planActivation,
   weekdaySequence,
@@ -88,6 +89,8 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
 
   const [source, setSource] = useState<RoutineSourceBundle | null>(null);
   const [active, setActive] = useState<ActiveRoutineRef | null>(null);
+  /** §3.4/F4 — set only when the review pending is for THIS routine. */
+  const [reviewEntry, setReviewEntry] = useState<ReviewEntry | null>(null);
   /** The preset's copy in the library, when it has one — what activation reactivates. */
   const [copyRoutineId, setCopyRoutineId] = useState<number | null>(null);
   const [actionsFor, setActionsFor] = useState<ActivationTarget | null>(null);
@@ -106,6 +109,7 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
               : await loadRoutineSourceById(routineDb, routineId as number);
           setSource(loaded);
           setActive(await getActiveRoutine(routineDb));
+          setReviewEntry(await loadReviewEntry(routineDb));
           if (presetKey !== undefined) {
             const copy = await routineDb.get(
               'SELECT routine_id FROM Routines WHERE routine_key = ?;',
@@ -138,6 +142,13 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
       ? { kind: 'preset', routineKey: presetKey, name: routine.name, copyRoutineId }
       : { kind: 'routine', routineId: routineId as number, name: routine.name };
   const plan = planActivation(target, active);
+
+  // §3.4/F4: the pending-review entry point is only this routine's if the
+  // active routine it names is the one this screen is actually showing —
+  // this screen's own id (a user routine) or its activated copy (a preset).
+  const thisRoutineId = presetKey !== undefined ? copyRoutineId : (routineId as number);
+  const reviewForThisRoutine =
+    reviewEntry !== null && reviewEntry.routineId === thisRoutineId ? reviewEntry : null;
 
   const orderedWeekdays = weekdaySequence(
     sessions.map((session) => session.weekday),
@@ -257,6 +268,26 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
           />
           <Row label={t('progressionRule')} detail={progressionText} detailBelow divided />
         </Section>
+
+        {reviewForThisRoutine !== null && (
+          <Section testID="routine-review">
+            <Row
+              label={t('inicioReviewTitle', { cycle: reviewForThisRoutine.cycleNumber })}
+              detail={t('sessionSummaryReview')}
+              detailBelow
+              right={
+                <Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />
+              }
+              onPress={() =>
+                navigation.navigate('CycleReview', {
+                  routineId: reviewForThisRoutine.routineId,
+                  cycleId: reviewForThisRoutine.cycleId,
+                })
+              }
+              divided
+            />
+          </Section>
+        )}
 
         <Section title={t('weekOverview')} testID="routine-week">
           {orderedSessions.map((session) => (

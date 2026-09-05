@@ -28,6 +28,7 @@ import type { RoutineDatabase } from './routineActions';
 export const DEFAULT_CYCLE_WEEKS = 4;
 
 const num = (value: unknown): number => Number(value);
+const str = (value: unknown): string => String(value);
 
 /**
  * Writes one cycle for a routine: the `Cycles` row (status 'active', current
@@ -150,4 +151,71 @@ export async function ensureActiveCycle(
       : num(routineRow.cycle_weeks);
 
   return createCycle(db, routineId, weeks, startedAt);
+}
+
+/**
+ * §3.4/F4 — `current_week` advances the moment a week's sessions all
+ * resolve; it no longer waits for that week's review to be opened and
+ * applied. Every caller that resolves a `WeekSessions` row to something
+ * other than 'pending' (`saveSessionLog`, `resolveMoveSession`,
+ * `resolveDiscardSession`) calls this with that row's id afterwards, inside
+ * the same transaction.
+ *
+ * Before this, skipping one week's review froze `current_week` there
+ * forever — every later week's own review-availability check compares
+ * against it, so the button never reappeared for any of them, and a cycle
+ * could never even be detected as complete (`current_week >= weeks`) if its
+ * very first week's review was ever skipped.
+ *
+ * `current_week` is set to the LATEST week of this cycle with zero pending
+ * sessions, capped at the cycle's own `weeks` — never past it: reaching a
+ * genuinely new cycle needs the accepted training maxes from a review
+ * (`utils/cycleReview.ts` `startNextCycle`), not a bare increment. Applying
+ * a review (`applyReview`) can still move it forward on its own, ahead of
+ * this — the two cooperate, both only ever moving it forward.
+ */
+export async function advanceCycleWeek(
+  db: RoutineDatabase,
+  weekSessionId: number,
+): Promise<void> {
+  const cycleRow = await db.get(
+    `SELECT c.cycle_id, c.current_week, c.weeks, c.status
+     FROM WeekSessions ws
+     JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+     JOIN Cycles c ON c.cycle_id = cw.cycle_id
+     WHERE ws.week_session_id = ?;`,
+    [weekSessionId],
+  );
+  if (cycleRow === undefined || str(cycleRow.status) !== 'active') {
+    return;
+  }
+  const cycleId = num(cycleRow.cycle_id);
+  const currentWeek = num(cycleRow.current_week);
+  const weeks = num(cycleRow.weeks);
+  if (currentWeek >= weeks) {
+    return;
+  }
+
+  const weekRows = await db.getAll(
+    `SELECT cw.week_number AS week_number,
+            SUM(CASE WHEN ws.status = 'pending' THEN 1 ELSE 0 END) AS pending
+     FROM CycleWeeks cw
+     JOIN WeekSessions ws ON ws.cycle_week_id = cw.cycle_week_id
+     WHERE cw.cycle_id = ?
+     GROUP BY cw.week_number;`,
+    [cycleId],
+  );
+  let latestResolved = 0;
+  for (const row of weekRows) {
+    if (num(row.pending) === 0 && num(row.week_number) > latestResolved) {
+      latestResolved = num(row.week_number);
+    }
+  }
+  const target = Math.min(latestResolved, weeks);
+  if (target > currentWeek) {
+    await db.run(
+      `UPDATE Cycles SET current_week = ? WHERE cycle_id = ? AND current_week < ?;`,
+      [target, cycleId, target],
+    );
+  }
 }

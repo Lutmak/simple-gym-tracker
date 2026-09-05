@@ -703,7 +703,7 @@ export default function InicioScreen({ navigation, route }: Props) {
         )}
         {queue.upcoming !== null && queue.upcoming.weekSessionId !== null && (
           <Row
-            label={t('restDayPullForward')}
+            label={t('restDayPullForward', { name: queue.upcoming.name })}
             detail={t('restDayPullForwardDetail')}
             detailBelow
             right={<Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />}

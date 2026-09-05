@@ -340,7 +340,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
       >
         {upcoming !== null && upcoming.weekSessionId !== null && (
           <Row
-            label={t('restDayPullForward')}
+            label={t('restDayPullForward', { name: upcoming.name })}
             detail={t('restDayPullForwardDetail')}
             detailBelow
             onPress={() => void pullForward()}

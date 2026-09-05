@@ -285,7 +285,11 @@ export function buildCycleHistory(
  * Which engine proposals become stored rows. One row per exercise per cycle
  * (UNIQUE(cycle_id, session_exercise_id)); at wave cycle end the TM proposal
  * — the row whose current target IS the training max — wins over the derived
- * week-1 target. Mid-cycle wave and every linear week store all proposals.
+ * week-1 target, for a `training_max_pct` exercise. Mid-cycle wave and every
+ * linear week store all proposals. So does a wave cycle's `absolute`-loaded
+ * accessory (F5) at ANY week, cycle end included: it is on the linear rule's
+ * own weekly cadence, with no week-target/TM duality to filter — every week's
+ * proposal for it is the real one, the same as inside a `linear` routine.
  */
 export function selectStoredProposals(
   rule: ReviewRule,
@@ -296,13 +300,17 @@ export function selectStoredProposals(
   if (rule !== 'wave' || cycle.currentWeek < cycle.weeks) {
     return [...proposals];
   }
-  const trainingMaxById = new Map(
-    exercises.map((exercise) => [exercise.sessionExerciseId, exercise.trainingMaxWeight]),
-  );
-  return proposals.filter(
-    (proposal) =>
-      trainingMaxById.get(proposal.exerciseIdentifier) === proposal.currentTarget,
-  );
+  const exercisesById = new Map(exercises.map((exercise) => [exercise.sessionExerciseId, exercise]));
+  return proposals.filter((proposal) => {
+    const exercise = exercisesById.get(proposal.exerciseIdentifier);
+    if (exercise === undefined) {
+      return false;
+    }
+    if (exercise.loadSource !== 'training_max_pct') {
+      return true;
+    }
+    return exercise.trainingMaxWeight === proposal.currentTarget;
+  });
 }
 
 const exerciseById = (exercises: readonly ReviewExercise[]): Map<number, ReviewExercise> =>

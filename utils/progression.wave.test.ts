@@ -193,37 +193,70 @@ describe('progression — wave rule', () => {
     });
   });
 
-  it('proposes nothing for absolute and bodyweight exercises in a wave routine', () => {
-    const squat: RoutineExercise = {
-      identifier: 12,
-      name: 'Sentadilla',
-      targetSets: 3,
-      targetReps: 5,
-      loadSource: 'absolute',
-      unitOverride: null,
-      absoluteWeight: 100,
-      trainingMaxWeight: null,
-      trainingMaxPct: null,
-    };
-    const pullUps: RoutineExercise = {
-      identifier: 13,
-      name: 'Dominadas',
-      targetSets: 3,
-      targetReps: 8,
-      loadSource: 'bodyweight',
-      unitOverride: null,
-      absoluteWeight: null,
-      trainingMaxWeight: null,
-      trainingMaxPct: null,
-    };
+  it(
+    'applies the linear rule to an absolute-loaded row inside a wave routine (F5) — ' +
+      'bodyweight still gets nothing, there is no weight to progress',
+    () => {
+      const squat: RoutineExercise = {
+        identifier: 12,
+        name: 'Sentadilla',
+        targetSets: 3,
+        targetReps: 5,
+        loadSource: 'absolute',
+        unitOverride: null,
+        absoluteWeight: 100,
+        trainingMaxWeight: null,
+        trainingMaxPct: null,
+      };
+      const pullUps: RoutineExercise = {
+        identifier: 13,
+        name: 'Dominadas',
+        targetSets: 3,
+        targetReps: 8,
+        loadSource: 'bodyweight',
+        unitOverride: null,
+        absoluteWeight: null,
+        trainingMaxWeight: null,
+        trainingMaxPct: null,
+      };
 
-    const proposals = proposeNextTargets(routine({}, [bench, squat, pullUps]), [
-      entry({ reps: 5, weight: 85 }),
-    ]);
+      const history: CycleHistory[] = [
+        {
+          cycleNumber: 1,
+          weeks: 4,
+          exercises: {
+            [bench.identifier]: {
+              sets: [{ reps: 5, weight: 85, unit: 'kg' }],
+              proposalStatus: null,
+            },
+            // Every planned set hits its target — a real "met" week, not the
+            // degenerate no-history case another test covers.
+            [squat.identifier]: {
+              sets: [
+                { reps: 5, weight: 100, unit: 'kg' },
+                { reps: 5, weight: 100, unit: 'kg' },
+                { reps: 5, weight: 100, unit: 'kg' },
+              ],
+              proposalStatus: null,
+            },
+          },
+        },
+      ];
 
-    expect(proposals).toHaveLength(1);
-    expect(proposals[0]).toMatchObject({ exerciseIdentifier: 11 });
-  });
+      const proposals = proposeNextTargets(routine({}, [bench, squat, pullUps]), history);
+
+      expect(proposals).toHaveLength(2);
+      expect(proposals.find((p) => p.exerciseIdentifier === 11)).toMatchObject({
+        exerciseIdentifier: 11,
+      });
+      expect(proposals.find((p) => p.exerciseIdentifier === 12)).toMatchObject({
+        exerciseIdentifier: 12,
+        currentTarget: 100,
+        proposedTarget: 102.5,
+      });
+      expect(proposals.some((p) => p.exerciseIdentifier === 13)).toBe(false);
+    },
+  );
 
   it('skips an exercise whose training max is missing or not positive', () => {
     const broken: RoutineExercise = {

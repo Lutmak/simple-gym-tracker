@@ -3,8 +3,20 @@
  * no registry. Pure module — no database, no React. The app proposes, the user
  * decides; nothing here ever writes anything.
  *
- * `proposeNextTargets` dispatches on the routine's `progressionRule` to the
- * `linear` implementation or the `wave` adapter over `utils/fiveThreeOne.ts`.
+ * `proposeNextTargets` dispatches on the routine's `progressionRule`, but the
+ * dispatch is not purely per-routine (F5): a `wave` routine's own main lifts
+ * still go through `waveProposeNextTargets`, but its `absolute`-loaded rows
+ * (assistance work, e.g. the shipped '531' preset's FSL/accessory rows) get
+ * the SAME hit-or-miss linear rule a `linear` routine's exercises get — one
+ * evaluation per exercise, per entry in `cycleHistory` (a week, for a wave
+ * routine; a cycle, for a linear one — the rule itself does not care which).
+ * Gating dispatch on the routine's rule alone left every absolute/bodyweight
+ * accessory inside a wave routine permanently frozen at its starting load,
+ * with no proposal ever, contradicting §7.4 ("every automated decision that
+ * changes future training surfaces as a proposal"). A `bodyweight` row still
+ * gets no proposal at all — there is no weight to progress and no reps-based
+ * proposal shape in the schema (`Progression_Proposal` is a weight column);
+ * see ADR-0029 §7.4 if that changes.
  *
  * Extra sets (§3.4) can never move a proposal on their own: every evaluation
  * reads only the first `targetSets` sets of an exercise's history — the
@@ -106,6 +118,30 @@ export interface LoadProposal {
   advisory: boolean;
 }
 
+/**
+ * `linearProposeNextTargets` reads `cycleHistory[length - 1]` as "the current
+ * cycle" — correct for a `linear` routine, where `buildCycleHistory` gives it
+ * one entry per actual cycle. A `wave` routine's `cycleHistory` is different
+ * (F3): one entry per week the cycle is STRUCTURALLY seeded for, whether that
+ * week has happened yet or not, so its true final entry is very often a
+ * not-yet-reached future week with empty sets, not "now". This trims the
+ * array to end at the latest entry that actually has a logged set, the same
+ * notion of progress `waveProposeNextTargets` reads — so a wave routine's
+ * absolute-loaded accessory is evaluated against the week that really just
+ * happened. No week has any data yet (a freshly seeded, untouched cycle) is
+ * kept as a single empty entry, so the rule still holds with its own
+ * "sin registros este ciclo" reason, the same as a linear routine's exercise.
+ */
+function relevantHistoryFor(cycleHistory: readonly CycleHistory[]): CycleHistory[] {
+  let lastLogged = -1;
+  cycleHistory.forEach((entry, index) => {
+    if (Object.values(entry.exercises).some((exercise) => exercise.sets.length > 0)) {
+      lastLogged = index;
+    }
+  });
+  return lastLogged === -1 ? cycleHistory.slice(0, 1) : cycleHistory.slice(0, lastLogged + 1);
+}
+
 export function proposeNextTargets(
   routine: RoutineLike,
   cycleHistory: CycleHistory[],
@@ -113,8 +149,23 @@ export function proposeNextTargets(
   switch (routine.progressionRule) {
     case 'linear':
       return linearProposeNextTargets(routine, cycleHistory);
-    case 'wave':
-      return waveProposeNextTargets(routine, cycleHistory);
+    case 'wave': {
+      // F5: the wave rule only ever looks at training_max_pct exercises
+      // (`waveTrainingMax`'s own gate) — every absolute-loaded row (assistance
+      // work) gets the linear rule instead, so it is not just decoration.
+      const absoluteExercises = routine.exercises.filter(
+        (exercise) => exercise.loadSource === 'absolute',
+      );
+      return [
+        ...waveProposeNextTargets(routine, cycleHistory),
+        ...(absoluteExercises.length === 0
+          ? []
+          : linearProposeNextTargets(
+              { ...routine, exercises: absoluteExercises },
+              relevantHistoryFor(cycleHistory),
+            )),
+      ];
+    }
     case 'none':
       return [];
   }

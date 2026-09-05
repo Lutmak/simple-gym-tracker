@@ -327,7 +327,10 @@ describe('G1 — generation: a resolved week produces pending proposals', () => 
     await resolveDemoWeek(executor, 4);
     await generateReview(executor, 1, 6);
 
-    expect(count(db, 'Progression_Proposal')).toBe(40);
+    // F5: the wave routine's absolute-loaded accessories now get their own
+    // linear-rule proposal at cycle end too, alongside its 4 main lifts'
+    // TM proposals — 11 more rows than before that fix.
+    expect(count(db, 'Progression_Proposal')).toBe(51);
     const cycle1 = db
       .prepare('SELECT status FROM Progression_Proposal WHERE cycle_id = 1;')
       .all() as { status: string }[];
@@ -380,6 +383,16 @@ describe('G1 — resolve and apply: nothing changes without confirmation', () =>
 
     const before = await planWeight(executor, 1, 'Barbell Full Squat');
     expect(before.tm).toBe(120);
+
+    // F5: the wave routine's absolute-loaded accessories now get their own
+    // proposal at cycle end too — accept every one still pending so applying
+    // the four main lifts' review is not blocked by unrelated rows.
+    const stillPending = db
+      .prepare("SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = 6 AND status = 'pending';")
+      .all() as { proposal_id: number }[];
+    for (const row of stillPending) {
+      await resolveProposal(executor, row.proposal_id, 'accepted');
+    }
 
     const result = await applyReview(executor, 1, 6);
     expect(result.completed).toBe(true);
@@ -525,7 +538,7 @@ describe('G1 — the review is stored state and survives a restart', () => {
       await resolveDemoWeek(executor, 4);
 
       const generated = await loadCycleReview(executor, 1, 6);
-      expect(generated.proposals).toHaveLength(4);
+      expect(generated.proposals).toHaveLength(15);
 
       const squat = await proposalOf(executor, 6, 'Barbell Full Squat');
       const bench = await proposalOf(executor, 6, 'Barbell Bench Press - Medium Grip');
@@ -537,8 +550,9 @@ describe('G1 — the review is stored state and survives a restart', () => {
 
       ({ db, executor } = open());
       const resumed = await loadCycleReview(executor, 1, 6);
-      expect(resumed.proposals).toHaveLength(4);
-      expect(countWhere(db, 'Progression_Proposal', 'cycle_id = 6 AND status = \'pending\'')).toBe(1);
+      expect(resumed.proposals).toHaveLength(15);
+      // F5: 11 accessory proposals are also stored, all still pending.
+      expect(countWhere(db, 'Progression_Proposal', 'cycle_id = 6 AND status = \'pending\'')).toBe(12);
 
       const squatView = resumed.proposals.find((p) => p.exerciseName === 'Barbell Full Squat');
       expect(squatView).toMatchObject({ status: 'accepted', proposedTarget: 125 });
@@ -868,6 +882,114 @@ describe('F3 — setup fields that do nothing (§3.1, §3.2)', () => {
       // what's actually added, not the 2.5 kg upper default.
       expect(tmProposal.currentTarget).toBe(120);
       expect(tmProposal.proposedTarget).toBe(121.25);
+    },
+  );
+});
+
+describe('F5 — accessories progress inside a wave routine', () => {
+  const TODAY = Math.floor(Date.UTC(2026, 7, 14, 12, 0, 0) / 1000);
+
+  it(
+    "after week 1 of the real '531' preset, every absolute-loaded accessory that hit its " +
+      'targets has its own +increment proposal, no bodyweight accessory has any proposal, and ' +
+      'the main lifts have a week-target proposal but no TM proposal yet (not at cycle end)',
+    async () => {
+      const { executor } = connect();
+      await runSchema(executor);
+      const { routineId } = await activatePresetRoutine(executor, '531', 'kg', new Map());
+      const cycleRow = await executor.get(
+        `SELECT cycle_id FROM Cycles WHERE routine_id = ? AND status = 'active';`,
+        [routineId],
+      );
+      if (cycleRow === undefined) {
+        throw new Error('531 preset activation did not seed a cycle');
+      }
+      const cycleId = Number((cycleRow as { cycle_id: number }).cycle_id);
+
+      const weekSessions = await executor.getAll<{ week_session_id: number }>(
+        `SELECT ws.week_session_id FROM WeekSessions ws
+         JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+         WHERE cw.cycle_id = ? AND cw.week_number = 1 AND ws.status = 'pending'
+         ORDER BY ws.week_session_id;`,
+        [cycleId],
+      );
+      expect(weekSessions.length).toBe(4);
+
+      // Log week 1 with every real (non-bodyweight) set meeting or beating
+      // its target — including the absolute accessories' own first-ever set,
+      // which both learns their baseline AND is the "met" week the F5
+      // proposal reads back, in the same pass (a real first session).
+      for (const { week_session_id: weekSessionId } of weekSessions) {
+        const session = await loadRunnerSession(executor, weekSessionId, TODAY);
+        const draft = session.exercises.map((exercise) =>
+          exercise.loadSource === 'bodyweight'
+            ? Array.from({ length: exercise.targetSets }, () => ({
+                reps: exercise.targetReps,
+                weight: null,
+              }))
+            : Array.from({ length: exercise.targetSets }, (_, index) => ({
+                reps:
+                  exercise.isAmrap && index === exercise.targetSets - 1
+                    ? exercise.targetReps + 2
+                    : exercise.targetReps,
+                weight: 100,
+              })),
+        );
+        await saveSessionLog(executor, weekSessionId, session, draft);
+      }
+
+      const review = await loadCycleReview(executor, routineId, cycleId);
+      expect(review.atCycleEnd).toBe(false);
+
+      const exerciseRows = await executor.getAll<{
+        session_exercise_id: number;
+        exercise_name: string;
+        role: string;
+        load_source: string;
+      }>(
+        `SELECT e.session_exercise_id, e.exercise_name, e.role, e.load_source
+         FROM SessionExercises e JOIN Sessions s ON s.session_id = e.session_id
+         WHERE s.routine_id = ?;`,
+        [routineId],
+      );
+
+      const absoluteAccessories = exerciseRows.filter(
+        (row) => row.role === 'accessory' && row.load_source === 'absolute',
+      );
+      expect(absoluteAccessories.length).toBe(3); // Leg Press, Seated Cable Rows, Face Pull
+
+      for (const accessory of absoluteAccessories) {
+        const proposal = review.proposals.find(
+          (p) => p.sessionExerciseId === accessory.session_exercise_id,
+        );
+        if (proposal === undefined) {
+          throw new Error(`No F5 proposal for accessory ${accessory.exercise_name}`);
+        }
+        expect(proposal.proposedTarget).toBe(proposal.currentTarget + 2.5);
+        expect(proposal.isTmProposal).toBe(false);
+      }
+
+      const bodyweightAccessories = exerciseRows.filter(
+        (row) => row.role === 'accessory' && row.load_source === 'bodyweight',
+      );
+      expect(bodyweightAccessories.length).toBe(5);
+      for (const accessory of bodyweightAccessories) {
+        expect(
+          review.proposals.some((p) => p.sessionExerciseId === accessory.session_exercise_id),
+        ).toBe(false);
+      }
+
+      const mains = exerciseRows.filter((row) => row.role === 'main');
+      expect(mains.length).toBe(4);
+      for (const main of mains) {
+        const proposal = review.proposals.find((p) => p.sessionExerciseId === main.session_exercise_id);
+        if (proposal === undefined) {
+          throw new Error(`No week-target proposal for main lift ${main.exercise_name}`);
+        }
+        // A real proposal exists (the week's target) but it is not yet a TM
+        // proposal — that only happens at cycle end (F3/F4).
+        expect(proposal.isTmProposal).toBe(false);
+      }
     },
   );
 });

@@ -1,4 +1,11 @@
-import { lightTokens, darkTokens, getTokens, toLegacyPalette, type DataStateKey } from './theme';
+import {
+  lightTokens,
+  darkTokens,
+  getTokens,
+  toLegacyPalette,
+  hexWithOpacity,
+  type DataStateKey,
+} from './theme';
 
 const TOKEN_KEYS = [
   'mode',
@@ -124,6 +131,22 @@ describe('data tokens (ADR-0047)', () => {
 
   it('differs between themes (dark steps are not the light steps reused)', () => {
     expect(lightTokens.data.series).not.toEqual(darkTokens.data.series);
+  });
+});
+
+describe('hexWithOpacity', () => {
+  it('converts an opaque hex to rgba at the given opacity', () => {
+    expect(hexWithOpacity('#2A78D6', 1)).toBe('rgba(42, 120, 214, 1)');
+    expect(hexWithOpacity('#2A78D6', 0.2)).toBe('rgba(42, 120, 214, 0.2)');
+  });
+
+  it('accepts lowercase and without the leading #', () => {
+    expect(hexWithOpacity('2a78d6', 0.5)).toBe('rgba(42, 120, 214, 0.5)');
+  });
+
+  it('throws on a non-hex or non-opaque colour', () => {
+    expect(() => hexWithOpacity('rgba(0,0,0,0.5)', 1)).toThrow();
+    expect(() => hexWithOpacity('not-a-colour', 1)).toThrow();
   });
 });
 

@@ -159,6 +159,22 @@ export function getTokens(mode: ThemeMode): ThemeTokens {
 }
 
 /**
+ * An opaque `data` hex at a given opacity, as `rgba()`. The one place this app manipulates a
+ * colour rather than naming one outright — needed because `react-native-chart-kit` takes a
+ * stroke/fill colour as a function of opacity (its area-fill gradient calls it at several
+ * stops), not as a flat hex. Every `data.series`/`data.state` value is `#RRGGBB`, never `rgba()`
+ * itself, so this never has to parse an alpha channel that was already there.
+ */
+export function hexWithOpacity(hex: string, opacity: number): string {
+  const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (match === null) {
+    throw new Error(`hexWithOpacity: not an opaque hex colour: ${hex}`);
+  }
+  const [r, g, b] = [match[1], match[2], match[3]].map((part) => parseInt(part, 16));
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
+/**
  * The pre-design-system palette that the old screens read (`ThemeContext`'s `theme` object).
  *
  * This shape is a compatibility seam, not a second design language: every field resolves to a

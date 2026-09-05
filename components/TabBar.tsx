@@ -218,6 +218,39 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
     );
   };
 
+  /**
+   * Navigate into a screen that is not its stack's own root, with that root underneath it —
+   * so hardware back returns to RoutinesList/InicioIndex rather than exiting the app.
+   *
+   * A bottom-tab's nested stack is lazy: if its tab has never been focused, `navigate(tab,
+   * {screen, params})` straight to a non-root screen initialises that stack with *only* the
+   * requested route, no root beneath it (found on the emulator, 2026-09-05 — back from
+   * `CycleReview` closed the app instead of landing on `RoutinesList`).
+   *
+   * Navigating to the root and then the target fixes it only if the two calls land in separate
+   * render passes: two `navigation.navigate()` calls made back-to-back in the same tick both
+   * read the navigation state as it was *before either had committed*, so the second silently
+   * overwrites the first instead of stacking on top of it (confirmed on the emulator the same
+   * day — back from `CycleReview` landed on `Inicio`, the tab open before either call, not on
+   * `RoutinesList`). The zero-delay `setTimeout` is what forces the second call into its own
+   * tick, after the first's state update has actually applied.
+   */
+  const navigateIntoStack = (
+    tab: 'Inicio' | 'Routines',
+    rootScreen: string,
+    targetScreen: string,
+    params?: Record<string, unknown>,
+  ) => {
+    if (targetScreen === rootScreen) {
+      navigation.navigate(tab, { screen: targetScreen, params });
+      return;
+    }
+    navigation.navigate(tab, { screen: rootScreen });
+    setTimeout(() => {
+      navigation.navigate(tab, { screen: targetScreen, params });
+    }, 0);
+  };
+
   const onCentrePress = () => {
     if (action === null) {
       return;
@@ -225,22 +258,20 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
     switch (action.kind) {
       case 'start':
       case 'continue':
-        navigation.navigate('Inicio', {
-          screen: 'StartSession',
-          params: { weekSessionId: action.weekSessionId },
+        navigateIntoStack('Inicio', 'InicioIndex', 'StartSession', {
+          weekSessionId: action.weekSessionId,
         });
         return;
       case 'resolve':
-        navigation.navigate('Inicio', {
-          screen: 'InicioIndex',
-          params: { resolutionWeekSessionId: action.weekSessionId ?? undefined },
+        navigateIntoStack('Inicio', 'InicioIndex', 'InicioIndex', {
+          resolutionWeekSessionId: action.weekSessionId ?? undefined,
         });
         return;
       case 'review':
         if (action.review !== null) {
-          navigation.navigate('Routines', {
-            screen: 'CycleReview',
-            params: { routineId: action.review.routineId, cycleId: action.review.cycleId },
+          navigateIntoStack('Routines', 'RoutinesList', 'CycleReview', {
+            routineId: action.review.routineId,
+            cycleId: action.review.cycleId,
           });
         }
         return;
@@ -248,7 +279,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
         setRestDaySheetOpen(true);
         return;
       case 'newRoutine':
-        navigation.navigate('Routines', { screen: 'NewRoutine' });
+        navigateIntoStack('Routines', 'RoutinesList', 'NewRoutine');
         return;
     }
   };
@@ -262,7 +293,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
       const weekSessionId = await resolvePullForwardSession(routineDb, dayStampOf(new Date()));
       bump();
       setRestDaySheetOpen(false);
-      navigation.navigate('Inicio', { screen: 'StartSession', params: { weekSessionId } });
+      navigateIntoStack('Inicio', 'InicioIndex', 'StartSession', { weekSessionId });
     } catch (error) {
       console.error('Error pulling the next session forward:', error);
     } finally {
@@ -321,6 +352,14 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
               >
                 {t('centreButtonLabel')}
               </Text>
+              {/*
+               * A normal tab's column is icon + label + indicator, three children sharing
+               * `gap`; this column is icon-slot + label, two. Centered inside the same row
+               * height, a shorter column lands its label lower than a taller one does — this
+               * spacer, sized to the indicator it stands in for, is what puts "Entrenar" back
+               * on the other four labels' line (found on the emulator, 2026-09-05: ~10 px low).
+               */}
+              <View style={styles.centreIndicatorSpacer} />
             </Pressable>
           </View>
           {TAB_CONFIG.slice(TABS_LEFT_OF_CENTRE).map(renderTab)}
@@ -348,7 +387,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
           label={t('freeLogging')}
           onPress={() => {
             setRestDaySheetOpen(false);
-            navigation.navigate('Inicio', { screen: 'FreeLogging' });
+            navigateIntoStack('Inicio', 'InicioIndex', 'FreeLogging');
           }}
           testID="rest-day-free-log"
         />
@@ -411,5 +450,8 @@ const styles = StyleSheet.create({
   },
   centreLabel: {
     fontSize: fontSize.caption,
+  },
+  centreIndicatorSpacer: {
+    height: tabIndicator.height,
   },
 });

@@ -1,21 +1,25 @@
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 import { runSchema, type SchemaExecutor } from './schema';
 import { loadDemoData, type DemoDatabase } from './demoData';
+import { estimate1RM, calcSetWeight, waveForWeek } from './fiveThreeOne';
 import {
   buildCycleWeeks,
-  buildLiftSeries,
+  buildStrengthChart,
+  buildStrengthPoints,
+  buildTrainingMaxByCycle,
   computeWeekAdherence,
   cycleAdherence,
   hasChartableSeries,
   hasProgressFocus,
   loadFreeLogDetail,
-  loadMainLiftSeries,
   loadProgressRoutines,
   loadRoutineProgress,
+  loadStrengthSeries,
   loadWeekDetail,
   sessionDetailsOfWeek,
   sessionExercises,
   weekSessionsDone,
+  windowStrengthChart,
 } from './routineProgress';
 import type { RoutineDatabase } from './routineActions';
 
@@ -89,6 +93,7 @@ describe('pure core', () => {
               },
               resolved: true,
               isCurrent: true,
+              sessionStatuses: ['completed' as const],
             },
           ],
         },
@@ -149,6 +154,11 @@ describe('pure core', () => {
     });
     expect(weeks[2]).toMatchObject({ resolved: false, isCurrent: true });
     expect(weeks[3]).toMatchObject({ resolved: true, isCurrent: false });
+    // U3's state discs: one status per session, in the order the rows arrived (the caller's own
+    // sort_order) — never re-sorted or deduplicated by this function.
+    expect(weeks[0]?.sessionStatuses).toEqual(['completed', 'completed']);
+    expect(weeks[1]?.sessionStatuses).toEqual(['completed', 'discarded']);
+    expect(weeks[3]?.sessionStatuses).toEqual([]);
   });
 
   it('never marks weeks of a complete cycle as current', () => {
@@ -156,30 +166,7 @@ describe('pure core', () => {
     expect(weeks.every((week) => !week.isCurrent)).toBe(true);
   });
 
-  it('builds the top weight per session day, ascending by date', () => {
-    const series = buildLiftSeries([
-      { date: epoch('2026-04-13'), weight: 100, reps: 5, unit: 'kg' },
-      { date: epoch('2026-04-06'), weight: 100, reps: 6, unit: 'kg' },
-      { date: epoch('2026-04-06'), weight: 95, reps: 5, unit: 'kg' },
-      { date: epoch('2026-04-06'), weight: 100, reps: 4, unit: 'kg' },
-    ]);
-    expect(series).toEqual([
-      { date: epoch('2026-04-06'), weight: 100, reps: 6 },
-      { date: epoch('2026-04-13'), weight: 100, reps: 5 },
-    ]);
-  });
-
-  it('keeps the logged unit untouched', () => {
-    const series = buildLiftSeries([
-      { date: 1, weight: 110, reps: 10, unit: 'lb' },
-      { date: 2, weight: 110, reps: 12, unit: 'lb' },
-    ]);
-    expect(series.map((point) => point.weight)).toEqual([110, 110]);
-  });
-
   it('handles empty and single-point series explicitly', () => {
-    expect(buildLiftSeries([])).toEqual([]);
-    expect(buildLiftSeries([{ date: 1, weight: 100, reps: 5, unit: 'kg' }])).toHaveLength(1);
     expect(hasChartableSeries([])).toBe(false);
     expect(
       hasChartableSeries([{ date: 1, weight: 100, reps: 5 }]),
@@ -190,6 +177,207 @@ describe('pure core', () => {
         { date: 2, weight: 102.5, reps: 5 },
       ]),
     ).toBe(true);
+  });
+
+  describe('buildStrengthPoints', () => {
+    const anchor = (cycleNumber: number, weekNumber: number): number =>
+      cycleNumber * 1000 + weekNumber;
+
+    it('takes the last of at least three logged sets as the AMRAP result', () => {
+      const points = buildStrengthPoints(
+        [
+          { cycleNumber: 1, weekNumber: 1, date: 5, setNumber: 1, weight: 85, reps: 5 },
+          { cycleNumber: 1, weekNumber: 1, date: 5, setNumber: 3, weight: 100, reps: 8 },
+          { cycleNumber: 1, weekNumber: 1, date: 5, setNumber: 2, weight: 95, reps: 3 },
+        ],
+        anchor,
+      );
+      expect(points).toEqual([
+        { cycleNumber: 1, weekNumber: 1, date: anchor(1, 1), estimated1RM: estimate1RM(100, 8) },
+      ]);
+    });
+
+    it('drops a week with fewer than three logged sets', () => {
+      const points = buildStrengthPoints(
+        [
+          { cycleNumber: 1, weekNumber: 1, date: 5, setNumber: 1, weight: 85, reps: 5 },
+          { cycleNumber: 1, weekNumber: 1, date: 5, setNumber: 2, weight: 95, reps: 3 },
+        ],
+        anchor,
+      );
+      expect(points).toEqual([]);
+    });
+
+    it('never produces a point past the cycle\'s first three (AMRAP) weeks', () => {
+      const points = buildStrengthPoints(
+        [
+          { cycleNumber: 1, weekNumber: 4, date: 5, setNumber: 1, weight: 60, reps: 5 },
+          { cycleNumber: 1, weekNumber: 4, date: 5, setNumber: 2, weight: 60, reps: 5 },
+          { cycleNumber: 1, weekNumber: 4, date: 5, setNumber: 3, weight: 60, reps: 5 },
+        ],
+        anchor,
+      );
+      expect(points).toEqual([]);
+    });
+
+    it('orders points ascending by cycle then week, regardless of row order', () => {
+      const set = (cycleNumber: number, weekNumber: number, reps: number) => [
+        { cycleNumber, weekNumber, date: 0, setNumber: 1, weight: 100, reps },
+        { cycleNumber, weekNumber, date: 0, setNumber: 2, weight: 100, reps },
+        { cycleNumber, weekNumber, date: 0, setNumber: 3, weight: 100, reps },
+      ];
+      const points = buildStrengthPoints(
+        [...set(2, 1, 5), ...set(1, 3, 5), ...set(1, 1, 5)],
+        anchor,
+      );
+      expect(points.map((point) => [point.cycleNumber, point.weekNumber])).toEqual([
+        [1, 1],
+        [1, 3],
+        [2, 1],
+      ]);
+    });
+  });
+
+  describe('buildTrainingMaxByCycle', () => {
+    it('reads the stored TM-type row for a completed cycle, and the live value for the rest', () => {
+      const tm = buildTrainingMaxByCycle(
+        [1, 2, 3],
+        [
+          { cycleNumber: 1, atCycleEnd: true, currentTarget: 100 },
+          { cycleNumber: 2, atCycleEnd: true, currentTarget: 105 },
+        ],
+        110,
+      );
+      expect(tm).toEqual([
+        { cycleNumber: 1, trainingMax: 100 },
+        { cycleNumber: 2, trainingMax: 105 },
+        { cycleNumber: 3, trainingMax: 110 },
+      ]);
+    });
+
+    it('ignores a mid-cycle (not-at-cycle-end) proposal row: it is a week target, not a TM', () => {
+      const tm = buildTrainingMaxByCycle(
+        [1],
+        [{ cycleNumber: 1, atCycleEnd: false, currentTarget: 999 }],
+        100,
+      );
+      expect(tm).toEqual([{ cycleNumber: 1, trainingMax: 100 }]);
+    });
+  });
+
+  describe('buildStrengthChart', () => {
+    it('shares one axis across lifts trained on different days of the same week', () => {
+      const chart = buildStrengthChart([
+        {
+          sessionExerciseId: 1,
+          exerciseName: 'Squat',
+          unit: 'kg',
+          hasTrainingMax: true,
+          points: [
+            { cycleNumber: 1, weekNumber: 1, date: 100, estimated1RM: 120 },
+            { cycleNumber: 1, weekNumber: 2, date: 200, estimated1RM: 125 },
+          ],
+          trainingMax: [{ cycleNumber: 1, trainingMax: 100 }],
+        },
+        {
+          sessionExerciseId: 2,
+          exerciseName: 'Bench',
+          unit: 'kg',
+          hasTrainingMax: true,
+          points: [{ cycleNumber: 1, weekNumber: 1, date: 100, estimated1RM: 90 }],
+          trainingMax: [{ cycleNumber: 1, trainingMax: 70 }],
+        },
+      ]);
+
+      expect(chart.axis.map((point) => point.date)).toEqual([100, 200]);
+      const squat = chart.lifts.find((lift) => lift.exerciseName === 'Squat');
+      const bench = chart.lifts.find((lift) => lift.exerciseName === 'Bench');
+      expect(squat?.estimated1RM).toEqual([120, 125]);
+      expect(squat?.trainingMax).toEqual([100, 100]);
+      // Bench has no week-2 AMRAP point: its last known value carries forward.
+      expect(bench?.estimated1RM).toEqual([90, 90]);
+      expect(bench?.trainingMax).toEqual([70, 70]);
+    });
+
+    it('omits a lift with no logged AMRAP point at all — no flat line for an untrained lift', () => {
+      const chart = buildStrengthChart([
+        {
+          sessionExerciseId: 1,
+          exerciseName: 'Squat',
+          unit: 'kg',
+          hasTrainingMax: true,
+          points: [{ cycleNumber: 1, weekNumber: 1, date: 100, estimated1RM: 120 }],
+          trainingMax: [{ cycleNumber: 1, trainingMax: 100 }],
+        },
+        {
+          sessionExerciseId: 2,
+          exerciseName: 'Overhead Press',
+          unit: 'kg',
+          hasTrainingMax: true,
+          points: [],
+          trainingMax: [],
+        },
+      ]);
+      expect(chart.lifts.map((lift) => lift.exerciseName)).toEqual(['Squat']);
+    });
+
+    it('leaves an absolute-load lift with no training max series', () => {
+      const chart = buildStrengthChart([
+        {
+          sessionExerciseId: 1,
+          exerciseName: 'Front Squat',
+          unit: 'kg',
+          hasTrainingMax: false,
+          points: [{ cycleNumber: 1, weekNumber: 1, date: 100, estimated1RM: 80 }],
+          trainingMax: [],
+        },
+      ]);
+      expect(chart.lifts[0]?.trainingMax).toEqual([]);
+      expect(chart.lifts[0]?.estimated1RM).toEqual([80]);
+    });
+
+    it('returns an empty axis and no lifts when nothing was ever logged', () => {
+      expect(buildStrengthChart([])).toEqual({ axis: [], lifts: [] });
+    });
+  });
+
+  describe('windowStrengthChart', () => {
+    it('cuts the axis and every lift\'s values to the same kept indices', () => {
+      const chart = buildStrengthChart([
+        {
+          sessionExerciseId: 1,
+          exerciseName: 'Squat',
+          unit: 'kg',
+          hasTrainingMax: true,
+          points: [
+            { cycleNumber: 1, weekNumber: 1, date: epoch('2026-01-01'), estimated1RM: 120 },
+            { cycleNumber: 2, weekNumber: 1, date: epoch('2026-08-01'), estimated1RM: 140 },
+          ],
+          trainingMax: [
+            { cycleNumber: 1, trainingMax: 100 },
+            { cycleNumber: 2, trainingMax: 110 },
+          ],
+        },
+      ]);
+      const windowed = windowStrengthChart(chart, 'month', epoch('2026-08-10'));
+      expect(windowed.axis).toEqual([chart.axis[1]]);
+      expect(windowed.lifts[0]?.estimated1RM).toEqual([140]);
+      expect(windowed.lifts[0]?.trainingMax).toEqual([110]);
+    });
+
+    it('keeps everything for the "all" range', () => {
+      const chart = buildStrengthChart([
+        {
+          sessionExerciseId: 1,
+          exerciseName: 'Squat',
+          unit: 'kg',
+          hasTrainingMax: false,
+          points: [{ cycleNumber: 1, weekNumber: 1, date: 5, estimated1RM: 120 }],
+          trainingMax: [],
+        },
+      ]);
+      expect(windowStrengthChart(chart, 'all', 999999).axis).toEqual(chart.axis);
+    });
   });
 
   it('counts a moved session as done and a discarded one as not done', () => {
@@ -343,37 +531,77 @@ describe('demo data through the db edges', () => {
     expect(cycle6?.weeks[3]).toMatchObject({ resolved: false, isCurrent: true });
   });
 
-  it('builds one series per main-role exercise with top weight per session', async () => {
+  it('builds one strength series per main lift: e1RM from the AMRAP week, TM as a step', async () => {
     const { executor } = await setupDemo();
-    const series = await loadMainLiftSeries(executor, 1);
+    const lifts = await loadStrengthSeries(executor, 1);
 
-    expect(series.map((entry) => entry.exerciseName)).toEqual([
+    expect(lifts.map((entry) => entry.exerciseName)).toEqual([
       'Barbell Full Squat',
       'Barbell Bench Press - Medium Grip',
       'Barbell Deadlift',
       'Barbell Shoulder Press',
     ]);
-    // Every main lift was logged in one unit, so each is exactly one series — P3's rule that a
-    // series never spans a unit change.
-    expect(series.every((entry) => entry.series.length === 1)).toBe(true);
-    expect(series.every((entry) => entry.series[0].unit === 'kg')).toBe(true);
+    expect(lifts.every((entry) => entry.hasTrainingMax)).toBe(true);
+    expect(lifts.every((entry) => entry.unit === 'kg')).toBe(true);
 
-    // One point per logged session: 24 weeks per lift, minus the discarded
-    // bench day and the unresolved press day.
-    expect(series.map((entry) => entry.series[0].points.length)).toEqual([24, 23, 24, 23]);
-    expect(series.every((entry) => hasChartableSeries(entry.series[0].points))).toBe(true);
+    // 3 AMRAP weeks × 6 cycles per lift, minus cycle 2 week 2's discarded bench day (its only
+    // effect on the AMRAP weeks — the moved deadlift day still logged, and the demo's one
+    // unresolved session is week 4 of cycle 6, a deload week this series never counts).
+    const squat = lifts[0];
+    const bench = lifts[1];
+    const deadlift = lifts[2];
+    const press = lifts[3];
+    expect(squat?.points).toHaveLength(18);
+    expect(bench?.points).toHaveLength(17);
+    expect(deadlift?.points).toHaveLength(18);
+    expect(press?.points).toHaveLength(18);
 
-    const squat = series[0].series[0];
+    // Cycle 1 week 1: squat's training max was 100 kg (WAVE_TMS), and the script's cycle-1
+    // week-1 AMRAP is 5 reps at the week's own top percentage — same arithmetic the demo data
+    // was generated with (utils/demoData.ts's `waveSessionResults`).
+    const week1Weight = calcSetWeight(100, waveForWeek(1).sets[2].percent, 2.5, 'nearest');
     expect(squat?.points[0]).toMatchObject({
-      date: epoch('2026-03-02'),
-      weight: 85,
-      reps: 5,
+      cycleNumber: 1,
+      weekNumber: 1,
+      estimated1RM: estimate1RM(week1Weight, 5),
     });
-    const last = squat?.points[squat.points.length - 1];
-    expect(last?.date).toBe(epoch('2026-08-10'));
 
-    // The lb accessory stays out of the main-lift view; its unit lives in the logs.
-    expect(series.some((entry) => entry.exerciseName.includes('Lat'))).toBe(false);
+    // The training max in effect during each cycle, reconstructed purely from the stored
+    // Progression_Proposal rows plus the live plan value for the still-unreviewed cycle 6 — the
+    // exact sequence `utils/demoData.ts`'s WAVE_TMS encodes.
+    expect(squat?.trainingMax.map((tm) => tm.trainingMax)).toEqual([100, 105, 110, 110, 115, 120]);
+    expect(bench?.trainingMax.map((tm) => tm.trainingMax)).toEqual([70, 72.5, 75, 75, 77.5, 82.5]);
+    expect(deadlift?.trainingMax.map((tm) => tm.trainingMax)).toEqual([
+      120, 125, 130, 130, 135, 135,
+    ]);
+    // Deadlift's cycle-5 proposal was declined: the TM stays flat into cycle 6, and that is only
+    // visible because the live plan value (not a stored row) is what cycle 6 falls back to.
+    expect(deadlift?.trainingMax[4]?.trainingMax).toBe(deadlift?.trainingMax[5]?.trainingMax);
+
+    // The linear routine's accessory-only lifts have nothing to step.
+    const linear = await loadStrengthSeries(executor, 2);
+    expect(linear.every((entry) => !entry.hasTrainingMax)).toBe(true);
+    expect(linear.every((entry) => entry.trainingMax.length === 0)).toBe(true);
+  });
+
+  it('shares one chart axis for every main lift of the demo routine', async () => {
+    const { executor } = await setupDemo();
+    const chart = buildStrengthChart(await loadStrengthSeries(executor, 1));
+    // Every lift charted (none has zero AMRAP points), on one shared axis no longer than the
+    // most-logged lift's own point count.
+    expect(chart.lifts.map((lift) => lift.exerciseName)).toEqual([
+      'Barbell Full Squat',
+      'Barbell Bench Press - Medium Grip',
+      'Barbell Deadlift',
+      'Barbell Shoulder Press',
+    ]);
+    expect(chart.axis).toHaveLength(18);
+    expect(chart.lifts.every((lift) => lift.estimated1RM.length === chart.axis.length)).toBe(true);
+    expect(
+      chart.lifts.every(
+        (lift) => !lift.hasTrainingMax || lift.trainingMax.length === chart.axis.length,
+      ),
+    ).toBe(true);
   });
 
 

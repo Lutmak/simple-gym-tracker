@@ -298,6 +298,8 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     name TEXT NOT NULL UNIQUE,
     description TEXT NOT NULL,
     philosophy TEXT NOT NULL,
+    description_es TEXT NOT NULL,
+    philosophy_es TEXT NOT NULL,
     level TEXT NOT NULL CHECK (level IN ('beginner', 'intermediate', 'advanced')),
     recommended_days INTEGER NOT NULL CHECK (recommended_days BETWEEN 1 AND 7),
     rest_main_seconds INTEGER NOT NULL CHECK (rest_main_seconds >= 0),
@@ -493,6 +495,25 @@ export async function ensureRoutinesWaveSetupColumns(
   }
 }
 
+/** The U6 Spanish preset-copy columns, for a Preset_Routines table created before them. */
+export async function ensurePresetRoutinesSpanishColumns(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(Preset_Routines);',
+  );
+  if (!columns.some((column) => column.name === 'description_es')) {
+    await executor.exec(
+      `ALTER TABLE Preset_Routines ADD COLUMN description_es TEXT NOT NULL DEFAULT '';`,
+    );
+  }
+  if (!columns.some((column) => column.name === 'philosophy_es')) {
+    await executor.exec(
+      `ALTER TABLE Preset_Routines ADD COLUMN philosophy_es TEXT NOT NULL DEFAULT '';`,
+    );
+  }
+}
+
 /** Idempotent catalog seed: stable exercise keys, INSERT OR IGNORE. */
 export async function seedCatalog(executor: SchemaExecutor): Promise<void> {
   await executor.exec(CATALOG_EXERCISE_SEED_SQL);
@@ -503,19 +524,30 @@ export async function seedCatalog(executor: SchemaExecutor): Promise<void> {
  * Idempotent preset-routine seed (SPECS.md F3). A routine referencing an exercise that is
  * not in the catalog is a build-time failure, not a runtime surprise: the catalog name
  * lookup throws here, and utils/presetRoutines.test.ts asserts the same invariant.
+ *
+ * The Spanish columns are refreshed on every run (`ON CONFLICT DO UPDATE`), unlike the rest of
+ * the row: `data/presetRoutines.ts` is committed content, and a database seeded before U6 added
+ * `descriptionEs`/`philosophyEs` would otherwise carry the migration's empty-string default
+ * forever, since `INSERT OR IGNORE` never touches a row that already exists.
  */
 export async function seedPresetRoutines(executor: SchemaExecutor): Promise<void> {
   for (const routine of PRESET_ROUTINES) {
     await executor.run(
-      `INSERT OR IGNORE INTO Preset_Routines
-       (routine_key, name, description, philosophy, level, recommended_days,
-        rest_main_seconds, rest_accessory_seconds, progression_rule, rounding_increment_kg)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+      `INSERT INTO Preset_Routines
+       (routine_key, name, description, philosophy, description_es, philosophy_es, level,
+        recommended_days, rest_main_seconds, rest_accessory_seconds, progression_rule,
+        rounding_increment_kg)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (routine_key) DO UPDATE SET
+         description_es = excluded.description_es,
+         philosophy_es = excluded.philosophy_es;`,
       [
         routine.key,
         routine.name,
         routine.description,
         routine.philosophy,
+        routine.descriptionEs,
+        routine.philosophyEs,
         routine.level,
         routine.recommendedDays,
         routine.restMainSeconds,
@@ -596,6 +628,7 @@ export async function runSchema(executor: SchemaExecutor): Promise<void> {
   await ensureRoutinesWaveSetupColumns(executor);
   await ensureLoggedExercisesRoleColumn(executor);
   await ensureWeekSessionsNominalDateColumn(executor);
+  await ensurePresetRoutinesSpanishColumns(executor);
   await seedCatalog(executor);
   await seedPresetRoutines(executor);
 }

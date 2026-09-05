@@ -29,4 +29,18 @@ i18n
     },
   });
 
+/**
+ * Picks the active language's copy of a bilingual field that is not routed through
+ * `locales/` — preset descriptions and philosophies, which are keyed by preset rather than by
+ * UI string (U6). Falls back to English when there is no Spanish yet, or when the field is one
+ * a copied (non-preset) routine never carries.
+ */
+export function pickLocalizedText(
+  language: string,
+  en: string | null,
+  es: string | null,
+): string | null {
+  return language === 'es' && es !== null && es.length > 0 ? es : en;
+}
+
 export default i18n;

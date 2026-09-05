@@ -9,6 +9,7 @@ import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
+import { pickLocalizedText } from '../utils/i18n';
 import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { ScreenTitle } from '../components/ScreenTitle';
@@ -97,7 +98,7 @@ const exercisesInRoutineOrder = (
  */
 export default function RoutineDetailsScreen({ navigation, route }: Props) {
   const { tokens } = useTheme();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { weightFormat, firstWeekday } = useSettings();
   const db = useSQLiteContext();
   const { routineId, presetKey } = route.params;
@@ -302,13 +303,17 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
 
         {routine.description !== null && (
           <Section title={t('description')}>
-            <Text style={[styles.body, { color: tokens.textSecondary }]}>{routine.description}</Text>
+            <Text style={[styles.body, { color: tokens.textSecondary }]}>
+              {pickLocalizedText(i18n.language, routine.description, routine.descriptionEs)}
+            </Text>
           </Section>
         )}
 
         {routine.philosophy !== null && (
           <Section title={t('philosophy')}>
-            <Text style={[styles.body, { color: tokens.textSecondary }]}>{routine.philosophy}</Text>
+            <Text style={[styles.body, { color: tokens.textSecondary }]}>
+              {pickLocalizedText(i18n.language, routine.philosophy, routine.philosophyEs)}
+            </Text>
           </Section>
         )}
 

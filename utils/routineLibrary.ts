@@ -89,6 +89,8 @@ export interface PresetEntry {
   routineKey: string;
   name: string;
   description: string;
+  /** Real Spanish; `NewRoutineScreen` picks between the two by the active language (U6). */
+  descriptionEs: string;
   level: RoutineLevel;
   progressionRule: RoutineProgressionRule;
   weekdays: readonly number[];
@@ -105,6 +107,7 @@ export interface PresetRow {
   routineKey: string;
   name: string;
   description: string;
+  descriptionEs: string;
   level: string;
   progressionRule: RoutineProgressionRule;
   weekdays: readonly number[];
@@ -137,6 +140,7 @@ export function buildPresetLibrary(
       routineKey: preset.routineKey,
       name: preset.name,
       description: preset.description,
+      descriptionEs: preset.descriptionEs,
       level: preset.level,
       progressionRule: preset.progressionRule,
       weekdays: preset.weekdays,
@@ -286,7 +290,7 @@ export async function loadPresetLibrary(
   library: readonly Pick<LibraryRoutine, 'routineId' | 'routineKey'>[],
 ): Promise<PresetLevelGroup[]> {
   const presetRows = await db.getAll(
-    `SELECT routine_key, name, description, level, progression_rule
+    `SELECT routine_key, name, description, description_es, level, progression_rule
      FROM Preset_Routines;`,
     [],
   );
@@ -311,6 +315,7 @@ export async function loadPresetLibrary(
       routineKey: str(row.routine_key),
       name: str(row.name),
       description: str(row.description),
+      descriptionEs: str(row.description_es),
       level: str(row.level),
       progressionRule: str(row.progression_rule) as RoutineProgressionRule,
       weekdays: weekdaysByKey.get(str(row.routine_key)) ?? [],

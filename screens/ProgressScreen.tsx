@@ -893,7 +893,6 @@ const styles = StyleSheet.create({
     marginBottom: spacing.section,
   },
   rangeRow: {
-    alignSelf: 'flex-end',
     marginBottom: spacing.cardGap,
   },
   block: {

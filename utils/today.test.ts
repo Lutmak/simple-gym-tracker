@@ -11,6 +11,7 @@ import {
   buildMoveDayPlan,
   computeSessionQueue,
   dayStampOf,
+  latestResolvedCycleWeek,
   loadSessionQueue,
   nextOccurrenceStamp,
   nominalSessionStamp,
@@ -1025,4 +1026,157 @@ describe('F4 — the queue reports a pending cycle review (§3.4)', () => {
       );
     },
   );
+});
+
+describe('latestResolvedCycleWeek — the pure calculation behind advance and undo', () => {
+  it('is 0 when nothing is resolved', () => {
+    expect(
+      latestResolvedCycleWeek(
+        [
+          { weekNumber: 1, status: 'pending' },
+          { weekNumber: 2, status: 'pending' },
+        ],
+        4,
+      ),
+    ).toBe(0);
+  });
+
+  it('is the latest week with zero pending rows, ignoring a later resolved week with a pending row', () => {
+    expect(
+      latestResolvedCycleWeek(
+        [
+          { weekNumber: 1, status: 'completed' },
+          { weekNumber: 2, status: 'completed' },
+          { weekNumber: 3, status: 'discarded' },
+          { weekNumber: 4, status: 'pending' },
+        ],
+        4,
+      ),
+    ).toBe(3);
+  });
+
+  it('never exceeds the cycle length even if every week resolved', () => {
+    expect(
+      latestResolvedCycleWeek(
+        [
+          { weekNumber: 1, status: 'completed' },
+          { weekNumber: 2, status: 'completed' },
+        ],
+        1,
+      ),
+    ).toBe(1);
+  });
+
+  it('treats a week as unresolved if ANY of its sessions is still pending', () => {
+    expect(
+      latestResolvedCycleWeek(
+        [
+          { weekNumber: 1, status: 'completed' },
+          { weekNumber: 1, status: 'pending' },
+        ],
+        4,
+      ),
+    ).toBe(0);
+  });
+});
+
+describe('U5 — undoDiscardSession reverses the current_week advance it undid (Phase F owed item)', () => {
+  const singleLiftDraft = (overrides: Partial<WaveSetupDraft> = {}): WaveSetupDraft => ({
+    name: 'Undo Test',
+    unit: 'kg',
+    roundingIncrement: 2.5,
+    roundingDirection: 'nearest',
+    tmPercentage: 0.9,
+    includeDeload: true,
+    warmupsEnabled: true,
+    upperTmIncrement: 2.5,
+    lowerTmIncrement: 5,
+    assistanceBias: 'hybrid',
+    days: [
+      {
+        key: 'd1',
+        weekday: 1,
+        liftName: 'Squat',
+        catalogExerciseId: null,
+        category: 'lower',
+        trainingMax: 100,
+        assistanceStartWeight: null,
+        assistance: [],
+      },
+    ],
+    ...overrides,
+  });
+
+  const weekSessionIdFor = async (
+    executor: TestExecutor,
+    cycleId: number,
+    weekNumber: number,
+  ): Promise<number> => {
+    const row = await executor.get(
+      `SELECT ws.week_session_id FROM WeekSessions ws
+       JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+       WHERE cw.cycle_id = ? AND cw.week_number = ? AND ws.status = 'pending'
+       ORDER BY ws.week_session_id LIMIT 1;`,
+      [cycleId, weekNumber],
+    );
+    if (row === undefined) {
+      throw new Error(`No pending week ${weekNumber} session`);
+    }
+    return Number((row as { week_session_id: number }).week_session_id);
+  };
+
+  it('un-discarding week 3 drops current_week from 3 back to 2, matching what actually resolved', async () => {
+    const { executor } = connect();
+    await runSchema(executor);
+    const routineId = await writeWaveRoutine(executor, singleLiftDraft());
+    const cycleRow = await executor.get(
+      `SELECT cycle_id FROM Cycles WHERE routine_id = ? AND status = 'active';`,
+      [routineId],
+    );
+    if (cycleRow === undefined) {
+      throw new Error('Routine did not seed a cycle');
+    }
+    const cycleId = Number((cycleRow as { cycle_id: number }).cycle_id);
+    const day = Math.floor(Date.UTC(2026, 7, 14, 12, 0, 0) / 1000);
+
+    // Weeks 1 and 2 logged for real, advancing current_week to 2 (F4).
+    for (let weekNumber = 1; weekNumber <= 2; weekNumber += 1) {
+      const weekSessionId = await weekSessionIdFor(executor, cycleId, weekNumber);
+      const stamp = day + (weekNumber - 1) * 7 * 86400;
+      const session = await loadRunnerSession(executor, weekSessionId, stamp);
+      await saveSessionLog(executor, weekSessionId, session, [
+        [{ reps: 5, weight: 100 }],
+      ]);
+    }
+    const cycleAfterWeek2 = await executor.get(
+      `SELECT current_week FROM Cycles WHERE cycle_id = ?;`,
+      [cycleId],
+    );
+    expect(cycleAfterWeek2).toMatchObject({ current_week: 2 });
+
+    // Discarding week 3's only session resolves week 3 with no pending rows,
+    // so current_week advances to 3 even though nothing was logged for it.
+    const week3SessionId = await weekSessionIdFor(executor, cycleId, 3);
+    await resolveDiscardSession(executor, week3SessionId);
+    const cycleAfterDiscard = await executor.get(
+      `SELECT current_week FROM Cycles WHERE cycle_id = ?;`,
+      [cycleId],
+    );
+    expect(cycleAfterDiscard).toMatchObject({ current_week: 3 });
+
+    // Undoing the discard makes week 3 pending again — current_week must
+    // fall back to 2, the actual latest fully-resolved week.
+    await undoDiscardSession(executor, week3SessionId);
+    const cycleAfterUndo = await executor.get(
+      `SELECT current_week FROM Cycles WHERE cycle_id = ?;`,
+      [cycleId],
+    );
+    expect(cycleAfterUndo).toMatchObject({ current_week: 2 });
+
+    const week3Row = await executor.get(
+      `SELECT status, resolved_on_date FROM WeekSessions WHERE week_session_id = ?;`,
+      [week3SessionId],
+    );
+    expect(week3Row).toMatchObject({ status: 'pending', resolved_on_date: null });
+  });
 });

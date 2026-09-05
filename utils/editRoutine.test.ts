@@ -11,10 +11,12 @@ import {
   type EditSession,
 } from './editRoutine';
 import {
+  createBlankRoutine,
   loadRoutineSourceById,
   type RoutineDatabase,
   type RoutineSourceBundle,
 } from './routineActions';
+import { blankRoutineDraft } from './routineLibrary';
 import { nominalSessionStamp } from './today';
 
 type TestExecutor = SchemaExecutor & {
@@ -961,5 +963,69 @@ describe('R3 — the per-exercise warm-up answer survives an edit (§3.6)', () =
     expect(stored(second.name)).toBe(true);
     expect(stored(others[0].name)).toBeNull();
     expect(count(db, 'Weight_Log')).toBe(historyBefore);
+  });
+});
+
+describe('F8 — "Desde cero" does not persist a draft until saved', () => {
+  it('discarding an unsaved draft leaves no Routines row at all', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    // The screen builds this draft entirely in memory (blankRoutineDraft) and
+    // never calls createBlankRoutine unless/until the user actually saves.
+    // Simulating "the user backed out" is simply: never call it.
+    blankRoutineDraft('My Routine', 'kg');
+
+    expect(count(db, 'Routines')).toBe(0);
+    expect(count(db, 'Sessions')).toBe(0);
+    expect(count(db, 'SessionExercises')).toBe(0);
+  });
+
+  it('the first explicit save creates exactly one Routines row and its plan', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    const draft = blankRoutineDraft('My Routine', 'kg');
+    const routineId = await createBlankRoutine(executor, draft);
+    expect(count(db, 'Routines')).toBe(1);
+
+    await saveRoutineEdit(executor, routineId, {
+      name: draft.name,
+      unit: draft.unit,
+      roundingIncrement: draft.roundingIncrement,
+      restMainSeconds: draft.restMainSeconds,
+      restAccessorySeconds: draft.restAccessorySeconds,
+      sessions: [
+        {
+          sessionId: null,
+          weekday: 1,
+          name: 'Upper',
+          exercises: [
+            {
+              exerciseId: null,
+              catalogExerciseId: null,
+              name: 'My custom lift',
+              role: 'main',
+              targetSets: 3,
+              targetReps: 10,
+              loadSource: 'absolute',
+              trainingMaxPct: null,
+              trainingMaxWeight: null,
+              absoluteWeight: 60,
+              unitOverride: null,
+              isAmrap: false,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(count(db, 'Routines')).toBe(1);
+    expect(count(db, 'Sessions')).toBe(1);
+    expect(count(db, 'SessionExercises')).toBe(1);
+    const reloaded = await loadRoutineSourceById(executor, routineId);
+    expect(reloaded.routine.name).toBe('My Routine');
+    expect(reloaded.sessions[0]?.name).toBe('Upper');
+    expect(reloaded.exercises[0]?.name).toBe('My custom lift');
   });
 });

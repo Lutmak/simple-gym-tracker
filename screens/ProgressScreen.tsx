@@ -603,13 +603,12 @@ export default function ProgressScreen({ navigation, route }: Props) {
         {reviewPending ? (
           <>
             <Text style={[styles.sectionTitle, { color: tokens.textPrimary }]}>
-              {t('progressReviewHeadline', {
-                cycle: cycle.cycleNumber,
-                next: cycle.cycleNumber + 1,
-              })}
+              {t('progressReviewFinishedTitle', { cycle: cycle.cycleNumber })}
             </Text>
             <Row
               label={t('sessionSummaryReview')}
+              detail={t('progressReviewProposalDetail', { next: cycle.cycleNumber + 1 })}
+              detailBelow
               right={
                 <Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />
               }

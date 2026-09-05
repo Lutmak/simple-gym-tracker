@@ -798,3 +798,17 @@ export async function loadRoutineDocumentText(
   const document = serialiseRoutine(bundle, catalog);
   return { name: document.routine.name, text: JSON.stringify(document, null, 2) };
 }
+
+/**
+ * The document's own filename convention (ADR-0048): ASCII-safe, no path separators, never
+ * empty. Every export door (the Rutinas list row, a routine's own details screen) writes to
+ * this same name so the same routine always produces the same `.sgtroutine.json` filename.
+ */
+export function routineDocumentFileName(routineName: string): string {
+  const slug = routineName
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${slug === '' ? 'routine' : slug}.sgtroutine.json`;
+}

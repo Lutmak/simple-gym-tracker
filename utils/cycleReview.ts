@@ -72,25 +72,49 @@ export interface PerformedSetGroup {
   cycleNumber: number;
   weekNumber: number;
   exerciseName: string;
+  /**
+   * Copied at log time onto `Logged_Exercises` (F2, ADR-0006): disambiguates
+   * two SessionExercises rows that share a name — a preset's main lift and a
+   * back-off set on the same catalog exercise (the shipped '531' preset's FSL
+   * rows). Null for a free session (no plan role to copy) or a row logged
+   * before this column existed; a null-role group matches by name alone, same
+   * as before this fix, since there is nothing left to disambiguate with.
+   */
+  role: 'main' | 'accessory' | null;
   sets: PerformedSet[];
+}
+
+/**
+ * Whether a set group belongs to a given (name, role) exercise. Role is the
+ * disambiguator (F2): an exercise's own role must agree with the group's,
+ * unless either side has none to compare (a free-session or pre-fix group,
+ * or a caller that does not know the role) — then name alone decides, same
+ * as before role existed.
+ */
+export function groupMatchesExercise(
+  group: Pick<PerformedSetGroup, 'exerciseName' | 'role'>,
+  name: string,
+  role: 'main' | 'accessory' | null,
+): boolean {
+  return group.exerciseName === name && (group.role === null || role === null || group.role === role);
 }
 
 /**
  * Extra sets (§3.4) never reach a proposal or the AMRAP review: each group is
  * cut to its exercise's planned set count, keeping only the first `targetSets`
  * logged sets. Applied once at load time, so `buildCycleHistory` and the
- * AMRAP rows both read planned work sets only.
+ * AMRAP rows both read planned work sets only. Matched by (name, role) so a
+ * main lift and a same-named accessory (F2) each get their own count.
  */
 export function plannedWorkSets(
   groups: readonly PerformedSetGroup[],
   exercises: readonly ReviewExercise[],
 ): PerformedSetGroup[] {
-  const targetByExercise = new Map(exercises.map((exercise) => [exercise.name, exercise.targetSets]));
   return groups.map((group) => {
-    const targetSets = targetByExercise.get(group.exerciseName);
-    return targetSets === undefined
+    const match = exercises.find((exercise) => groupMatchesExercise(group, exercise.name, exercise.role));
+    return match === undefined
       ? group
-      : { ...group, sets: group.sets.slice(0, targetSets) };
+      : { ...group, sets: group.sets.slice(0, match.targetSets) };
   });
 }
 
@@ -210,7 +234,7 @@ export function buildCycleHistory(
               (group) =>
                 group.cycleNumber === cycle.cycleNumber &&
                 group.weekNumber === weekNumber &&
-                group.exerciseName === exercise.name,
+                groupMatchesExercise(group, exercise.name, exercise.role),
             )
             .flatMap((group) => group.sets);
           entry.exercises[exercise.sessionExerciseId] = {
@@ -233,7 +257,7 @@ export function buildCycleHistory(
         .filter(
           (group) =>
             group.cycleNumber === cycle.cycleNumber &&
-            group.exerciseName === exercise.name,
+            groupMatchesExercise(group, exercise.name, exercise.role),
         )
         .flatMap((group) => group.sets);
       entry.exercises[exercise.sessionExerciseId] = {
@@ -320,13 +344,14 @@ const amrapRowsFor = (
   setGroups: readonly PerformedSetGroup[],
   cycleNumber: number,
   exerciseName: string,
+  role: 'main' | 'accessory' | null,
   maxWeek: number,
 ): AmrapRow[] => {
   const rows: AmrapRow[] = [];
   for (const group of setGroups) {
     if (
       group.cycleNumber !== cycleNumber ||
-      group.exerciseName !== exerciseName ||
+      !groupMatchesExercise(group, exerciseName, role) ||
       group.weekNumber > maxWeek
     ) {
       continue;
@@ -454,7 +479,7 @@ async function loadReviewSource(
   }
 
   const setRows = await db.getAll(
-    `SELECT c.cycle_number, cw.week_number, le.exercise_name, wl.set_number,
+    `SELECT c.cycle_number, cw.week_number, le.exercise_name, le.role, wl.set_number,
             wl.weight_logged, wl.reps_logged, wl.unit
      FROM Cycles c
      JOIN CycleWeeks cw ON cw.cycle_id = c.cycle_id
@@ -463,22 +488,28 @@ async function loadReviewSource(
      JOIN Logged_Exercises le ON le.workout_log_id = wol.workout_log_id
      JOIN Weight_Log wl ON wl.logged_exercise_id = le.logged_exercise_id
      WHERE c.routine_id = ?
-     ORDER BY c.cycle_number, cw.week_number, le.exercise_name, wl.set_number;`,
+     ORDER BY c.cycle_number, cw.week_number, le.exercise_name, le.role, wl.set_number;`,
     [routineId],
   );
   const setGroups: PerformedSetGroup[] = [];
   for (const row of setRows) {
+    // F2: grouped by (cycle, week, name, role) — role is what keeps a
+    // main lift and a same-catalog back-off row (the shipped '531' preset's
+    // FSL sets) from merging into one blob and corrupting the AMRAP read.
+    const role = nullableStr(row.role) as PerformedSetGroup['role'];
     let group = setGroups[setGroups.length - 1];
     if (
       group === undefined ||
       group.cycleNumber !== num(row.cycle_number) ||
       group.weekNumber !== num(row.week_number) ||
-      group.exerciseName !== str(row.exercise_name)
+      group.exerciseName !== str(row.exercise_name) ||
+      group.role !== role
     ) {
       group = {
         cycleNumber: num(row.cycle_number),
         weekNumber: num(row.week_number),
         exerciseName: str(row.exercise_name),
+        role,
         sets: [],
       };
       setGroups.push(group);
@@ -609,6 +640,7 @@ export function buildReviewData(source: ReviewSource): ReviewData {
             source.setGroups,
             cycle.cycleNumber,
             row.exerciseName,
+            exercise.role,
             cycle.weeks - 1,
           )
         : [];
@@ -644,6 +676,7 @@ export function buildReviewData(source: ReviewSource): ReviewData {
           source.setGroups,
           cycle.cycleNumber,
           proposal.exerciseName,
+          exercise.role,
           cycle.weeks - 1,
         ),
       });

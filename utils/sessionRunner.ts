@@ -98,7 +98,13 @@ export type RunnerDraft = (LoggedSet | null)[][];
 
 export interface RunnerLogRows {
   workoutLog: { workoutName: string; dayName: string; workoutDate: number };
-  loggedExercises: { exerciseName: string; sets: number; reps: number }[];
+  loggedExercises: {
+    exerciseName: string;
+    sets: number;
+    reps: number;
+    /** Copied at log time (F2); null for a free-log exercise with no plan role. */
+    role: 'main' | 'accessory' | null;
+  }[];
   weightLog: {
     /** Position into `loggedExercises` — links sets to their log row by construction. */
     loggedExerciseIndex: number;
@@ -363,6 +369,7 @@ export function buildLogRows(session: RunnerSession, draft: RunnerDraft): Runner
       exerciseName: exercise.name,
       sets: isPlanned ? exercise.targetSets : sets.length,
       reps: isPlanned ? exercise.targetReps : lastSet.reps,
+      role: isPlanned ? exercise.role : null,
     });
     sets.forEach((set, index) => {
       weightLog.push({
@@ -490,9 +497,9 @@ export async function saveSessionLog(
     for (let index = 0; index < rows.loggedExercises.length; index += 1) {
       const logged = rows.loggedExercises[index];
       await db.run(
-        `INSERT INTO Logged_Exercises (workout_log_id, exercise_name, sets, reps)
-         VALUES (?, ?, ?, ?);`,
-        [workoutLogId, logged.exerciseName, logged.sets, logged.reps],
+        `INSERT INTO Logged_Exercises (workout_log_id, exercise_name, sets, reps, role)
+         VALUES (?, ?, ?, ?, ?);`,
+        [workoutLogId, logged.exerciseName, logged.sets, logged.reps, logged.role],
       );
       const loggedRow = await db.get('SELECT last_insert_rowid() AS id;', []);
       if (!loggedRow) {

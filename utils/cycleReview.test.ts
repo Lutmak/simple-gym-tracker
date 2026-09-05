@@ -17,7 +17,8 @@ import {
   type PerformedSetGroup,
   type ReviewExercise,
 } from './cycleReview';
-import type { RoutineDatabase } from './routineActions';
+import { activatePresetRoutine, type RoutineDatabase } from './routineActions';
+import { buildPlannedDraft, loadRunnerSession, saveSessionLog, type RunnerSession } from './sessionRunner';
 
 type TestExecutor = SchemaExecutor & {
   get: RoutineDatabase['get'];
@@ -232,6 +233,7 @@ describe('plannedWorkSets — extra sets never reach a proposal or the AMRAP vie
     cycleNumber: 1,
     weekNumber: 1,
     exerciseName: 'Barbell Full Squat',
+    role: null,
     sets: [
       { weight: 100, reps: 5, unit: 'kg' },
       { weight: 100, reps: 5, unit: 'kg' },
@@ -609,4 +611,143 @@ describe('G1 — the Today entry point', () => {
     const resumed = await loadReviewEntry(executor);
     expect(resumed?.cycleId).toBe(6);
   });
+});
+
+describe('F2 — the shipped 531 preset does not corrupt its own review', () => {
+  const TODAY = Math.floor(Date.UTC(2026, 7, 14, 12, 0, 0) / 1000);
+
+  /**
+   * One week of the real '531' preset, logged through the real
+   * `saveSessionLog` write path: every main lift's three sets (weight 100,
+   * last set's reps = `mainAmrapReps`) and its FSL back-off's five sets
+   * (weight 70, reps always 3 — deliberately different from the main's
+   * AMRAP reps, so a grouping bug that merges the two blocks is caught).
+   * Bodyweight/absolute accessories are left as the runner's own default
+   * (§7.3) — untouched is a real, supported way to finish a session.
+   */
+  const logWeek531 = async (
+    executor: TestExecutor,
+    routineId: number,
+    cycleId: number,
+    weekNumber: number,
+    mainAmrapReps: number,
+  ): Promise<void> => {
+    const weekSessions = await executor.getAll<{ week_session_id: number }>(
+      `SELECT ws.week_session_id FROM WeekSessions ws
+       JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+       WHERE cw.cycle_id = ? AND cw.week_number = ? AND ws.status = 'pending'
+       ORDER BY ws.week_session_id;`,
+      [cycleId, weekNumber],
+    );
+    expect(weekSessions.length).toBe(4);
+    // Workout_Log is UNIQUE(workout_date, day_name, workout_name) — each week
+    // needs its own calendar day so four weeks of the same day names (Bench,
+    // Squat, Press, Deadlift) don't collide.
+    const weekStamp = TODAY + (weekNumber - 1) * 7 * 86400;
+
+    for (const { week_session_id: weekSessionId } of weekSessions) {
+      const session: RunnerSession = await loadRunnerSession(executor, weekSessionId, weekStamp);
+      const mainIndex = session.exercises.findIndex((exercise) => exercise.role === 'main');
+      const fslIndex = session.exercises.findIndex(
+        (exercise) => exercise.role === 'accessory' && exercise.loadSource === 'training_max_pct',
+      );
+      expect(mainIndex).toBeGreaterThanOrEqual(0);
+      expect(fslIndex).toBeGreaterThanOrEqual(0);
+
+      const draft = buildPlannedDraft(session);
+      draft[mainIndex] = [
+        { reps: 5, weight: 100 },
+        { reps: 5, weight: 100 },
+        { reps: mainAmrapReps, weight: 100 },
+      ];
+      draft[fslIndex] = [
+        { reps: 3, weight: 70 },
+        { reps: 3, weight: 70 },
+        { reps: 3, weight: 70 },
+        { reps: 3, weight: 70 },
+        { reps: 3, weight: 70 },
+      ];
+
+      await saveSessionLog(executor, weekSessionId, session, draft);
+    }
+  };
+
+  /** Accepts every pending proposal of the cycle and advances/completes it. */
+  const acceptWeekReview = async (
+    executor: TestExecutor,
+    routineId: number,
+    cycleId: number,
+  ): Promise<void> => {
+    await generateReview(executor, routineId, cycleId);
+    const pending = await executor.getAll<{ proposal_id: number }>(
+      `SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = ? AND status = 'pending';`,
+      [cycleId],
+    );
+    for (const { proposal_id: proposalId } of pending) {
+      await resolveProposal(executor, proposalId, 'accepted');
+    }
+    await applyReview(executor, routineId, cycleId);
+  };
+
+  it(
+    'reads the main lift\'s last work set as the AMRAP for all four lifts — ' +
+      "not the FSL back-off row that shares its catalog exercise",
+    async () => {
+      const { executor } = connect();
+      await runSchema(executor);
+      const { routineId } = await activatePresetRoutine(executor, '531', 'kg', new Map());
+      const cycleRow = await executor.get(
+        `SELECT cycle_id FROM Cycles WHERE routine_id = ? AND status = 'active';`,
+        [routineId],
+      );
+      if (cycleRow === undefined) {
+        throw new Error('531 preset activation did not seed a cycle');
+      }
+      const cycleId = Number(cycleRow.cycle_id);
+
+      // Weeks 1-3: log the real preset's four sessions, then resolve and
+      // apply that week's review so the cycle reaches week 4 — the real
+      // path a maintainer's phone would have gone through, not a shortcut.
+      const weekAmrapReps = [8, 6, 4];
+      for (const [index, reps] of weekAmrapReps.entries()) {
+        await logWeek531(executor, routineId, cycleId, index + 1, reps);
+        await acceptWeekReview(executor, routineId, cycleId);
+      }
+      // Week 4 (deload) has no AMRAP set, but its sessions must resolve too —
+      // atCycleEnd's review is due only once the current week has no pending
+      // sessions left.
+      await logWeek531(executor, routineId, cycleId, 4, 5);
+
+      const review = await loadCycleReview(executor, routineId, cycleId);
+      expect(review.atCycleEnd).toBe(true);
+      expect(review.amrap.length).toBe(4);
+      for (const lift of review.amrap) {
+        expect(lift.rows.map((row) => row.reps)).toEqual(weekAmrapReps);
+      }
+
+      // The corruption the audit found is not only "main shows the wrong
+      // AMRAP" — merging the two blocks means the FSL row's OWN cycle-end
+      // proposal reads main's 100 kg/AMRAP-rep sets instead of its own real
+      // 70 kg/3-rep sets. This holds regardless of which of the two rows a
+      // SQL tie-break for an equal set_number happens to sort first, since
+      // main's first two sets (set_number 1-2) are never in dispute either
+      // way and would still leak into the FSL group under the bug.
+      const fslProposals = await executor.getAll<{
+        session_exercise_id: number;
+        reason: string;
+      }>(
+        `SELECT session_exercise_id, reason FROM Progression_Proposal
+         WHERE cycle_id = ? AND session_exercise_id IN (
+           SELECT session_exercise_id FROM SessionExercises
+           WHERE role = 'accessory' AND load_source = 'training_max_pct'
+         );`,
+        [cycleId],
+      );
+      expect(fslProposals.length).toBe(4);
+      for (const proposal of fslProposals) {
+        expect(proposal.reason).toContain('70 kg');
+        expect(proposal.reason).not.toContain('100 kg');
+      }
+    },
+  );
 });

@@ -57,12 +57,18 @@ CREATE TABLE IF NOT EXISTS Workout_Log (
     UNIQUE (workout_date, day_name, workout_name)
 );
 
+-- role (F2) is copied at log time from the planned SessionExercises row —
+-- NULL for a free session with no plan role. It disambiguates two rows that
+-- share exercise_name (a preset's main lift and a back-off set on the same
+-- catalog exercise, e.g. the shipped '531' preset's FSL rows), which the name
+-- alone cannot.
 CREATE TABLE IF NOT EXISTS Logged_Exercises (
     logged_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     workout_log_id INTEGER NOT NULL,
     exercise_name TEXT NOT NULL,
     sets INTEGER NOT NULL,
     reps INTEGER NOT NULL,
+    role TEXT CHECK (role IS NULL OR role IN ('main', 'accessory')),
     FOREIGN KEY (workout_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE CASCADE
 );
 

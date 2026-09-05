@@ -310,10 +310,10 @@ describe('buildLogRows — the §3.2 history rows', () => {
       workoutDate: TODAY,
     });
     expect(rows.loggedExercises).toEqual([
-      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 5 },
-      { exerciseName: 'Bent Over Two-Dumbbell Row', sets: 3, reps: 10 },
-      { exerciseName: 'Lying Leg Curls', sets: 3, reps: 10 },
-      { exerciseName: 'Standing Calf Raises', sets: 3, reps: 12 },
+      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 5, role: 'main' },
+      { exerciseName: 'Bent Over Two-Dumbbell Row', sets: 3, reps: 10, role: 'accessory' },
+      { exerciseName: 'Lying Leg Curls', sets: 3, reps: 10, role: 'accessory' },
+      { exerciseName: 'Standing Calf Raises', sets: 3, reps: 12, role: 'accessory' },
     ]);
     expect(rows.weightLog).toHaveLength(12);
     const squatSets = rows.weightLog.filter((s) => s.loggedExerciseIndex === 0);
@@ -388,7 +388,7 @@ describe('buildLogRows — the §3.2 history rows', () => {
     const squatLog = rows.loggedExercises.find(
       (e) => e.exerciseName === 'Barbell Full Squat',
     );
-    expect(squatLog).toEqual({ exerciseName: 'Barbell Full Squat', sets: 3, reps: 5 });
+    expect(squatLog).toEqual({ exerciseName: 'Barbell Full Squat', sets: 3, reps: 5, role: 'main' });
   });
 
   it('keeps edited reps and weight, and uses the exercise unit override', async () => {
@@ -427,8 +427,8 @@ describe('buildLogRows — the §3.2 history rows', () => {
     const rows = buildLogRows(sessionWithTwin, draft);
 
     expect(rows.loggedExercises).toEqual([
-      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 5 },
-      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 10 },
+      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 5, role: 'main' },
+      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 10, role: 'accessory' },
     ]);
     const first = rows.weightLog.filter((s) => s.loggedExerciseIndex === 0);
     const second = rows.weightLog.filter((s) => s.loggedExerciseIndex === 1);
@@ -503,6 +503,7 @@ describe('buildLogRows — the §3.2 history rows', () => {
       exerciseName: 'Cable Chest Press',
       sets: 1,
       reps: 12,
+      role: null,
     });
     expect(rows.weightLog.at(-1)).toMatchObject({
       loggedExerciseIndex: 4,

@@ -80,12 +80,18 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     UNIQUE (workout_date, day_name, workout_name)
   );`,
 
+  // `role` (F2) is copied at log time from the planned SessionExercises row —
+  // NULL for a free session with no plan role. It disambiguates two rows that
+  // share `exercise_name` (a preset's main lift and a back-off set on the
+  // same catalog exercise, e.g. the shipped '531' preset's FSL rows), which
+  // the name alone cannot; the AMRAP/proposal read otherwise merges them.
   `CREATE TABLE IF NOT EXISTS Logged_Exercises (
     logged_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     workout_log_id INTEGER NOT NULL,
     exercise_name TEXT NOT NULL,
     sets INTEGER NOT NULL,
     reps INTEGER NOT NULL,
+    role TEXT CHECK (role IS NULL OR role IN ('main', 'accessory')),
     FOREIGN KEY (workout_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE CASCADE
   );`,
 
@@ -394,6 +400,21 @@ export async function ensureCatalogExerciseOriginColumns(
   }
 }
 
+/** The F2 role column on Logged_Exercises, for databases created before it. */
+export async function ensureLoggedExercisesRoleColumn(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(Logged_Exercises);',
+  );
+  if (!columns.some((column) => column.name === 'role')) {
+    await executor.exec(
+      `ALTER TABLE Logged_Exercises ADD COLUMN role TEXT
+       CHECK (role IS NULL OR role IN ('main', 'accessory'));`,
+    );
+  }
+}
+
 /** The M2 planned-jokers column on Routines. */
 export async function ensureRoutinesPlannedJokers(
   executor: SchemaExecutor,
@@ -509,6 +530,7 @@ export async function runSchema(executor: SchemaExecutor): Promise<void> {
   await ensureSessionExercisesColumns(executor);
   await ensureCatalogExerciseOriginColumns(executor);
   await ensureRoutinesPlannedJokers(executor);
+  await ensureLoggedExercisesRoleColumn(executor);
   await seedCatalog(executor);
   await seedPresetRoutines(executor);
 }

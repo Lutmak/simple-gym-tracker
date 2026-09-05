@@ -374,9 +374,18 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
         <Section testID="routine-config">
           <Row
             label={t('routineConfigSection')}
-            detail={`${config.unit} · ${t('roundingIncrement')} ${formatWeight(
-              config.roundingIncrement,
-            )} ${config.unit} · ${progressionText}`}
+            detail={[
+              config.unit,
+              t('routineConfigRounding', {
+                value: formatWeight(config.roundingIncrement),
+                unit: config.unit,
+              }),
+              t('routineConfigDayCount', { count: sessions.length }),
+              t('routineConfigRest', {
+                main: formatRest(config.restMainSeconds),
+                accessory: formatRest(config.restAccessorySeconds),
+              }),
+            ].join(' · ')}
             detailBelow
             right={chevron(configOpen ? 'chevron-up' : 'chevron-down')}
             onPress={() => setConfigOpen(!configOpen)}
@@ -412,7 +421,7 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
                     testID="routine-config-jokers"
                   />
                   <Row
-                    label={t('upperTmIncrement')}
+                    label={t('routineConfigTmIncrementUpper')}
                     detail={t('loadAbsoluteValue', {
                       weight: formatWeight(config.tmIncrementUpper),
                       unit: config.unit,
@@ -421,7 +430,7 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
                     testID="routine-config-tm-upper"
                   />
                   <Row
-                    label={t('lowerTmIncrement')}
+                    label={t('routineConfigTmIncrementLower')}
                     detail={t('loadAbsoluteValue', {
                       weight: formatWeight(config.tmIncrementLower),
                       unit: config.unit,

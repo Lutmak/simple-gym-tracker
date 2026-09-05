@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTheme } from '../context/ThemeContext';
+import { hexWithOpacity, type DataStateKey } from '../utils/theme';
 import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from './AppTextInput';
 import {
   calendarMonthIndex,
@@ -16,28 +17,41 @@ import {
   type ProgressDayState,
 } from '../utils/progressCalendar';
 import type { FirstWeekday } from '../utils/inicio';
-import { fontSize, spacing, tabBar, touchTarget } from '../utils/scale';
+import { dataMark, fontSize, spacing, tabBar, touchTarget } from '../utils/scale';
 
 /**
- * The calendar of Progreso (SPECS.md P2).
+ * The calendar of Progreso (SPEC.md U1, ADR-0047 §4.1).
  *
- * **How five states are told apart in a monochrome app.** The palette is black, greys and white
- * (ENGINEERING.md §3.5), so colour cannot carry the difference, and this is what does:
+ * **Five states, told apart two ways at once, never by colour alone.**
  *
- * - **A glyph per state**, under the day number: `✓` done · `→` moved · `✕` discarded · `○` planned
- *   · `+` free session. Five shapes, no two alike, each in the legend under the grid.
- * - **Weight and ink.** A day that happened is `textPrimary` at weight 700; a day that did not —
- *   planned, discarded — is `textSecondary`, and a discarded day number is struck through, so the
- *   two "nothing was trained" states differ from each other as well as from the rest.
- * - **A ring means today**, and nothing else. It is the one border in the grid, so it can never be
- *   confused with a state.
+ * - **A tinted disc per state**, from the `data.state` tokens: green for done, blue for moved,
+ *   amber for discarded, violet for free. `planned` carries no fill — an unhappened day is the
+ *   *absence* of colour, not a fifth hue — so it stays bare text, exactly as before this rebuild.
+ * - **A glyph per state**, inside the disc: `✓` done · `→` moved · `✕` discarded · `○` planned ·
+ *   `+` free session. This is the second cue ADR-0047 requires: nothing here is read by colour
+ *   alone, which matters for the colour-vision-deficient reader as much as it does on a washed-out
+ *   phone screen in gym lighting.
+ * - **A ring means today**, in `textPrimary`, independent of whatever state the day also carries.
  *
  * The legend is not optional decoration: it is the thing that makes the grid readable on first
- * sight, and `§7.5` says a label that needs a manual is not a label.
+ * sight, and §4.5 says a label that needs a manual is not a label. Each entry repeats the same
+ * pairing the grid uses — a colour dot, the glyph, the word — so the legend is where the mapping
+ * is learned once rather than guessed from the grid.
  *
  * Every marked day is tappable and opens its session; an unmarked day is inert rather than a
  * dead-end dialog, which is the recorded defect.
  */
+
+/** `planned` has no data.state entry (no fill); every other state does. */
+const DISC_STATE_KEYS: Partial<Record<ProgressDayState, DataStateKey>> = {
+  done: 'done',
+  moved: 'moved',
+  discarded: 'discarded',
+  free: 'free',
+};
+
+/** The disc is a tint, not the saturated token, so the day number stays legible on top of it. */
+const DISC_FILL_OPACITY = 0.22;
 
 export type ProgressCalendarProps = {
   /** The month shown first — normally the month of the most recent activity. */
@@ -95,6 +109,12 @@ export function ProgressCalendar({
       return { color: tokens.textSecondary, textDecorationLine: 'line-through' as const };
     }
     return { color: tokens.textSecondary };
+  };
+
+  /** The disc's tint (ADR-0047 §4.1) — `null` for `planned`, which carries no fill. */
+  const discColor = (state: ProgressDayState | null): string | null => {
+    const stateKey = state === null ? undefined : DISC_STATE_KEYS[state];
+    return stateKey === undefined ? null : hexWithOpacity(tokens.data.state[stateKey], DISC_FILL_OPACITY);
   };
 
   return (
@@ -181,26 +201,36 @@ export function ProgressCalendar({
                   testID={testID === undefined ? undefined : `${testID}-day-${cell.stamp}`}
                   style={({ pressed }) => [
                     styles.cell,
-                    isToday && { borderColor: tokens.accent, borderWidth: 2 },
                     pressed && entry !== null && { backgroundColor: tokens.inputFill },
                   ]}
                 >
-                  <Text
+                  <View
                     style={[
-                      styles.dayNumber,
-                      dayNumberStyle(entry?.state ?? null),
-                      entry !== null && styles.dayNumberMarked,
+                      styles.disc,
+                      isToday && { borderColor: tokens.textPrimary, borderWidth: 2 },
+                      (() => {
+                        const fill = discColor(entry?.state ?? null);
+                        return fill === null ? null : { backgroundColor: fill };
+                      })(),
                     ]}
-                    maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
                   >
-                    {cell.day}
-                  </Text>
-                  <Text
-                    style={[styles.glyph, dayNumberStyle(entry?.state ?? null)]}
-                    maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                  >
-                    {entry === null ? ' ' : PROGRESS_DAY_GLYPHS[entry.state]}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.dayNumber,
+                        dayNumberStyle(entry?.state ?? null),
+                        entry !== null && styles.dayNumberMarked,
+                      ]}
+                      maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                    >
+                      {cell.day}
+                    </Text>
+                    <Text
+                      style={[styles.glyph, dayNumberStyle(entry?.state ?? null)]}
+                      maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                    >
+                      {entry === null ? ' ' : PROGRESS_DAY_GLYPHS[entry.state]}
+                    </Text>
+                  </View>
                 </Pressable>
               );
             })}
@@ -209,22 +239,33 @@ export function ProgressCalendar({
       </View>
 
       <View style={styles.legend}>
-        {PROGRESS_DAY_STATES.map((state) => (
-          <View key={state} style={styles.legendItem}>
-            <Text
-              style={[styles.legendGlyph, { color: tokens.textPrimary }]}
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            >
-              {PROGRESS_DAY_GLYPHS[state]}
-            </Text>
-            <Text
-              style={[styles.legendLabel, { color: tokens.textSecondary }]}
-              maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-            >
-              {stateLabels[state]}
-            </Text>
-          </View>
-        ))}
+        {PROGRESS_DAY_STATES.map((state) => {
+          const stateKey = DISC_STATE_KEYS[state];
+          return (
+            <View key={state} style={styles.legendItem}>
+              <View
+                style={[
+                  styles.legendDot,
+                  stateKey === undefined
+                    ? { borderWidth: 1, borderColor: tokens.divider }
+                    : { backgroundColor: tokens.data.state[stateKey] },
+                ]}
+              />
+              <Text
+                style={[styles.legendGlyph, { color: tokens.textPrimary }]}
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+              >
+                {PROGRESS_DAY_GLYPHS[state]}
+              </Text>
+              <Text
+                style={[styles.legendLabel, { color: tokens.textSecondary }]}
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+              >
+                {stateLabels[state]}
+              </Text>
+            </View>
+          );
+        })}
       </View>
     </View>
   );
@@ -269,6 +310,13 @@ const styles = StyleSheet.create({
     minHeight: touchTarget.control,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  disc: {
+    width: touchTarget.control,
+    height: touchTarget.control,
+    borderRadius: touchTarget.control / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 2,
     borderColor: 'transparent',
   },
@@ -294,6 +342,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.inline,
+  },
+  legendDot: {
+    width: dataMark.dot,
+    height: dataMark.dot,
+    borderRadius: dataMark.dot / 2,
   },
   legendGlyph: {
     fontSize: fontSize.body,

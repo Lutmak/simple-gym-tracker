@@ -327,9 +327,23 @@ export function belowTarget(
 }
 
 /**
+ * A logged slot that is still the runner's own "peso por aprender" default,
+ * untouched: the plan pre-fills a never-logged exercise's sets as done with
+ * `weight: null` (`buildPlannedDraft`), and finishing it without editing a
+ * single row must not fabricate a 0 kg/lb set that was never lifted (F1).
+ * Bodyweight sets have no weight by design — `null` there is a real answer,
+ * not a blank waiting to be learned.
+ */
+export function isUnlearnedSet(exercise: RunnerExercise, set: LoggedSet): boolean {
+  return set.weight === null && exercise.loadSource !== 'bodyweight';
+}
+
+/**
  * The §3.2 history rows for a finished session: exercises without a logged
  * set produce no rows at all; `set_number` sequences only the logged work
  * sets, in order, so a skipped middle set leaves a gapless 1..N per exercise.
+ * A set whose weight is still unlearned and untouched (`isUnlearnedSet`) is
+ * dropped like a removed set — it never reaches `Weight_Log` (F1).
  */
 export function buildLogRows(session: RunnerSession, draft: RunnerDraft): RunnerLogRows {
   const loggedExercises: RunnerLogRows['loggedExercises'] = [];
@@ -337,7 +351,7 @@ export function buildLogRows(session: RunnerSession, draft: RunnerDraft): Runner
 
   session.exercises.forEach((exercise, exerciseIndex) => {
     const sets = (draft[exerciseIndex] ?? []).filter(
-      (set): set is LoggedSet => set !== null,
+      (set): set is LoggedSet => set !== null && !isUnlearnedSet(exercise, set),
     );
     if (sets.length === 0) {
       return;
@@ -383,11 +397,13 @@ export interface SavedSession {
 
 /**
  * The §3.2 baseline write, inside the session transaction: for every exercise
- * whose plan weight is still NULL, the first set the user actually logged
+ * whose plan weight is still NULL, the HEAVIEST set the user actually logged
  * becomes the baseline (training max for `training_max_pct`, starting load
- * otherwise). The `IS NULL` guard is what makes it "learned, never demanded"
- * — a value the user entered by hand is never overwritten, and an exercise
- * that already has a baseline is never touched again.
+ * otherwise) — a lifter naturally ramping up across a first-ever session
+ * should not have day-one's max calibrated off their lightest attempt (F1).
+ * The `IS NULL` guard is what makes it "learned, never demanded" — a value
+ * the user entered by hand is never overwritten, and an exercise that
+ * already has a baseline is never touched again.
  */
 async function applyLearnedBaselines(
   db: RoutineDatabase,
@@ -403,10 +419,15 @@ async function applyLearnedBaselines(
       continue;
     }
     const sets = draft[exerciseIndex] ?? [];
-    const first = sets.find((set): set is LoggedSet => set !== null);
-    if (first === undefined) {
+    const logged = sets.filter(
+      (set): set is LoggedSet => set !== null && !isUnlearnedSet(exercise, set),
+    );
+    if (logged.length === 0) {
       continue;
     }
+    const heaviest = logged.reduce((max, set) =>
+      (set.weight ?? 0) > (max.weight ?? 0) ? set : max,
+    );
     const planUnit = exerciseUnit(exercise, session);
     const baseline = inferBaselineWeight({
       loadSource: exercise.loadSource,
@@ -414,9 +435,9 @@ async function applyLearnedBaselines(
       roundingIncrement: session.roundingIncrement,
       planUnit,
       set: {
-        weight: first.weight ?? 0,
-        reps: first.reps,
-        unit: first.unit ?? planUnit,
+        weight: heaviest.weight ?? 0,
+        reps: heaviest.reps,
+        unit: heaviest.unit ?? planUnit,
       },
     });
     if (baseline === null) {

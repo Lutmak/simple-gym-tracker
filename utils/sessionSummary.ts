@@ -1,4 +1,5 @@
 import {
+  isUnlearnedSet,
   runnerTargetsFor,
   type LoggedSet,
   type RunnerDraft,
@@ -41,6 +42,13 @@ export interface SessionSummary {
   exerciseCount: number;
   workSetCount: number;
   notDoneSets: number;
+  /**
+   * Sets still showing "peso por aprender" (F1): the plan's own default,
+   * untouched. `workSetCount`/`exerciseCount` already exclude them — they
+   * are not part of what gets saved — this is only the count for the
+   * finish confirmation's warning line.
+   */
+  unsavedSets: number;
   /** Milliseconds are reduced to elapsed whole seconds; null means timing was unavailable. */
   durationSeconds: number | null;
   volumes: SessionSummaryVolume[];
@@ -111,15 +119,16 @@ export function buildSessionSummary(
   let exerciseCount = 0;
   let workSetCount = 0;
   let notDoneSets = 0;
+  let unsavedSets = 0;
 
   session.exercises.forEach((exercise, exerciseIndex) => {
     const sets = draft[exerciseIndex] ?? [];
-    const hasLoggedSet = sets.some((set) => set !== null);
-    if (hasLoggedSet) {
-      exerciseCount += 1;
-    }
 
     if (exercise.isPlanned === false) {
+      const hasLoggedSet = sets.some((set) => set !== null);
+      if (hasLoggedSet) {
+        exerciseCount += 1;
+      }
       sets.forEach((set) => {
         if (set === null) {
           return;
@@ -132,6 +141,7 @@ export function buildSessionSummary(
     }
 
     const targets = runnerTargetsFor(exercise, session);
+    let exerciseHasSavedSet = false;
 
     for (let setIndex = 0; setIndex < targets.length; setIndex += 1) {
       const set = sets[setIndex] ?? null;
@@ -144,7 +154,14 @@ export function buildSessionSummary(
         });
         continue;
       }
+      // Still "peso por aprender", untouched (F1): the plan's own default,
+      // not a deviation, and never saved — see `isUnlearnedSet`.
+      if (isUnlearnedSet(exercise, set)) {
+        unsavedSets += 1;
+        continue;
+      }
 
+      exerciseHasSavedSet = true;
       workSetCount += 1;
       const target = targets[setIndex];
       if (target === undefined) {
@@ -173,6 +190,11 @@ export function buildSessionSummary(
       if (set === null) {
         continue;
       }
+      if (isUnlearnedSet(exercise, set)) {
+        unsavedSets += 1;
+        continue;
+      }
+      exerciseHasSavedSet = true;
       workSetCount += 1;
       const actual = asSummarySet(set, exercise, session);
       addVolume(volumes, actual.unit, actual.weight, actual.reps);
@@ -183,12 +205,17 @@ export function buildSessionSummary(
         actual,
       });
     }
+
+    if (exerciseHasSavedSet) {
+      exerciseCount += 1;
+    }
   });
 
   return {
     exerciseCount,
     workSetCount,
     notDoneSets,
+    unsavedSets,
     durationSeconds: durationSecondsOf(draft),
     volumes: [...volumes.entries()].map(([unit, volume]) => ({
       unit,

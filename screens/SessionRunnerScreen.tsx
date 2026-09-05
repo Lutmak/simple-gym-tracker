@@ -44,6 +44,7 @@ import {
 import {
   belowTarget,
   buildPlannedDraft,
+  isUnlearnedSet,
   loadRunnerSession,
   nextExtraSet,
   formatRunnerPlanLine,
@@ -669,6 +670,13 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
               })
           : t('setPosition', { n: setIndex + 1, total: currentExercise.targetSets });
     const warning = logged === null ? null : belowTargetNote(setIndex, logged);
+    // F1: the runner's own default for a first-ever exercise is "already
+    // done, weight to learn" — say which one of these blanks will fix the
+    // baseline, since it will be the heaviest logged, not the first.
+    const learningNote =
+      logged !== null && currentExercise.isPlanned !== false && isUnlearnedSet(currentExercise, logged)
+        ? t('runnerHeaviestSetsMax')
+        : null;
     const detail =
       logged === null ? (
         <Text
@@ -691,6 +699,9 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
           </Text>
           {warning !== null && (
             <Text style={[styles.warning, { color: tokens.warning }]}>{warning}</Text>
+          )}
+          {learningNote !== null && (
+            <Text style={[styles.warning, { color: tokens.textSecondary }]}>{learningNote}</Text>
           )}
         </View>
       );
@@ -1023,6 +1034,11 @@ export default function SessionRunnerScreen({ mode, navigation, route }: RunnerP
         {confirmationSummary.notDoneSets > 0 && (
           <Text style={[styles.finishInfo, { color: tokens.textSecondary }]}>
             {t('sessionSummaryNotDone', { count: confirmationSummary.notDoneSets })}
+          </Text>
+        )}
+        {confirmationSummary.unsavedSets > 0 && (
+          <Text style={[styles.finishInfo, { color: tokens.textSecondary }]}>
+            {t('finishConfirmUnsavedSets', { count: confirmationSummary.unsavedSets })}
           </Text>
         )}
         <Button

@@ -486,8 +486,8 @@ export default function ProgressScreen({ navigation, route }: Props) {
           testID="progress-tile-adherence"
         />
         <Stat
-          value={String(current.cycle.cycleNumber)}
-          label={t('progressCycleTileLabel', {
+          value={t('progressCycleHeader', { n: current.cycle.cycleNumber })}
+          label={t('progressCycleWeekOf', {
             week: current.cycle.currentWeek,
             weeks: current.cycle.weeks,
           })}

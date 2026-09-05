@@ -435,7 +435,6 @@
   "progressWeekDetailTitle": "Week {{week}} · Cycle {{cycle}}",
   "progressStreakTileLabel": "weeks",
   "progressAdherenceTileLabel": "this cycle",
-  "progressCycleTileLabel": "cycle · week {{week}} of {{weeks}}",
   "progressThisCycle": "This cycle",
   "progressReviewHeadline": "Cycle {{cycle}} finished · review the proposal for cycle {{next}}",
   "progressPastCycles": "Previous cycles",

@@ -12,10 +12,14 @@ import {
   DAY_SECONDS,
   dayStampOfStamp,
   loadSessionQueueInput,
+  nextPlanSession,
+  type QueueRow,
   type QueueWeekSessionRow,
   type SessionQueueInput,
   type SessionQueueState,
+  type UpcomingSession,
 } from './today';
+import { mainLiftColours, type MainLiftOrderRow } from './liftColours';
 import type { RoutineDatabase } from './routineActions';
 
 export type InicioInput = SessionQueueInput;
@@ -27,11 +31,26 @@ export type InicioDayStatus =
   | 'moved'
   | 'discarded';
 
+/**
+ * Enough to open `SessionDetailSheet`'s `'session'` target (`components/SessionDetailSheet.tsx`)
+ * for a resolved day of the week strip — null for `pending`/`rest`, which are not pressable
+ * (SPEC.md U2: "the cell simply is not pressable").
+ */
+export interface InicioSessionTarget {
+  routineId: number;
+  cycleId: number;
+  cycleNumber: number;
+  weekNumber: number;
+  sessionId: number;
+}
+
 export interface InicioDay {
   stamp: number;
   weekday: number;
   status: InicioDayStatus;
   sessionName: string | null;
+  /** Non-null exactly for `completed`/`moved`/`discarded` — the tappable statuses. */
+  target: InicioSessionTarget | null;
 }
 
 export interface InicioWeek {
@@ -64,10 +83,28 @@ export interface InicioDateParts {
   year: number;
 }
 
+/** The two Stat tiles beside the streak that need more than the queue's own read model. */
+export interface InicioCycleStats {
+  /**
+   * `null` when there is no active cycle to measure yet (no routine, or between cycles) — the
+   * screen shows an em dash rather than a misleading 0/100%.
+   */
+  adherencePercent: number | null;
+  cyclesCompleted: number;
+}
+
 export interface InicioData {
   queue: SessionQueueState;
   week: InicioWeek;
   streak: InicioStreak;
+  cycleStats: InicioCycleStats;
+  /**
+   * The next two sessions after the queue's own head, for the "PRÓXIMAS" list (§U2) — distinct
+   * from `queue.upcoming`, which is only the single next one the resolution flow itself needs.
+   */
+  upcomingSessions: UpcomingSession[];
+  /** A routine's main lifts, coloured once and reused by every row that names one (ADR-0047). */
+  mainLiftColours: ReadonlyMap<string, number>;
   durationMinutes: number | null;
 }
 
@@ -90,16 +127,20 @@ export function weekStartStamp(todayStamp: number, firstWeekday: FirstWeekday): 
 const statusForRow = (row: QueueWeekSessionRow | undefined): InicioDayStatus =>
   row?.status ?? 'pending';
 
-const weekSessionRowsByDay = (
-  input: InicioInput,
-  startStamp: number,
-): Map<string, QueueWeekSessionRow> => {
-  const rows = new Map<string, QueueWeekSessionRow>();
+/** The tappable statuses (SPEC.md U2) — everything a resolved day's cell can carry. */
+const TAPPABLE_STATUSES: ReadonlySet<InicioDayStatus> = new Set([
+  'completed',
+  'moved',
+  'discarded',
+]);
+
+const weekQueueRowsByDay = (input: InicioInput, startStamp: number): Map<string, QueueRow> => {
+  const rows = new Map<string, QueueRow>();
   for (const row of buildQueueRows(input)) {
     if (row.nominal < startStamp || row.nominal >= startStamp + 7 * DAY_SECONDS) {
       continue;
     }
-    rows.set(`${row.session.sessionId}:${row.nominal}`, row.weekSession);
+    rows.set(`${row.session.sessionId}:${row.nominal}`, row);
   }
   return rows;
 };
@@ -110,7 +151,7 @@ export function buildInicioWeek(
   firstWeekday: FirstWeekday,
 ): InicioWeek {
   const startStamp = weekStartStamp(todayStamp, firstWeekday);
-  const rowBySessionDay = weekSessionRowsByDay(input, startStamp);
+  const rowBySessionDay = weekQueueRowsByDay(input, startStamp);
   const sessionByWeekday = new Map(input.sessions.map((session) => [session.weekday, session]));
   const firstDay = firstWeekday === 'Monday' ? 1 : 0;
   const days: InicioDay[] = [];
@@ -122,11 +163,23 @@ export function buildInicioWeek(
     const row = session === undefined
       ? undefined
       : rowBySessionDay.get(`${session.sessionId}:${stamp}`);
+    const status = session === undefined ? 'rest' : statusForRow(row?.weekSession);
+    const target: InicioSessionTarget | null =
+      input.routine === null || row === undefined || !TAPPABLE_STATUSES.has(status)
+        ? null
+        : {
+            routineId: input.routine.routineId,
+            cycleId: row.cycle.cycleId,
+            cycleNumber: row.cycle.cycleNumber,
+            weekNumber: row.weekSession.weekNumber,
+            sessionId: row.session.sessionId,
+          };
     days.push({
       stamp,
       weekday,
-      status: session === undefined ? 'rest' : statusForRow(row),
+      status,
       sessionName: session?.name ?? null,
+      target,
     });
   }
 
@@ -276,6 +329,115 @@ export function averageSessionDurationMinutes(
   );
 }
 
+/**
+ * "Adherence this cycle" (SPEC.md U2's Stat tile) and cycles completed. Read from
+ * `current_week`/`weeks` rather than from dates: a week counts once its cycle has reached it,
+ * regardless of whether every day inside it has actually happened yet, so the number never needs
+ * `todayStamp` and never depends on how the calendar carves up a week — the same rule the streak
+ * (ADR-0041) already applies to "is this week done", just at cycle scope instead of a rolling one.
+ */
+export function computeInicioCycleStats(input: InicioInput): InicioCycleStats {
+  const cyclesCompleted = input.cycles.filter((cycle) => cycle.status === 'complete').length;
+  const activeCycle = [...input.cycles]
+    .filter((cycle) => cycle.status === 'active')
+    .sort((a, b) => b.cycleNumber - a.cycleNumber)[0];
+  if (activeCycle === undefined) {
+    return { adherencePercent: null, cyclesCompleted };
+  }
+
+  const rowsSoFar = input.weekSessions.filter(
+    (row) => row.cycleId === activeCycle.cycleId && row.weekNumber <= activeCycle.currentWeek,
+  );
+  if (rowsSoFar.length === 0) {
+    return { adherencePercent: null, cyclesCompleted };
+  }
+
+  const adherent = rowsSoFar.filter(
+    (row) => row.status === 'completed' || row.status === 'moved',
+  ).length;
+  return {
+    adherencePercent: Math.round((adherent / rowsSoFar.length) * 100),
+    cyclesCompleted,
+  };
+}
+
+/**
+ * The routine's main lifts, coloured once (`utils/liftColours.ts`). Built from the same
+ * `sessions`/`exercises` rows the queue already loaded — no second query.
+ */
+export function computeMainLiftColours(input: InicioInput): ReadonlyMap<string, number> {
+  const sessionOrder = new Map(input.sessions.map((session) => [session.sessionId, session.sortOrder]));
+  const rows: MainLiftOrderRow[] = input.exercises.map((exercise) => ({
+    sessionSortOrder: sessionOrder.get(exercise.sessionId) ?? 0,
+    exerciseSortOrder: exercise.sortOrder,
+    name: exercise.name,
+    role: exercise.role,
+  }));
+  return mainLiftColours(rows);
+}
+
+/**
+ * The next two sessions after the queue's own head (SPEC.md U2's "PRÓXIMAS" list) — on a rest day
+ * this is what fills the screen instead of nothing. Reads the same seeded week-session rows the
+ * queue does, in queue order, then chains `nextPlanSession` past the end of the active cycle for
+ * whatever a not-yet-seeded next cycle cannot supply (§3.4: the next cycle only exists once the
+ * pending review is answered).
+ */
+export function buildInicioUpcoming(
+  input: InicioInput,
+  todayStamp: number,
+  count: number,
+): UpcomingSession[] {
+  if (input.routine === null) {
+    return [];
+  }
+
+  const headId = computeSessionQueue(input, todayStamp).head?.weekSessionId ?? null;
+  const pendingRows = buildQueueRows(input)
+    .filter((row) => row.weekSession.status === 'pending')
+    .filter((row) => row.weekSession.weekSessionId !== headId)
+    .sort(
+      (a, b) => a.nominal - b.nominal || a.weekSession.weekSessionId - b.weekSession.weekSessionId,
+    );
+
+  const result: UpcomingSession[] = pendingRows.slice(0, count).map((row) => ({
+    weekSessionId: row.weekSession.weekSessionId,
+    sessionId: row.session.sessionId,
+    name: row.session.name,
+    weekday: row.session.weekday,
+    date: row.weekSession.resolvedOnDate ?? row.nominal,
+  }));
+
+  let cursor = result.length > 0 ? result[result.length - 1].date : todayStamp;
+  while (result.length < count) {
+    const next = nextPlanSession(input.sessions, cursor);
+    if (next === null) {
+      break;
+    }
+    result.push(next);
+    cursor = next.date;
+  }
+  return result;
+}
+
+/** The hero's exercise list stops here; the rest becomes "+N ejercicios más" (SPEC.md U2). */
+export const INICIO_HERO_EXERCISE_LIMIT = 3;
+
+export interface TruncatedExercises<T> {
+  shown: T[];
+  remaining: number;
+}
+
+export function truncateHeroExercises<T>(
+  exercises: readonly T[],
+  limit: number = INICIO_HERO_EXERCISE_LIMIT,
+): TruncatedExercises<T> {
+  return {
+    shown: exercises.slice(0, limit),
+    remaining: Math.max(0, exercises.length - limit),
+  };
+}
+
 export function computeInicioData(
   input: InicioInput,
   todayStamp: number,
@@ -287,6 +449,9 @@ export function computeInicioData(
     queue,
     week: buildInicioWeek(input, todayStamp, firstWeekday),
     streak: computeInicioStreak(input, todayStamp, firstWeekday),
+    cycleStats: computeInicioCycleStats(input),
+    upcomingSessions: buildInicioUpcoming(input, todayStamp, 2),
+    mainLiftColours: computeMainLiftColours(input),
     durationMinutes:
       queue.resolution === 'due' && queue.head !== null
         ? averageSessionDurationMinutes(durationRows)

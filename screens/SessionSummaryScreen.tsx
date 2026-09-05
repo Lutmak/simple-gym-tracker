@@ -12,6 +12,7 @@ import { Stat } from '../components/Stat';
 import { fontSize, spacing } from '../utils/scale';
 import { datePartsOfStamp } from '../utils/inicio';
 import type { InicioStackParamList, RootTabParamList } from '../App';
+import type { LearnedBaseline } from '../utils/sessionRunner';
 import type { SessionSummaryDeviation } from '../utils/sessionSummary';
 
 type Props = NativeStackScreenProps<InicioStackParamList, 'SessionSummary'>;
@@ -149,6 +150,12 @@ export default function SessionSummaryScreen({ navigation, route }: Props) {
     return `${deviation.exerciseName} · ${position}: ${details.join(' · ')}`;
   };
 
+  const learnedBaselineLabel = (learned: LearnedBaseline): string =>
+    `${learned.exerciseName} · ${formatWeight(learned.baseline)} ${learned.unit} (${t(
+      'sessionSummaryLearnedFrom',
+      { weight: formatWeight(learned.fromWeight), unit: learned.fromUnit, reps: learned.fromReps },
+    )})`;
+
   return (
     <Screen scroll testID="session-summary">
       <View style={styles.header}>
@@ -211,6 +218,18 @@ export default function SessionSummaryScreen({ navigation, route }: Props) {
           ))
         )}
       </View>
+
+      {summary.learnedBaselines.length > 0 && (
+        <Section title={t('sessionSummaryLearned')} testID="session-summary-learned">
+          {summary.learnedBaselines.map((learned) => (
+            <Row
+              key={learned.sessionExerciseId}
+              label={learnedBaselineLabel(learned)}
+              divided
+            />
+          ))}
+        </Section>
+      )}
 
       {summary.deviations.length > 0 && (
         <Section title={t('sessionSummaryChanges')} testID="session-summary-changes">

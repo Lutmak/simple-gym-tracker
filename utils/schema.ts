@@ -80,12 +80,18 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     UNIQUE (workout_date, day_name, workout_name)
   );`,
 
+  // `role` (F2) is copied at log time from the planned SessionExercises row —
+  // NULL for a free session with no plan role. It disambiguates two rows that
+  // share `exercise_name` (a preset's main lift and a back-off set on the
+  // same catalog exercise, e.g. the shipped '531' preset's FSL rows), which
+  // the name alone cannot; the AMRAP/proposal read otherwise merges them.
   `CREATE TABLE IF NOT EXISTS Logged_Exercises (
     logged_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     workout_log_id INTEGER NOT NULL,
     exercise_name TEXT NOT NULL,
     sets INTEGER NOT NULL,
     reps INTEGER NOT NULL,
+    role TEXT CHECK (role IS NULL OR role IN ('main', 'accessory')),
     FOREIGN KEY (workout_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE CASCADE
   );`,
 
@@ -133,6 +139,10 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
   );`,
 
   // Plan. A routine is an ordered set of training days plus a progression rule.
+  // tm_increment_upper/lower and cycle_weeks are §3.1/§3.2 (F3): a wave
+  // routine's own training-max increments and deload choice, actually read at
+  // cycle end instead of being validated and thrown away. NULL increments mean
+  // the wave engine's own unit default (2.5/5 kg, 5/10 lb).
   `CREATE TABLE IF NOT EXISTS Routines (
     routine_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     routine_key TEXT UNIQUE,
@@ -145,7 +155,10 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     rest_accessory_seconds INTEGER NOT NULL CHECK (rest_accessory_seconds >= 0),
     is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0, 1)),
     created_at INTEGER NOT NULL,
-    planned_jokers INTEGER NOT NULL DEFAULT 0 CHECK (planned_jokers >= 0)
+    planned_jokers INTEGER NOT NULL DEFAULT 0 CHECK (planned_jokers >= 0),
+    tm_increment_upper REAL CHECK (tm_increment_upper IS NULL OR tm_increment_upper > 0),
+    tm_increment_lower REAL CHECK (tm_increment_lower IS NULL OR tm_increment_lower > 0),
+    cycle_weeks INTEGER NOT NULL DEFAULT 4 CHECK (cycle_weeks IN (3, 4))
   );`,
 
   `CREATE UNIQUE INDEX IF NOT EXISTS Routines_single_active
@@ -181,6 +194,10 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     -- R3/§3.6: NULL means "whatever this role does by default" — on for a main
     -- lift, off for an accessory. 0/1 is the user overriding that per exercise.
     warmups_enabled INTEGER CHECK (warmups_enabled IS NULL OR warmups_enabled IN (0, 1)),
+    -- §3.1/F3: the 5/3/1 upper/lower role, chosen at setup, actually used for
+    -- the cycle-end TM increment instead of being guessed from the load.
+    -- NULL = inferred from the training max, same as before this column existed.
+    category TEXT CHECK (category IS NULL OR category IN ('upper', 'lower')),
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
     UNIQUE (session_id, sort_order),
@@ -221,6 +238,12 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
   // session links to its log, a moved one records the date it was moved to, a discarded
   // one records the date it was discarded (§3.6). The link to Workout_Log never cascades:
   // deleting a log must never destroy plan bookkeeping.
+  // nominal_date (F7): the session's planned day, SNAPSHOT at cycle-seed time
+  // instead of derived live from Sessions.weekday. A later weekday edit
+  // restamps only this row's value when it is still 'pending' (utils/editRoutine.ts);
+  // an already-resolved row's displayed plan position never changes underneath
+  // it. NULL on a row from before this column existed — utils/today.ts falls
+  // back to the old live computation for those, unchanged.
   `CREATE TABLE IF NOT EXISTS WeekSessions (
     week_session_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     cycle_week_id INTEGER NOT NULL,
@@ -228,6 +251,7 @@ export const SCHEMA_STATEMENTS: readonly string[] = [
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'moved', 'discarded')),
     resolved_on_date INTEGER,
     completed_log_id INTEGER,
+    nominal_date INTEGER,
     FOREIGN KEY (cycle_week_id) REFERENCES CycleWeeks(cycle_week_id) ON DELETE CASCADE,
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (completed_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE SET NULL,
@@ -371,6 +395,12 @@ export async function ensureSessionExercisesColumns(
   if (!columns.some((column) => column.name === 'bar_weight')) {
     await executor.exec('ALTER TABLE SessionExercises ADD COLUMN bar_weight REAL;');
   }
+  if (!columns.some((column) => column.name === 'category')) {
+    await executor.exec(
+      `ALTER TABLE SessionExercises ADD COLUMN category TEXT
+       CHECK (category IS NULL OR category IN ('upper', 'lower'));`,
+    );
+  }
 }
 
 /** The R2 custom-exercise columns on Catalog_Exercises (origin + the bar answer). */
@@ -394,6 +424,33 @@ export async function ensureCatalogExerciseOriginColumns(
   }
 }
 
+/** The F2 role column on Logged_Exercises, for databases created before it. */
+export async function ensureLoggedExercisesRoleColumn(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(Logged_Exercises);',
+  );
+  if (!columns.some((column) => column.name === 'role')) {
+    await executor.exec(
+      `ALTER TABLE Logged_Exercises ADD COLUMN role TEXT
+       CHECK (role IS NULL OR role IN ('main', 'accessory'));`,
+    );
+  }
+}
+
+/** The F7 nominal_date snapshot column on WeekSessions, for databases created before it. */
+export async function ensureWeekSessionsNominalDateColumn(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(WeekSessions);',
+  );
+  if (!columns.some((column) => column.name === 'nominal_date')) {
+    await executor.exec('ALTER TABLE WeekSessions ADD COLUMN nominal_date INTEGER;');
+  }
+}
+
 /** The M2 planned-jokers column on Routines. */
 export async function ensureRoutinesPlannedJokers(
   executor: SchemaExecutor,
@@ -405,6 +462,33 @@ export async function ensureRoutinesPlannedJokers(
     await executor.exec(
       `ALTER TABLE Routines ADD COLUMN planned_jokers INTEGER NOT NULL DEFAULT 0
        CHECK (planned_jokers >= 0);`,
+    );
+  }
+}
+
+/** The F3 (§3.1/§3.2) TM-increment and deload-cycle-length columns on Routines. */
+export async function ensureRoutinesWaveSetupColumns(
+  executor: SchemaExecutor,
+): Promise<void> {
+  const columns = await executor.getAll<{ name: string }>(
+    'PRAGMA table_info(Routines);',
+  );
+  if (!columns.some((column) => column.name === 'tm_increment_upper')) {
+    await executor.exec(
+      `ALTER TABLE Routines ADD COLUMN tm_increment_upper REAL
+       CHECK (tm_increment_upper IS NULL OR tm_increment_upper > 0);`,
+    );
+  }
+  if (!columns.some((column) => column.name === 'tm_increment_lower')) {
+    await executor.exec(
+      `ALTER TABLE Routines ADD COLUMN tm_increment_lower REAL
+       CHECK (tm_increment_lower IS NULL OR tm_increment_lower > 0);`,
+    );
+  }
+  if (!columns.some((column) => column.name === 'cycle_weeks')) {
+    await executor.exec(
+      `ALTER TABLE Routines ADD COLUMN cycle_weeks INTEGER NOT NULL DEFAULT 4
+       CHECK (cycle_weeks IN (3, 4));`,
     );
   }
 }
@@ -509,6 +593,9 @@ export async function runSchema(executor: SchemaExecutor): Promise<void> {
   await ensureSessionExercisesColumns(executor);
   await ensureCatalogExerciseOriginColumns(executor);
   await ensureRoutinesPlannedJokers(executor);
+  await ensureRoutinesWaveSetupColumns(executor);
+  await ensureLoggedExercisesRoleColumn(executor);
+  await ensureWeekSessionsNominalDateColumn(executor);
   await seedCatalog(executor);
   await seedPresetRoutines(executor);
 }

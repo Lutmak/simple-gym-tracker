@@ -35,6 +35,7 @@ const entry = (
   unit: PerformedSet['unit'] = 'kg',
   cycleNumber = 1,
   loggedSets = 3,
+  weeks = 4,
 ): CycleHistory => {
   const sets: PerformedSet[] = [];
   for (let index = 0; index < loggedSets; index++) {
@@ -47,20 +48,57 @@ const entry = (
   }
   return {
     cycleNumber,
+    weeks,
     exercises: {
       [bench.identifier]: { sets, proposalStatus: null },
     },
   };
 };
 
-/** A wave cycle under review: weeks 1-4, in order; a null week logged no AMRAP. */
+/**
+ * A wave cycle under review: weeks 1-4 (or 1-3 for a deload-off, 3-week
+ * cycle), in order, all sharing one `cycleNumber` — a null week logged no
+ * AMRAP.
+ */
 const waveCycle = (
   weekResults: Array<{ reps: number; weight: number } | null>,
   unit: PerformedSet['unit'] = 'kg',
+  cycleNumber = 1,
+  weeks = 4,
 ): CycleHistory[] =>
-  weekResults.map((result, index) => entry(result, unit, index + 1));
+  weekResults.map((result) => entry(result, unit, cycleNumber, 3, weeks));
 
 describe('progression — wave rule', () => {
+  it(
+    'reads progress from which weeks have logged sets, not from how many weeks exist — ' +
+      'a cycle seeds ALL of its weeks upfront (utils/cycleSeed.ts), so an unlogged future ' +
+      'week is a real, empty entry, not a missing one',
+    () => {
+      const emptyWeek = (weekNumber: number): CycleHistory => ({
+        cycleNumber: 1,
+        weeks: 4,
+        exercises: {
+          [bench.identifier]: { sets: [], proposalStatus: null },
+        },
+      });
+      const history: CycleHistory[] = [
+        entry({ reps: 5, weight: 85 }), // week 1, logged
+        emptyWeek(2),
+        emptyWeek(3),
+        emptyWeek(4),
+      ];
+
+      const proposals = proposeNextTargets(routine(), history);
+
+      expect(proposals).toHaveLength(1);
+      expect(proposals[0]).toMatchObject({
+        currentTarget: 85,
+        proposedTarget: 90,
+        reason: 'semana 2: 3+ reps con 90 kg (AMRAP)',
+      });
+    },
+  );
+
   it('proposes nothing for a wave routine with no history', () => {
     expect(proposeNextTargets(routine(), [])).toEqual([]);
   });
@@ -155,37 +193,70 @@ describe('progression — wave rule', () => {
     });
   });
 
-  it('proposes nothing for absolute and bodyweight exercises in a wave routine', () => {
-    const squat: RoutineExercise = {
-      identifier: 12,
-      name: 'Sentadilla',
-      targetSets: 3,
-      targetReps: 5,
-      loadSource: 'absolute',
-      unitOverride: null,
-      absoluteWeight: 100,
-      trainingMaxWeight: null,
-      trainingMaxPct: null,
-    };
-    const pullUps: RoutineExercise = {
-      identifier: 13,
-      name: 'Dominadas',
-      targetSets: 3,
-      targetReps: 8,
-      loadSource: 'bodyweight',
-      unitOverride: null,
-      absoluteWeight: null,
-      trainingMaxWeight: null,
-      trainingMaxPct: null,
-    };
+  it(
+    'applies the linear rule to an absolute-loaded row inside a wave routine (F5) — ' +
+      'bodyweight still gets nothing, there is no weight to progress',
+    () => {
+      const squat: RoutineExercise = {
+        identifier: 12,
+        name: 'Sentadilla',
+        targetSets: 3,
+        targetReps: 5,
+        loadSource: 'absolute',
+        unitOverride: null,
+        absoluteWeight: 100,
+        trainingMaxWeight: null,
+        trainingMaxPct: null,
+      };
+      const pullUps: RoutineExercise = {
+        identifier: 13,
+        name: 'Dominadas',
+        targetSets: 3,
+        targetReps: 8,
+        loadSource: 'bodyweight',
+        unitOverride: null,
+        absoluteWeight: null,
+        trainingMaxWeight: null,
+        trainingMaxPct: null,
+      };
 
-    const proposals = proposeNextTargets(routine({}, [bench, squat, pullUps]), [
-      entry({ reps: 5, weight: 85 }),
-    ]);
+      const history: CycleHistory[] = [
+        {
+          cycleNumber: 1,
+          weeks: 4,
+          exercises: {
+            [bench.identifier]: {
+              sets: [{ reps: 5, weight: 85, unit: 'kg' }],
+              proposalStatus: null,
+            },
+            // Every planned set hits its target — a real "met" week, not the
+            // degenerate no-history case another test covers.
+            [squat.identifier]: {
+              sets: [
+                { reps: 5, weight: 100, unit: 'kg' },
+                { reps: 5, weight: 100, unit: 'kg' },
+                { reps: 5, weight: 100, unit: 'kg' },
+              ],
+              proposalStatus: null,
+            },
+          },
+        },
+      ];
 
-    expect(proposals).toHaveLength(1);
-    expect(proposals[0]).toMatchObject({ exerciseIdentifier: 11 });
-  });
+      const proposals = proposeNextTargets(routine({}, [bench, squat, pullUps]), history);
+
+      expect(proposals).toHaveLength(2);
+      expect(proposals.find((p) => p.exerciseIdentifier === 11)).toMatchObject({
+        exerciseIdentifier: 11,
+      });
+      expect(proposals.find((p) => p.exerciseIdentifier === 12)).toMatchObject({
+        exerciseIdentifier: 12,
+        currentTarget: 100,
+        proposedTarget: 102.5,
+      });
+      expect(proposals.some((p) => p.exerciseIdentifier === 13)).toBe(false);
+    },
+  );
 
   it('skips an exercise whose training max is missing or not positive', () => {
     const broken: RoutineExercise = {
@@ -255,6 +326,7 @@ describe('progression — wave rule', () => {
   it('an extra set does not become the AMRAP set — the proposal reads the planned sets (§3.4)', () => {
     const weekWithJoker: CycleHistory = {
       cycleNumber: 1,
+      weeks: 4,
       exercises: {
         [bench.identifier]: {
           sets: [
@@ -275,11 +347,12 @@ describe('progression — wave rule', () => {
   });
 
   it('extra sets in every week leave the cycle-end TM proposal unchanged', () => {
-    const weekWithJoker = (weekNumber: number, amrap: { reps: number; weight: number }): CycleHistory => {
+    const weekWithJoker = (amrap: { reps: number; weight: number }): CycleHistory => {
       const weights = [60, 60, amrap.weight, amrap.weight + 5];
       const reps = [5, 5, amrap.reps, 3];
       return {
-        cycleNumber: weekNumber,
+        cycleNumber: 1,
+        weeks: 4,
         exercises: {
           [bench.identifier]: {
             sets: weights.map((weight, index) => ({
@@ -300,10 +373,10 @@ describe('progression — wave rule', () => {
       entry({ reps: 5, weight: 60 }),
     ];
     const withJokers = [
-      weekWithJoker(1, { reps: 5, weight: 85 }),
-      weekWithJoker(2, { reps: 3, weight: 90 }),
-      weekWithJoker(3, { reps: 5, weight: 95 }),
-      weekWithJoker(4, { reps: 5, weight: 60 }),
+      weekWithJoker({ reps: 5, weight: 85 }),
+      weekWithJoker({ reps: 3, weight: 90 }),
+      weekWithJoker({ reps: 5, weight: 95 }),
+      weekWithJoker({ reps: 5, weight: 60 }),
     ];
 
     const plainProposals = proposeNextTargets(routine(), plain);
@@ -393,7 +466,7 @@ describe('progression — wave rule', () => {
   it('ignores weeks with fewer than three logged sets in the AMRAP analysis', () => {
     const proposals = proposeNextTargets(routine(), [
       entry({ reps: 5, weight: 85 }),
-      entry({ reps: 3, weight: 90 }, 'kg', 2, 2),
+      entry({ reps: 3, weight: 90 }, 'kg', 1, 2),
       entry({ reps: 5, weight: 95 }),
       entry({ reps: 5, weight: 60 }),
     ]);
@@ -407,8 +480,8 @@ describe('progression — wave rule', () => {
   it('proposes no TM when the cycle has no usable AMRAP results', () => {
     const proposals = proposeNextTargets(routine(), [
       entry({ reps: 5, weight: 85 }, 'kg', 1, 2),
-      entry({ reps: 3, weight: 90 }, 'kg', 2, 2),
-      entry({ reps: 5, weight: 95 }, 'kg', 3, 2),
+      entry({ reps: 3, weight: 90 }, 'kg', 1, 2),
+      entry({ reps: 5, weight: 95 }, 'kg', 1, 2),
       entry({ reps: 5, weight: 60 }),
     ]);
 
@@ -420,18 +493,26 @@ describe('progression — wave rule', () => {
   });
 
   it('analyzes only the last cycle when several are complete', () => {
-    const firstCycle = waveCycle([
-      { reps: 5, weight: 85 },
-      { reps: 3, weight: 90 },
-      { reps: 5, weight: 95 },
-      { reps: 5, weight: 60 },
-    ]);
-    const secondCycle = waveCycle([
-      { reps: 4, weight: 87.5 },
-      { reps: 3, weight: 92.5 },
-      { reps: 1, weight: 97.5 },
-      { reps: 5, weight: 62.5 },
-    ]);
+    const firstCycle = waveCycle(
+      [
+        { reps: 5, weight: 85 },
+        { reps: 3, weight: 90 },
+        { reps: 5, weight: 95 },
+        { reps: 5, weight: 60 },
+      ],
+      'kg',
+      1,
+    );
+    const secondCycle = waveCycle(
+      [
+        { reps: 4, weight: 87.5 },
+        { reps: 3, weight: 92.5 },
+        { reps: 1, weight: 97.5 },
+        { reps: 5, weight: 62.5 },
+      ],
+      'kg',
+      2,
+    );
 
     const proposals = proposeNextTargets(routine(), [...firstCycle, ...secondCycle]);
 

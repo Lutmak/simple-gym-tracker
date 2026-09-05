@@ -180,6 +180,10 @@ export interface QueueCycleRow {
   cycleId: number;
   cycleNumber: number;
   startedAt: number | null;
+  /** §3.4 — carried so the queue can report a pending cycle review itself. */
+  currentWeek: number;
+  weeks: number;
+  status: 'active' | 'complete';
 }
 
 export interface QueueWeekSessionRow {
@@ -189,6 +193,13 @@ export interface QueueWeekSessionRow {
   sessionId: number;
   status: 'pending' | 'completed' | 'moved' | 'discarded';
   resolvedOnDate: number | null;
+  /**
+   * The plan-position day, snapshot at cycle-seed time (F7); null on a row
+   * from before this column existed, in which case `buildQueueRows` falls
+   * back to computing it live off the session's CURRENT weekday — the old
+   * behaviour, unchanged for a row this old.
+   */
+  nominalDate: number | null;
 }
 
 export interface SessionQueueInput {
@@ -257,6 +268,22 @@ export interface SessionQueueState {
   resolution: 'due' | 'unresolved' | null;
   /** The next session after the head — what resolving the head reveals. */
   upcoming: UpcomingSession | null;
+  /**
+   * §3.4 — the active routine's latest cycle is complete (its last week's
+   * sessions are all resolved) and still unreviewed. Set independently of
+   * `head`/`resolution`: in practice they are mutually exclusive, since a
+   * cycle in this state has nothing left pending until the next one is
+   * seeded, but nothing here assumes that.
+   */
+  review: QueueReviewEntry | null;
+}
+
+export interface QueueReviewEntry {
+  cycleId: number;
+  cycleNumber: number;
+  /** How many of the cycle's own sessions (every week) are resolved. */
+  completedSessions: number;
+  totalSessions: number;
 }
 
 export interface QueueRow {
@@ -281,7 +308,12 @@ export function buildQueueRows(input: SessionQueueInput): QueueRow[] {
       weekSession,
       session,
       cycle,
-      nominal: nominalSessionStamp(cycle.startedAt, weekSession.weekNumber, session.weekday),
+      // F7: the snapshot taken at cycle-seed/weekday-edit time wins when it
+      // exists; only a row from before that column existed falls back to the
+      // live computation off the session's CURRENT weekday.
+      nominal:
+        weekSession.nominalDate ??
+        nominalSessionStamp(cycle.startedAt, weekSession.weekNumber, session.weekday),
     });
   }
   return rows;
@@ -355,13 +387,43 @@ function queueOrder(rows: readonly QueueRow[], todayStamp: number): QueueRow[] {
   return [...inProgress, ...pending.filter((row) => !inProgressIds.has(row.weekSession.weekSessionId))];
 }
 
+/**
+ * §3.4 — the active routine's latest cycle, complete and unreviewed: its last
+ * week's sessions are all resolved (`current_week` reaches `weeks` the moment
+ * that happens, independent of whether any week's review was ever opened —
+ * see `advanceCycleWeek` below) and the cycle itself has
+ * not yet been closed out by `applyReview`/`startNextCycle` (`status` stays
+ * 'active' until then).
+ */
+function reviewEntryFor(input: SessionQueueInput): QueueReviewEntry | null {
+  const latestCycle = [...input.cycles]
+    .filter((cycle) => cycle.status === 'active')
+    .sort((a, b) => b.cycleNumber - a.cycleNumber)[0];
+  if (latestCycle === undefined || latestCycle.currentWeek < latestCycle.weeks) {
+    return null;
+  }
+  const cycleWeekSessions = input.weekSessions.filter(
+    (row) => row.cycleId === latestCycle.cycleId,
+  );
+  const completedSessions = cycleWeekSessions.filter((row) => row.status !== 'pending').length;
+  if (completedSessions < cycleWeekSessions.length) {
+    return null;
+  }
+  return {
+    cycleId: latestCycle.cycleId,
+    cycleNumber: latestCycle.cycleNumber,
+    completedSessions,
+    totalSessions: cycleWeekSessions.length,
+  };
+}
+
 export function computeSessionQueue(
   input: SessionQueueInput,
   todayStamp: number,
 ): SessionQueueState {
   const routine = input.routine;
   if (routine === null) {
-    return { routine: null, head: null, resolution: null, upcoming: null };
+    return { routine: null, head: null, resolution: null, upcoming: null, review: null };
   }
 
   const rows = buildQueueRows(input);
@@ -422,7 +484,7 @@ export function computeSessionQueue(
           date: effectiveDay(upcomingRow),
         };
 
-  return { routine, head, resolution, upcoming };
+  return { routine, head, resolution, upcoming, review: reviewEntryFor(input) };
 }
 
 /**
@@ -725,6 +787,9 @@ const toCycleRow = (row: Record<string, unknown>): QueueCycleRow => ({
   cycleId: num(row.cycle_id),
   cycleNumber: num(row.cycle_number),
   startedAt: nullableNum(row.started_at),
+  currentWeek: num(row.current_week),
+  weeks: num(row.weeks),
+  status: str(row.status) as QueueCycleRow['status'],
 });
 
 const toWeekSessionRow = (row: Record<string, unknown>): QueueWeekSessionRow => ({
@@ -734,6 +799,7 @@ const toWeekSessionRow = (row: Record<string, unknown>): QueueWeekSessionRow => 
   sessionId: num(row.session_id),
   status: str(row.status) as QueueWeekSessionRow['status'],
   resolvedOnDate: nullableNum(row.resolved_on_date),
+  nominalDate: nullableNum(row.nominal_date),
 });
 
 /** The active routine's queue inputs — cycles, plan rows and every week session. */
@@ -754,7 +820,7 @@ export async function loadSessionQueueInput(db: RoutineDatabase): Promise<Sessio
   };
 
   const cycleRows = await db.getAll(
-    `SELECT cycle_id, cycle_number, started_at
+    `SELECT cycle_id, cycle_number, started_at, current_week, weeks, status
      FROM Cycles WHERE routine_id = ? ORDER BY cycle_number;`,
     [routine.routineId],
   );
@@ -769,7 +835,7 @@ export async function loadSessionQueueInput(db: RoutineDatabase): Promise<Sessio
 
   const weekSessionRows = await db.getAll(
     `SELECT ws.week_session_id, cw.cycle_id, cw.week_number, ws.session_id,
-            ws.status, ws.resolved_on_date
+            ws.status, ws.resolved_on_date, ws.nominal_date
      FROM WeekSessions ws
      JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
      WHERE cw.cycle_id IN (SELECT cycle_id FROM Cycles WHERE routine_id = ?);`,
@@ -863,6 +929,7 @@ export async function resolveMoveSession(
      WHERE week_session_id = ? AND status = 'pending';`,
     [targetStamp, weekSessionId],
   );
+  await advanceCycleWeek(db, weekSessionId);
 }
 
 export async function resolveDiscardSession(
@@ -885,6 +952,7 @@ export async function resolveDiscardSession(
      WHERE week_session_id = ? AND status = 'pending';`,
     [discarded.resolvedOnDate, weekSessionId],
   );
+  await advanceCycleWeek(db, weekSessionId);
 }
 
 export async function undoDiscardSession(
@@ -901,4 +969,71 @@ export async function undoDiscardSession(
      WHERE week_session_id = ? AND status = 'discarded';`,
     [weekSessionId],
   );
+}
+
+/**
+ * §3.4/F4 — `current_week` advances the moment a week's sessions all
+ * resolve; it no longer waits for that week's review to be opened and
+ * applied. Every caller that resolves a `WeekSessions` row to something
+ * other than 'pending' (`saveSessionLog`, `resolveMoveSession`,
+ * `resolveDiscardSession`) calls this with that row's id afterwards, inside
+ * the same transaction.
+ *
+ * Before this, skipping one week's review froze `current_week` there
+ * forever — every later week's own review-availability check compares
+ * against it, so the button never reappeared for any of them, and a cycle
+ * could never even be detected as complete (`current_week >= weeks`) if its
+ * very first week's review was ever skipped.
+ *
+ * `current_week` is set to the LATEST week of this cycle with zero pending
+ * sessions, capped at the cycle's own `weeks` — never past it: reaching a
+ * genuinely new cycle needs the accepted training maxes from a review
+ * (`utils/cycleReview.ts` `startNextCycle`), not a bare increment. Applying
+ * a review (`applyReview`) can still move it forward on its own, ahead of
+ * this — the two cooperate, both only ever moving it forward.
+ */
+export async function advanceCycleWeek(
+  db: RoutineDatabase,
+  weekSessionId: number,
+): Promise<void> {
+  const cycleRow = await db.get(
+    `SELECT c.cycle_id, c.current_week, c.weeks, c.status
+     FROM WeekSessions ws
+     JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+     JOIN Cycles c ON c.cycle_id = cw.cycle_id
+     WHERE ws.week_session_id = ?;`,
+    [weekSessionId],
+  );
+  if (cycleRow === undefined || str(cycleRow.status) !== 'active') {
+    return;
+  }
+  const cycleId = num(cycleRow.cycle_id);
+  const currentWeek = num(cycleRow.current_week);
+  const weeks = num(cycleRow.weeks);
+  if (currentWeek >= weeks) {
+    return;
+  }
+
+  const weekRows = await db.getAll(
+    `SELECT cw.week_number AS week_number,
+            SUM(CASE WHEN ws.status = 'pending' THEN 1 ELSE 0 END) AS pending
+     FROM CycleWeeks cw
+     JOIN WeekSessions ws ON ws.cycle_week_id = cw.cycle_week_id
+     WHERE cw.cycle_id = ?
+     GROUP BY cw.week_number;`,
+    [cycleId],
+  );
+  let latestResolved = 0;
+  for (const row of weekRows) {
+    if (num(row.pending) === 0 && num(row.week_number) > latestResolved) {
+      latestResolved = num(row.week_number);
+    }
+  }
+  const target = Math.min(latestResolved, weeks);
+  if (target > currentWeek) {
+    await db.run(
+      `UPDATE Cycles SET current_week = ? WHERE cycle_id = ? AND current_week < ?;`,
+      [target, cycleId, target],
+    );
+  }
 }

@@ -146,7 +146,9 @@ import type { SessionSummary } from './utils/sessionSummary';
     /** R1: the one door to a new routine — from scratch, from a preset, or 5/3/1. */
     NewRoutine: undefined;
     RoutineDetails: { routineId?: number; presetKey?: string };
-    EditRoutine: { routineId: number };
+    /** F8: null routineId is an unsaved "Desde cero" draft — nothing is
+     * written until the first explicit save. */
+    EditRoutine: { routineId: number | null };
     FiveThreeOneSetup: { presetKey: string };
     CycleReview: { routineId: number; cycleId: number };
   };

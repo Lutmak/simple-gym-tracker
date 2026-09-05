@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSQLiteContext } from 'expo-sqlite';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -33,12 +33,14 @@ import {
 import {
   DEFAULT_TARGET_REPS,
   DEFAULT_TARGET_SETS,
+  editRemovalWarning,
   EditRoutineValidationError,
   saveRoutineEdit,
   type EditRoutine,
   type EditRoutineError,
 } from '../utils/editRoutine';
 import {
+  createBlankRoutine,
   loadRoutineSourceById,
   warmupsEnabledFor,
   type ExerciseSource,
@@ -51,7 +53,9 @@ import {
 import {
   BLANK_REST_ACCESSORY_SECONDS,
   BLANK_REST_MAIN_SECONDS,
+  blankRoutineDraft,
 } from '../utils/routineLibrary';
+import { routineUnitFor } from '../utils/settingsOptions';
 import {
   assignWeekday,
   firstFreeWeekday,
@@ -231,9 +235,17 @@ const errorKey = (detail: EditRoutineError): string =>
 export default function EditRoutineScreen({ navigation, route }: Props) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
-  const { firstWeekday, barProfile: settingsBarProfile } = useSettings();
+  const { firstWeekday, weightFormat, roundingIncrement: settingsIncrement, barProfile: settingsBarProfile } =
+    useSettings();
   const db = useSQLiteContext();
-  const { routineId } = route.params;
+  const { routineId: routeRoutineId } = route.params;
+  /**
+   * F8: null means an unsaved "Desde cero" draft — nothing has been written
+   * yet. It becomes a real id the moment the first explicit save creates the
+   * Routines row (`ensurePersistedRoutineId`); every other action in this
+   * screen keeps working exactly as it does for an existing routine from then on.
+   */
+  const [routineId, setRoutineId] = useState<number | null>(routeRoutineId);
 
   const routineDb: RoutineDatabase = {
     run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
@@ -261,7 +273,24 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
   const originalName = useRef('');
 
   useEffect(() => {
-    loadRoutineSourceById(routineDb, routineId)
+    if (routeRoutineId === null) {
+      // F8: an unsaved draft is built entirely in memory — no DB read, and
+      // (until the first explicit save) no DB write either.
+      const blank = blankRoutineDraft(t('routineNewDefaultName'), routineUnitFor(weightFormat), settingsIncrement);
+      originalName.current = blank.name;
+      setDraft({
+        name: blank.name,
+        unit: blank.unit,
+        progressionRule: blank.progressionRule,
+        roundingIncrement: blank.roundingIncrement,
+        restMainSeconds: blank.restMainSeconds,
+        restAccessorySeconds: blank.restAccessorySeconds,
+        plannedJokers: null,
+        sessions: [],
+      });
+      return;
+    }
+    loadRoutineSourceById(routineDb, routeRoutineId)
       .then((source) => {
         originalName.current = source.routine.name;
         setDraft({
@@ -291,7 +320,7 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
     // the user's unsaved draft, and neither the locale nor the week setting is
     // worth that.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, routineId]);
+  }, [db, routeRoutineId]);
 
   const patchDraft = (patch: (current: ScreenDraft) => ScreenDraft) =>
     setDraft((current) => (current === null ? current : patch(current)));
@@ -432,21 +461,11 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
       ?.navigate('Progress', { exercise: exerciseName });
   };
 
-  const handleSave = async () => {
-    if (draft === null || busy) {
-      return;
-    }
+  const performSave = async (editRoutine: EditRoutine, targetRoutineId: number) => {
     setBusy(true);
     setError(null);
     try {
-      await saveRoutineEdit(
-        routineDb,
-        routineId,
-        toEditRoutine(draft, {
-          routineName: originalName.current || t('routineNewDefaultName'),
-          weekdayName: (weekday) => t(WEEKDAY_FULL_KEYS[weekday]),
-        }),
-      );
+      await saveRoutineEdit(routineDb, targetRoutineId, editRoutine);
       navigation.goBack();
     } catch (failure) {
       if (failure instanceof EditRoutineValidationError) {
@@ -460,6 +479,80 @@ export default function EditRoutineScreen({ navigation, route }: Props) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleSave = async () => {
+    if (draft === null || busy) {
+      return;
+    }
+    const editRoutine = toEditRoutine(draft, {
+      routineName: originalName.current || t('routineNewDefaultName'),
+      weekdayName: (weekday) => t(WEEKDAY_FULL_KEYS[weekday]),
+    });
+
+    if (routineId === null) {
+      // F8: this is the first explicit save of an until-now unsaved draft —
+      // there is no active cycle and no history yet, so nothing to confirm.
+      // Create the Routines row now, then save the plan onto it exactly like
+      // any other edit.
+      setBusy(true);
+      setError(null);
+      let newRoutineId: number;
+      try {
+        newRoutineId = await createBlankRoutine(routineDb, {
+          name: editRoutine.name,
+          unit: editRoutine.unit,
+          roundingIncrement: editRoutine.roundingIncrement,
+          restMainSeconds: editRoutine.restMainSeconds,
+          restAccessorySeconds: editRoutine.restAccessorySeconds,
+          progressionRule: draft.progressionRule,
+        });
+      } catch {
+        setError(t('errorCreatingRoutine'));
+        setBusy(false);
+        return;
+      }
+      setBusy(false);
+      setRoutineId(newRoutineId);
+      await performSave(editRoutine, newRoutineId);
+      return;
+    }
+
+    // F7: a removed day or exercise that already has real bookkeeping in the
+    // active cycle (a completed week session's cycle position, a pending
+    // proposal) asks once before saving — stating what stays (the logs) and
+    // what is lost, never silently.
+    const warning = await editRemovalWarning(routineDb, routineId, editRoutine);
+    if (warning.days.length > 0 || warning.exercises.length > 0) {
+      const parts: string[] = [];
+      if (warning.days.length > 0) {
+        parts.push(
+          t('editRemovalWarningDays', {
+            count: warning.days.length,
+            names: warning.days.join(', '),
+          }),
+        );
+      }
+      if (warning.exercises.length > 0) {
+        parts.push(
+          t('editRemovalWarningExercises', {
+            count: warning.exercises.length,
+            names: warning.exercises.join(', '),
+          }),
+        );
+      }
+      Alert.alert(t('editRemovalWarningTitle'), parts.join('\n\n'), [
+        { text: t('editRemovalWarningCancel'), style: 'cancel' },
+        {
+          text: t('editRemovalWarningConfirm'),
+          style: 'destructive',
+          onPress: () => void performSave(editRoutine, routineId),
+        },
+      ]);
+      return;
+    }
+
+    await performSave(editRoutine, routineId);
   };
 
   const goBack = () => {

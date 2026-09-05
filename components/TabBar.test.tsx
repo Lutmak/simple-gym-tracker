@@ -8,15 +8,15 @@ import { TabBar } from './TabBar';
 import { ThemeProvider } from '../context/ThemeContext';
 import { QueueRevisionProvider } from '../context/QueueRevision';
 import { loadSessionQueue, resolvePullForwardSession } from '../utils/today';
-import { loadReviewEntry } from '../utils/cycleReview';
 import type { SessionQueueState } from '../utils/today';
 
 /**
  * The centre button answers the queue (SPEC.md §4.4); these tests exercise every one of its six
- * states by controlling what `loadSessionQueue`/`loadReviewEntry` resolve with, and asserting the
- * icon `centreActionFor`/the bar picks and where a press navigates or what it opens. The database
- * and navigation are mocked — this is the bar's own decision logic wired to a live component tree,
- * not an integration test of `expo-sqlite` or React Navigation.
+ * states by controlling what `loadSessionQueue` resolves with — a pending review is one of its
+ * states (`state.review`), not a separate lookup — and asserting the icon `centreActionFor`/the
+ * bar picks and where a press navigates or what it opens. The database and navigation are mocked —
+ * this is the bar's own decision logic wired to a live component tree, not an integration test of
+ * `expo-sqlite` or React Navigation.
  */
 
 jest.mock('expo-sqlite', () => ({
@@ -41,15 +41,10 @@ jest.mock('../utils/today', () => {
   };
 });
 
-jest.mock('../utils/cycleReview', () => ({
-  loadReviewEntry: jest.fn(),
-}));
-
 const mockLoadSessionQueue = loadSessionQueue as jest.MockedFunction<typeof loadSessionQueue>;
 const mockResolvePullForward = resolvePullForwardSession as jest.MockedFunction<
   typeof resolvePullForwardSession
 >;
-const mockLoadReviewEntry = loadReviewEntry as jest.MockedFunction<typeof loadReviewEntry>;
 
 const routine = { routineId: 1, name: 'Demo', unit: 'kg' as const, roundingIncrement: 2.5 };
 
@@ -108,8 +103,6 @@ const expectCentreIcon = async (name: string): Promise<void> => {
 beforeEach(() => {
   mockNavigate.mockClear();
   mockResolvePullForward.mockClear();
-  mockLoadReviewEntry.mockReset();
-  mockLoadReviewEntry.mockResolvedValue(null);
 });
 
 describe('TabBar centre button — the six queue states', () => {
@@ -119,6 +112,7 @@ describe('TabBar centre button — the six queue states', () => {
       head: head({ date: 100, originDate: 100 }),
       resolution: 'due',
       upcoming: null,
+      review: null,
     });
     await renderBar();
     await expectCentreIcon('play');
@@ -140,6 +134,7 @@ describe('TabBar centre button — the six queue states', () => {
       head: head({ date: 100, originDate: 60 }),
       resolution: 'due',
       upcoming: null,
+      review: null,
     });
     await renderBar();
     await expectCentreIcon('play');
@@ -159,6 +154,7 @@ describe('TabBar centre button — the six queue states', () => {
       head: head({ date: 50, originDate: 50 }),
       resolution: 'unresolved',
       upcoming: null,
+      review: null,
     });
     await renderBar();
     await expectCentreIcon('alert-circle');
@@ -178,13 +174,7 @@ describe('TabBar centre button — the six queue states', () => {
       head: null,
       resolution: null,
       upcoming: null,
-    });
-    mockLoadReviewEntry.mockResolvedValue({
-      routineId: 1,
-      cycleId: 9,
-      cycleNumber: 3,
-      currentWeek: 4,
-      routineName: 'Demo',
+      review: { cycleId: 9, cycleNumber: 3, completedSessions: 16, totalSessions: 16 },
     });
     await renderBar();
     await expectCentreIcon('ribbon');
@@ -212,6 +202,7 @@ describe('TabBar centre button — the six queue states', () => {
         weekday: 1,
         date: 500,
       },
+      review: null,
     });
     await renderBar();
     await expectCentreIcon('moon');
@@ -228,6 +219,7 @@ describe('TabBar centre button — the six queue states', () => {
       head: null,
       resolution: null,
       upcoming: null,
+      review: null,
     });
     await renderBar();
     await expectCentreIcon('moon');
@@ -255,6 +247,7 @@ describe('TabBar centre button — the six queue states', () => {
         weekday: 1,
         date: 500,
       },
+      review: null,
     });
     mockResolvePullForward.mockResolvedValue(42);
     await renderBar();
@@ -277,6 +270,7 @@ describe('TabBar centre button — the six queue states', () => {
       head: null,
       resolution: null,
       upcoming: null,
+      review: null,
     });
     await renderBar();
     await expectCentreIcon('add');

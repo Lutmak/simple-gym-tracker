@@ -12,7 +12,7 @@ const dayStamp = (ymd: string): number => {
 
 const input = (weekSessions: InicioInput['weekSessions']): InicioInput => ({
   routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
-  cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStamp('2026-08-10') }],
+  cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStamp('2026-08-10'), currentWeek: 1, weeks: 4, status: 'active' }],
   sessions: [
     { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
     { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
@@ -32,7 +32,7 @@ describe('Inicio week', () => {
           weekNumber: 1,
           sessionId: 1,
           status: 'completed',
-          resolvedOnDate: dayStamp('2026-08-10'),
+          resolvedOnDate: dayStamp('2026-08-10'), nominalDate: null
         },
         {
           weekSessionId: 2,
@@ -40,7 +40,7 @@ describe('Inicio week', () => {
           weekNumber: 1,
           sessionId: 2,
           status: 'moved',
-          resolvedOnDate: dayStamp('2026-08-14'),
+          resolvedOnDate: dayStamp('2026-08-14'), nominalDate: null
         },
         {
           weekSessionId: 3,
@@ -48,7 +48,7 @@ describe('Inicio week', () => {
           weekNumber: 1,
           sessionId: 3,
           status: 'pending',
-          resolvedOnDate: null,
+          resolvedOnDate: null, nominalDate: null
         },
       ]),
       dayStamp('2026-08-15'),
@@ -117,6 +117,7 @@ describe('Inicio streak', () => {
       sessionId,
       status,
       resolvedOnDate,
+      nominalDate: null,
     });
 
     const streak = computeInicioStreak(
@@ -150,7 +151,7 @@ describe('Inicio streak', () => {
       weekSessions: InicioInput['weekSessions'],
     ): InicioInput => ({
       routine: { routineId: 1, name: 'Two days', unit: 'kg', roundingIncrement: 2.5 },
-      cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStamp('2026-08-10') }],
+      cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStamp('2026-08-10'), currentWeek: 1, weeks: 4, status: 'active' }],
       sessions: [
         { sessionId: 1, weekday: 1, name: 'Upper', sortOrder: 1 },
         { sessionId: 2, weekday: 4, name: 'Lower', sortOrder: 2 },
@@ -164,7 +165,7 @@ describe('Inicio streak', () => {
       sessionId: number,
       status: 'completed' | 'moved' | 'discarded' | 'pending',
       resolvedOnDate: number | null,
-    ) => ({ weekSessionId, cycleId: 1, weekNumber, sessionId, status, resolvedOnDate });
+    ) => ({ weekSessionId, cycleId: 1, weekNumber, sessionId, status, resolvedOnDate, nominalDate: null });
 
     // Week 1 done as planned; week 2 done with one session moved inside the week;
     // week 3 done as planned. Three complete weeks, no discard anywhere.

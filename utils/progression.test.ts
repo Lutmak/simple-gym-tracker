@@ -42,6 +42,7 @@ const cycle = (
   proposalStatus: ProposalStatus | null = null,
 ): CycleHistory => ({
   cycleNumber: 1,
+  weeks: 4,
   exercises: {
     [squat.identifier]: { sets, proposalStatus },
   },
@@ -214,6 +215,7 @@ describe('progression — linear rule', () => {
     const proposals = proposeNextTargets(routine({}, [squat, pullUps]), [
       {
         cycleNumber: 1,
+        weeks: 4,
         exercises: {
           [squat.identifier]: {
             sets: [set(5, 100), set(5, 100), set(5, 100)],
@@ -231,10 +233,35 @@ describe('progression — linear rule', () => {
     expect(proposals[0]).toMatchObject({ exerciseIdentifier: 1, proposedTarget: 102.5 });
   });
 
-  it('proposes nothing for a wave routine with no history', () => {
-    expect(proposeNextTargets(routine({ progressionRule: 'wave' }), [])).toEqual([]);
-    expect(waveProposeNextTargets(routine({ progressionRule: 'wave' }), [])).toEqual([]);
+  it('proposes nothing for a wave routine with no history and no absolute-loaded rows', () => {
+    const tmOnly: RoutineExercise = {
+      ...squat,
+      loadSource: 'training_max_pct',
+      trainingMaxWeight: 100,
+      trainingMaxPct: 0.9,
+      absoluteWeight: null,
+    };
+    expect(proposeNextTargets(routine({ progressionRule: 'wave' }, [tmOnly]), [])).toEqual([]);
+    expect(waveProposeNextTargets(routine({ progressionRule: 'wave' }, [tmOnly]), [])).toEqual([]);
   });
+
+  it(
+    'a wave routine\'s absolute-loaded row still holds with a no-history reason (F5) — ' +
+      'the linear rule does not become a no-op just because it is hosted in a wave routine',
+    () => {
+      expect(proposeNextTargets(routine({ progressionRule: 'wave' }), [])).toEqual([
+        {
+          exerciseIdentifier: 1,
+          exerciseName: 'Squat',
+          currentTarget: 100,
+          proposedTarget: 100,
+          unit: 'kg',
+          reason: 'sin registros este ciclo',
+          advisory: false,
+        },
+      ]);
+    },
+  );
 
   it('proposes nothing for a none-rule routine', () => {
     expect(proposeNextTargets(routine({ progressionRule: 'none' }), [])).toEqual([]);

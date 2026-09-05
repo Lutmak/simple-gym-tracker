@@ -180,6 +180,9 @@ describe('serialiseRoutine → parseRoutineDocument — round trip', () => {
         philosophy: null,
         recommendedDays: null,
         plannedJokers: 1,
+        tmIncrementUpper: null,
+        tmIncrementLower: null,
+        cycleWeeks: 4,
       },
       sessions: [{ sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 }],
       exercises: [
@@ -202,6 +205,7 @@ describe('serialiseRoutine → parseRoutineDocument — round trip', () => {
           barProfile: 'olympic',
           barWeight: null,
           warmupsEnabled: true,
+          category: null,
         },
         {
           exerciseId: 2,
@@ -222,6 +226,7 @@ describe('serialiseRoutine → parseRoutineDocument — round trip', () => {
           barProfile: 'custom',
           barWeight: 9.5,
           warmupsEnabled: false,
+          category: null,
         },
       ],
     };

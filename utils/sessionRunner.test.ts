@@ -19,6 +19,8 @@ import {
   type RunnerSession,
 } from './sessionRunner';
 import {
+  estimateTrainingMax,
+  warmupRampFor,
   writeWaveRoutine,
   type WaveDayDraft,
   type WaveSetupDraft,
@@ -93,16 +95,24 @@ const row = (session: RunnerSession): RunnerSession['exercises'][number] => {
 };
 
 describe('warmupSetsFor — the ramp is a UI affordance, never a work set', () => {
-  it('derives the standard 40/50/60 x 5/5/3 ramp from the first work set, rounded', async () => {
-    const { executor } = connect();
-    const session = await fixture(executor);
-    const warmups = warmupSetsFor(squat(session), session);
-    expect(warmups).toEqual([
-      { weight: 20, reps: 5 },
-      { weight: 25, reps: 5 },
-      { weight: 27.5, reps: 3 },
-    ]);
-  });
+  it(
+    'derives the standard 40/50/60 x 5/5/3 ramp from the TRAINING MAX itself (F6) — ' +
+      'never the week\'s own first work set, which is a different number every week',
+    async () => {
+      const { executor } = connect();
+      const session = await fixture(executor);
+      // The fixture's squat has a 120 kg training max; 40/50/60% of THAT —
+      // not of whatever this week's (here, the deload week's) first work
+      // set happens to be — is 48/60/72, rounded to the 2.5 kg increment.
+      expect(squat(session).trainingMaxWeight).toBe(120);
+      const warmups = warmupSetsFor(squat(session), session);
+      expect(warmups).toEqual([
+        { weight: 47.5, reps: 5 },
+        { weight: 60, reps: 5 },
+        { weight: 72.5, reps: 3 },
+      ]);
+    },
+  );
 
   it('returns no warm-ups for a bodyweight exercise', async () => {
     const { executor } = connect();
@@ -116,6 +126,37 @@ describe('warmupSetsFor — the ramp is a UI affordance, never a work set', () =
     };
     expect(warmupSetsFor(bodyweight, session)).toEqual([]);
   });
+
+  it(
+    'produces the identical ramp the setup screen previews, in every week of the cycle (F6) — ' +
+      'the ramp seen at setup is the ramp seen in the gym, unchanged by the week',
+    async () => {
+      const { executor } = connect();
+      const session = await fixture(executor);
+      const trainingMax = squat(session).trainingMaxWeight;
+      if (trainingMax === null) {
+        throw new Error('Fixture squat has no training max');
+      }
+      const previewDay: WaveDayDraft = {
+        key: 'd1',
+        weekday: 1,
+        liftName: 'Squat',
+        catalogExerciseId: null,
+        category: 'lower',
+        trainingMax,
+        assistanceStartWeight: null,
+        assistance: [],
+      };
+      const previewRamp = warmupRampFor(previewDay, session.unit, session.roundingIncrement, 'nearest');
+      expect(previewRamp).not.toBeNull();
+      const previewShape = previewRamp?.map((set) => ({ weight: set.weight, reps: set.reps }));
+
+      for (let weekNumber = 1; weekNumber <= 4; weekNumber += 1) {
+        const runnerRamp = warmupSetsFor(squat(session), { ...session, weekNumber });
+        expect(runnerRamp).toEqual(previewShape);
+      }
+    },
+  );
 });
 
 describe('runnerTargetsFor — the runner receives the cycle week', () => {
@@ -309,10 +350,10 @@ describe('buildLogRows — the §3.2 history rows', () => {
       workoutDate: TODAY,
     });
     expect(rows.loggedExercises).toEqual([
-      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 5 },
-      { exerciseName: 'Bent Over Two-Dumbbell Row', sets: 3, reps: 10 },
-      { exerciseName: 'Lying Leg Curls', sets: 3, reps: 10 },
-      { exerciseName: 'Standing Calf Raises', sets: 3, reps: 12 },
+      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 5, role: 'main' },
+      { exerciseName: 'Bent Over Two-Dumbbell Row', sets: 3, reps: 10, role: 'accessory' },
+      { exerciseName: 'Lying Leg Curls', sets: 3, reps: 10, role: 'accessory' },
+      { exerciseName: 'Standing Calf Raises', sets: 3, reps: 12, role: 'accessory' },
     ]);
     expect(rows.weightLog).toHaveLength(12);
     const squatSets = rows.weightLog.filter((s) => s.loggedExerciseIndex === 0);
@@ -354,7 +395,14 @@ describe('buildLogRows — the §3.2 history rows', () => {
 
   it('never writes a warm-up weight — only work-set weights reach Weight_Log', async () => {
     const { executor } = connect();
-    const session = await fixture(executor);
+    const original = await fixture(executor);
+    // Warm-ups are a flat 40/50/60% of the training max (F6), unchanged by
+    // week; the fixture's own week happens to be the deload week, whose OWN
+    // work sets are also 40/50/60% of the TM — the same numbers by pure
+    // coincidence of that one week, not an overlap bug. Week 1's work sets
+    // (65/75/85% of TM) keep the two clearly distinct, which is what this
+    // test is actually about.
+    const session: RunnerSession = { ...original, weekNumber: 1 };
     const warmups = warmupSetsFor(squat(session), session);
 
     const rows = buildLogRows(session, planned(session));
@@ -387,7 +435,7 @@ describe('buildLogRows — the §3.2 history rows', () => {
     const squatLog = rows.loggedExercises.find(
       (e) => e.exerciseName === 'Barbell Full Squat',
     );
-    expect(squatLog).toEqual({ exerciseName: 'Barbell Full Squat', sets: 3, reps: 5 });
+    expect(squatLog).toEqual({ exerciseName: 'Barbell Full Squat', sets: 3, reps: 5, role: 'main' });
   });
 
   it('keeps edited reps and weight, and uses the exercise unit override', async () => {
@@ -426,8 +474,8 @@ describe('buildLogRows — the §3.2 history rows', () => {
     const rows = buildLogRows(sessionWithTwin, draft);
 
     expect(rows.loggedExercises).toEqual([
-      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 5 },
-      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 10 },
+      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 5, role: 'main' },
+      { exerciseName: 'Barbell Full Squat', sets: 3, reps: 10, role: 'accessory' },
     ]);
     const first = rows.weightLog.filter((s) => s.loggedExerciseIndex === 0);
     const second = rows.weightLog.filter((s) => s.loggedExerciseIndex === 1);
@@ -502,6 +550,7 @@ describe('buildLogRows — the §3.2 history rows', () => {
       exerciseName: 'Cable Chest Press',
       sets: 1,
       reps: 12,
+      role: null,
     });
     expect(rows.weightLog.at(-1)).toMatchObject({
       loggedExerciseIndex: 4,
@@ -879,6 +928,121 @@ describe('saveSessionLog — learned baselines (§3.2)', () => {
       .get(routineId) as { training_max_weight: number | null };
     // Epley 100 x (1 + 5/30) = 116.67; x 0.9 = 105.
     expect(row.training_max_weight).toBe(105);
+  });
+
+  it(
+    'finishing a first-ever exercise with all sets untouched writes no Weight_Log rows ' +
+      'and no baseline (F1) — a real, still-blank exercise alongside one that already has one',
+    async () => {
+      const { db, executor } = connect();
+      await runSchema(executor);
+      const routineId = await writeWaveRoutine(
+        executor,
+        waveDraft({
+          days: [
+            waveDay({
+              key: 'd1',
+              liftName: 'Squat',
+              trainingMax: null,
+              assistance: [
+                { key: 'a1', catalogExerciseId: null, name: 'Leg Press', sets: 3, reps: 10 },
+              ],
+            }),
+          ],
+        }),
+      );
+      // The assistance row already has a learned starting weight, so the
+      // session has something real to save alongside squat's untouched blanks.
+      db.prepare(
+        `UPDATE SessionExercises SET absolute_weight = 80
+           WHERE session_id = (SELECT session_id FROM Sessions WHERE routine_id = ?)
+             AND exercise_name = 'Leg Press';`,
+      ).run(routineId);
+
+      const weekSessionId = await pendingWaveWeekSession(executor, routineId);
+      const session = await loadRunnerSession(executor, weekSessionId, TODAY);
+      // Zero taps: exactly the plan the runner pre-fills, untouched.
+      const draft = buildPlannedDraft(session);
+
+      await saveSessionLog(executor, weekSessionId, session, draft);
+
+      const squatSets = db
+        .prepare(`SELECT COUNT(*) AS n FROM Weight_Log WHERE exercise_name = 'Squat';`)
+        .get() as { n: number };
+      expect(squatSets.n).toBe(0);
+
+      const legPressSets = db
+        .prepare(`SELECT COUNT(*) AS n FROM Weight_Log WHERE exercise_name = 'Leg Press';`)
+        .get() as { n: number };
+      expect(legPressSets.n).toBe(3);
+
+      const squatTm = db
+        .prepare(
+          `SELECT training_max_weight FROM SessionExercises
+           WHERE session_id = (SELECT session_id FROM Sessions WHERE routine_id = ?)
+             AND exercise_name = 'Squat';`,
+        )
+        .get(routineId) as { training_max_weight: number | null };
+      expect(squatTm.training_max_weight).toBeNull();
+    },
+  );
+
+  it('derives the wave training max from one logged set at 80 kg x 5 (Epley x TM pct)', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+    const routineId = await writeWaveRoutine(
+      executor,
+      waveDraft({ days: [waveDay({ key: 'd1', liftName: 'Squat', trainingMax: null })] }),
+    );
+    const weekSessionId = await pendingWaveWeekSession(executor, routineId);
+    const session = await loadRunnerSession(executor, weekSessionId, TODAY);
+
+    const draft: RunnerDraft = [[{ reps: 5, weight: 80 }], []];
+    await saveSessionLog(executor, weekSessionId, session, draft);
+
+    const row = db
+      .prepare(
+        `SELECT e.training_max_weight FROM SessionExercises e
+         JOIN Sessions s ON s.session_id = e.session_id
+         WHERE s.routine_id = ? AND e.role = 'main';`,
+      )
+      .get(routineId) as { training_max_weight: number | null };
+    expect(row.training_max_weight).toBe(estimateTrainingMax(80, 5, 0.9, 2.5, 'nearest'));
+  });
+
+  it('derives the wave training max from the HEAVIEST logged set, not the first (F1)', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+    const routineId = await writeWaveRoutine(
+      executor,
+      waveDraft({ days: [waveDay({ key: 'd1', liftName: 'Squat', trainingMax: null })] }),
+    );
+    const weekSessionId = await pendingWaveWeekSession(executor, routineId);
+    const session = await loadRunnerSession(executor, weekSessionId, TODAY);
+
+    // A natural ramp across the three work sets: 60, 70, 80. The heaviest —
+    // the last one — must set the baseline, not the first (60).
+    const draft: RunnerDraft = [
+      [
+        { reps: 5, weight: 60 },
+        { reps: 5, weight: 70 },
+        { reps: 5, weight: 80 },
+      ],
+      [],
+    ];
+    await saveSessionLog(executor, weekSessionId, session, draft);
+
+    const row = db
+      .prepare(
+        `SELECT e.training_max_weight FROM SessionExercises e
+         JOIN Sessions s ON s.session_id = e.session_id
+         WHERE s.routine_id = ? AND e.role = 'main';`,
+      )
+      .get(routineId) as { training_max_weight: number | null };
+    const fromHeaviest = estimateTrainingMax(80, 5, 0.9, 2.5, 'nearest');
+    const fromFirst = estimateTrainingMax(60, 5, 0.9, 2.5, 'nearest');
+    expect(row.training_max_weight).toBe(fromHeaviest);
+    expect(row.training_max_weight).not.toBe(fromFirst);
   });
 
   it('never overwrites a baseline the user set by hand', async () => {

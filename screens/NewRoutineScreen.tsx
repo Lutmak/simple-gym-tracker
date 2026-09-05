@@ -14,7 +14,7 @@ import { Screen } from '../components/Screen';
 import { ScreenTitle } from '../components/ScreenTitle';
 import { Section } from '../components/Section';
 import { fontSize, spacing, tabBar } from '../utils/scale';
-import { createBlankRoutine, type RoutineDatabase, type RoutineUnit } from '../utils/routineActions';
+import { type RoutineDatabase } from '../utils/routineActions';
 import { loadCatalogExercises } from '../utils/exerciseCatalog';
 import {
   parseRoutineDocumentText,
@@ -22,7 +22,6 @@ import {
   type RoutineDocumentError,
 } from '../utils/routineDocument';
 import {
-  blankRoutineDraft,
   loadPresetLibrary,
   loadRoutineLibrary,
   weekdaySequence,
@@ -97,14 +96,8 @@ const WAVE_PRESET_KEY = '531';
 export default function NewRoutineScreen({ navigation }: Props) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
-  const {
-    weightFormat,
-    firstWeekday,
-    roundingIncrement: settingsIncrement,
-  } = useSettings();
+  const { firstWeekday } = useSettings();
   const db = useSQLiteContext();
-
-  const unit: RoutineUnit = weightFormat === 'lbs' ? 'lb' : 'kg';
 
   const [groups, setGroups] = useState<PresetLevelGroup[]>([]);
   const [openLevel, setOpenLevel] = useState<RoutineLevel | null>(null);
@@ -133,23 +126,17 @@ export default function NewRoutineScreen({ navigation }: Props) {
     }, [db, t]),
   );
 
-  const startFromScratch = async () => {
+  /**
+   * F8: nothing is written yet — the editor holds an unsaved draft entirely
+   * in memory (§7.5) and only creates the Routines row on the user's first
+   * explicit save (a changed name, an added day, or "Continuar"). Backing
+   * out of an untouched draft leaves nothing behind.
+   */
+  const startFromScratch = () => {
     if (busy) {
       return;
     }
-    setBusy(true);
-    setError(null);
-    try {
-      const routineId = await createBlankRoutine(
-        routineDb,
-        blankRoutineDraft(t('routineNewDefaultName'), unit, settingsIncrement),
-      );
-      navigation.replace('EditRoutine', { routineId });
-    } catch {
-      setError(t('errorCreatingRoutine'));
-    } finally {
-      setBusy(false);
-    }
+    navigation.replace('EditRoutine', { routineId: null });
   };
 
   /**

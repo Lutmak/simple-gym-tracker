@@ -9,8 +9,7 @@ import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import { useQueueRevision } from '../context/QueueRevision';
 import { dayStampOf, loadSessionQueue, resolvePullForwardSession, type SessionQueueState } from '../utils/today';
-import { loadReviewEntry, type ReviewEntry } from '../utils/cycleReview';
-import { centreActionFor, type CentreActionKind } from '../utils/shell';
+import { centreActionFor, type CentreAction, type CentreActionKind } from '../utils/shell';
 import { centreButton, fontSize, spacing, tabBar, tabIndicator } from '../utils/scale';
 import type { RoutineDatabase } from '../utils/routineActions';
 import { Row } from './Row';
@@ -29,12 +28,9 @@ import { Sheet } from './Sheet';
  * in place (no navigation event) announce themselves through the queue-revision context; the bar
  * reloads on every revision bump.
  *
- * **Review is not decided by `centreActionFor`.** A pending cycle review (SPEC.md §3.4) needs a
- * database read — `loadReviewEntry` (`utils/cycleReview.ts`), owned by the Phase F work — that a
- * pure function cannot perform. The bar only asks that question when `centreActionFor` would
- * otherwise answer `restDay`: a cycle can only be complete-and-unreviewed once nothing else in
- * the routine is due, which is exactly the same precondition `restDay` already encodes, so the
- * two checks can never disagree about when to fire.
+ * A pending cycle review (SPEC.md §3.4) is a queue state, not a separate lookup: `loadSessionQueue`
+ * already reports it (`state.review`), so `centreActionFor` decides `review` itself, ahead of
+ * `restDay` — the bar has nothing of its own to fetch or reconcile.
  *
  * **Rest day opens a Sheet, never navigates.** "Adelantar la próxima sesión" pulls the next
  * upcoming session onto today (`resolvePullForwardSession`, SPEC.md §3.3) and opens it directly;
@@ -75,10 +71,7 @@ const TAB_CONFIG: readonly TabConfig[] = [
 /** How many tabs sit to the left of the centre action button. */
 const TABS_LEFT_OF_CENTRE = 2;
 
-/** Every reachable state of the centre button (SPEC.md §4.4's table, plus `review`). */
-type BarActionKind = CentreActionKind | 'review';
-
-const CENTRE_ICON: Record<BarActionKind, string> = {
+const CENTRE_ICON: Record<CentreActionKind, string> = {
   start: 'play',
   continue: 'play',
   resolve: 'alert-circle',
@@ -87,7 +80,7 @@ const CENTRE_ICON: Record<BarActionKind, string> = {
   newRoutine: 'add',
 };
 
-const CENTRE_ACCESSIBILITY_KEY: Record<BarActionKind, string> = {
+const CENTRE_ACCESSIBILITY_KEY: Record<CentreActionKind, string> = {
   start: 'startSession',
   continue: 'continueSession',
   resolve: 'resolveSession',
@@ -95,12 +88,6 @@ const CENTRE_ACCESSIBILITY_KEY: Record<BarActionKind, string> = {
   restDay: 'restDaySheetTitle',
   newRoutine: 'newRoutineAction',
 };
-
-interface BarAction {
-  kind: BarActionKind;
-  weekSessionId: number | null;
-  review: ReviewEntry | null;
-}
 
 function TabItem({
   config,
@@ -152,7 +139,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const db = useSQLiteContext();
   const [queue, setQueue] = useState<SessionQueueState | null>(null);
-  const [action, setAction] = useState<BarAction | null>(null);
+  const [action, setAction] = useState<CentreAction | null>(null);
   const [restDaySheetOpen, setRestDaySheetOpen] = useState(false);
   const [pullingForward, setPullingForward] = useState(false);
 
@@ -170,19 +157,9 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
   const reload = useCallback(() => {
     const today = dayStampOf(new Date());
     loadSessionQueue(routineDb, today)
-      .then(async (nextQueue) => {
+      .then((nextQueue) => {
         setQueue(nextQueue);
-        const base = centreActionFor(nextQueue);
-        if (base.kind !== 'restDay') {
-          setAction({ kind: base.kind, weekSessionId: base.weekSessionId, review: null });
-          return;
-        }
-        const review = await loadReviewEntry(routineDb);
-        setAction(
-          review === null
-            ? { kind: 'restDay', weekSessionId: null, review: null }
-            : { kind: 'review', weekSessionId: null, review },
-        );
+        setAction(centreActionFor(nextQueue));
       })
       .catch((error) =>
         console.error('Error loading the session queue for the tab bar:', error),
@@ -257,10 +234,10 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
         });
         return;
       case 'review':
-        if (action.review !== null) {
+        if (action.routineId !== null && action.cycleId !== null) {
           navigateIntoStack('Routines', 'CycleReview', {
-            routineId: action.review.routineId,
-            cycleId: action.review.cycleId,
+            routineId: action.routineId,
+            cycleId: action.cycleId,
           });
         }
         return;

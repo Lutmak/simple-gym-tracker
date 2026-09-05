@@ -84,6 +84,7 @@ describe('buildSessionSummary', () => {
       exerciseCount: 2,
       workSetCount: 5,
       notDoneSets: 1,
+      unsavedSets: 0,
       durationSeconds: 17,
       volumes: [
         { unit: 'kg', volume: 1300 },
@@ -136,6 +137,39 @@ describe('buildSessionSummary', () => {
       exerciseCount: 1,
       workSetCount: 1,
       volumes: [],
+    });
+  });
+
+  it('excludes an untouched, weight-still-unlearned set from what will be saved (F1)', () => {
+    // The runner's own default draft for a first-ever exercise: every set
+    // arrives "already done" with weight null (`buildPlannedDraft`). Left
+    // untouched, none of it is a real deviation and none of it is saved.
+    const learningSession: RunnerSession = {
+      ...session,
+      exercises: [
+        { ...session.exercises[0], absoluteWeight: null },
+        session.exercises[1],
+      ],
+    };
+
+    const summary = buildSessionSummary(learningSession, [
+      [
+        { reps: 5, weight: null },
+        { reps: 5, weight: null },
+        { reps: 5, weight: null },
+      ],
+      [
+        { reps: 8, weight: 60, unit: 'lb' },
+        { reps: 8, weight: 60, unit: 'lb' },
+      ],
+    ]);
+
+    expect(summary).toMatchObject({
+      exerciseCount: 1, // only Row — Squat logged nothing that will be saved
+      workSetCount: 2, // Row's two sets only
+      notDoneSets: 0, // these are "done" (default), not removed
+      unsavedSets: 3, // Squat's three untouched blanks
+      deviations: [], // the plan's own default is never a deviation
     });
   });
 

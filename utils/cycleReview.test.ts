@@ -17,7 +17,9 @@ import {
   type PerformedSetGroup,
   type ReviewExercise,
 } from './cycleReview';
-import type { RoutineDatabase } from './routineActions';
+import { activatePresetRoutine, type RoutineDatabase } from './routineActions';
+import { buildPlannedDraft, loadRunnerSession, saveSessionLog, type RunnerSession } from './sessionRunner';
+import { writeWaveRoutine, type WaveDayDraft, type WaveSetupDraft } from './waveSetup';
 
 type TestExecutor = SchemaExecutor & {
   get: RoutineDatabase['get'];
@@ -232,6 +234,7 @@ describe('plannedWorkSets — extra sets never reach a proposal or the AMRAP vie
     cycleNumber: 1,
     weekNumber: 1,
     exerciseName: 'Barbell Full Squat',
+    role: null,
     sets: [
       { weight: 100, reps: 5, unit: 'kg' },
       { weight: 100, reps: 5, unit: 'kg' },
@@ -255,6 +258,7 @@ describe('plannedWorkSets — extra sets never reach a proposal or the AMRAP vie
     trainingMaxPct: null,
     unitOverride: null,
     isAmrap: true,
+    category: null,
     ...overrides,
   });
 
@@ -323,7 +327,10 @@ describe('G1 — generation: a resolved week produces pending proposals', () => 
     await resolveDemoWeek(executor, 4);
     await generateReview(executor, 1, 6);
 
-    expect(count(db, 'Progression_Proposal')).toBe(40);
+    // F5: the wave routine's absolute-loaded accessories now get their own
+    // linear-rule proposal at cycle end too, alongside its 4 main lifts'
+    // TM proposals — 11 more rows than before that fix.
+    expect(count(db, 'Progression_Proposal')).toBe(51);
     const cycle1 = db
       .prepare('SELECT status FROM Progression_Proposal WHERE cycle_id = 1;')
       .all() as { status: string }[];
@@ -376,6 +383,16 @@ describe('G1 — resolve and apply: nothing changes without confirmation', () =>
 
     const before = await planWeight(executor, 1, 'Barbell Full Squat');
     expect(before.tm).toBe(120);
+
+    // F5: the wave routine's absolute-loaded accessories now get their own
+    // proposal at cycle end too — accept every one still pending so applying
+    // the four main lifts' review is not blocked by unrelated rows.
+    const stillPending = db
+      .prepare("SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = 6 AND status = 'pending';")
+      .all() as { proposal_id: number }[];
+    for (const row of stillPending) {
+      await resolveProposal(executor, row.proposal_id, 'accepted');
+    }
 
     const result = await applyReview(executor, 1, 6);
     expect(result.completed).toBe(true);
@@ -521,7 +538,7 @@ describe('G1 — the review is stored state and survives a restart', () => {
       await resolveDemoWeek(executor, 4);
 
       const generated = await loadCycleReview(executor, 1, 6);
-      expect(generated.proposals).toHaveLength(4);
+      expect(generated.proposals).toHaveLength(15);
 
       const squat = await proposalOf(executor, 6, 'Barbell Full Squat');
       const bench = await proposalOf(executor, 6, 'Barbell Bench Press - Medium Grip');
@@ -533,8 +550,9 @@ describe('G1 — the review is stored state and survives a restart', () => {
 
       ({ db, executor } = open());
       const resumed = await loadCycleReview(executor, 1, 6);
-      expect(resumed.proposals).toHaveLength(4);
-      expect(countWhere(db, 'Progression_Proposal', 'cycle_id = 6 AND status = \'pending\'')).toBe(1);
+      expect(resumed.proposals).toHaveLength(15);
+      // F5: 11 accessory proposals are also stored, all still pending.
+      expect(countWhere(db, 'Progression_Proposal', 'cycle_id = 6 AND status = \'pending\'')).toBe(12);
 
       const squatView = resumed.proposals.find((p) => p.exerciseName === 'Barbell Full Squat');
       expect(squatView).toMatchObject({ status: 'accepted', proposedTarget: 125 });
@@ -609,4 +627,369 @@ describe('G1 — the Today entry point', () => {
     const resumed = await loadReviewEntry(executor);
     expect(resumed?.cycleId).toBe(6);
   });
+});
+
+describe('F2 — the shipped 531 preset does not corrupt its own review', () => {
+  const TODAY = Math.floor(Date.UTC(2026, 7, 14, 12, 0, 0) / 1000);
+
+  /**
+   * One week of the real '531' preset, logged through the real
+   * `saveSessionLog` write path: every main lift's three sets (weight 100,
+   * last set's reps = `mainAmrapReps`) and its FSL back-off's five sets
+   * (weight 70, reps always 3 — deliberately different from the main's
+   * AMRAP reps, so a grouping bug that merges the two blocks is caught).
+   * Bodyweight/absolute accessories are left as the runner's own default
+   * (§7.3) — untouched is a real, supported way to finish a session.
+   */
+  const logWeek531 = async (
+    executor: TestExecutor,
+    routineId: number,
+    cycleId: number,
+    weekNumber: number,
+    mainAmrapReps: number,
+  ): Promise<void> => {
+    const weekSessions = await executor.getAll<{ week_session_id: number }>(
+      `SELECT ws.week_session_id FROM WeekSessions ws
+       JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+       WHERE cw.cycle_id = ? AND cw.week_number = ? AND ws.status = 'pending'
+       ORDER BY ws.week_session_id;`,
+      [cycleId, weekNumber],
+    );
+    expect(weekSessions.length).toBe(4);
+    // Workout_Log is UNIQUE(workout_date, day_name, workout_name) — each week
+    // needs its own calendar day so four weeks of the same day names (Bench,
+    // Squat, Press, Deadlift) don't collide.
+    const weekStamp = TODAY + (weekNumber - 1) * 7 * 86400;
+
+    for (const { week_session_id: weekSessionId } of weekSessions) {
+      const session: RunnerSession = await loadRunnerSession(executor, weekSessionId, weekStamp);
+      const mainIndex = session.exercises.findIndex((exercise) => exercise.role === 'main');
+      const fslIndex = session.exercises.findIndex(
+        (exercise) => exercise.role === 'accessory' && exercise.loadSource === 'training_max_pct',
+      );
+      expect(mainIndex).toBeGreaterThanOrEqual(0);
+      expect(fslIndex).toBeGreaterThanOrEqual(0);
+
+      const draft = buildPlannedDraft(session);
+      draft[mainIndex] = [
+        { reps: 5, weight: 100 },
+        { reps: 5, weight: 100 },
+        { reps: mainAmrapReps, weight: 100 },
+      ];
+      draft[fslIndex] = [
+        { reps: 3, weight: 70 },
+        { reps: 3, weight: 70 },
+        { reps: 3, weight: 70 },
+        { reps: 3, weight: 70 },
+        { reps: 3, weight: 70 },
+      ];
+
+      await saveSessionLog(executor, weekSessionId, session, draft);
+    }
+  };
+
+  /** Accepts every pending proposal of the cycle and advances/completes it. */
+  const acceptWeekReview = async (
+    executor: TestExecutor,
+    routineId: number,
+    cycleId: number,
+  ): Promise<void> => {
+    await generateReview(executor, routineId, cycleId);
+    const pending = await executor.getAll<{ proposal_id: number }>(
+      `SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = ? AND status = 'pending';`,
+      [cycleId],
+    );
+    for (const { proposal_id: proposalId } of pending) {
+      await resolveProposal(executor, proposalId, 'accepted');
+    }
+    await applyReview(executor, routineId, cycleId);
+  };
+
+  it(
+    'reads the main lift\'s last work set as the AMRAP for all four lifts — ' +
+      "not the FSL back-off row that shares its catalog exercise",
+    async () => {
+      const { executor } = connect();
+      await runSchema(executor);
+      const { routineId } = await activatePresetRoutine(executor, '531', 'kg', new Map());
+      const cycleRow = await executor.get(
+        `SELECT cycle_id FROM Cycles WHERE routine_id = ? AND status = 'active';`,
+        [routineId],
+      );
+      if (cycleRow === undefined) {
+        throw new Error('531 preset activation did not seed a cycle');
+      }
+      const cycleId = Number(cycleRow.cycle_id);
+
+      // Weeks 1-3: log the real preset's four sessions, then resolve and
+      // apply that week's review so the cycle reaches week 4 — the real
+      // path a maintainer's phone would have gone through, not a shortcut.
+      const weekAmrapReps = [8, 6, 4];
+      for (const [index, reps] of weekAmrapReps.entries()) {
+        await logWeek531(executor, routineId, cycleId, index + 1, reps);
+        await acceptWeekReview(executor, routineId, cycleId);
+      }
+      // Week 4 (deload) has no AMRAP set, but its sessions must resolve too —
+      // atCycleEnd's review is due only once the current week has no pending
+      // sessions left.
+      await logWeek531(executor, routineId, cycleId, 4, 5);
+
+      const review = await loadCycleReview(executor, routineId, cycleId);
+      expect(review.atCycleEnd).toBe(true);
+      expect(review.amrap.length).toBe(4);
+      for (const lift of review.amrap) {
+        expect(lift.rows.map((row) => row.reps)).toEqual(weekAmrapReps);
+      }
+
+      // The corruption the audit found is not only "main shows the wrong
+      // AMRAP" — merging the two blocks means the FSL row's OWN cycle-end
+      // proposal reads main's 100 kg/AMRAP-rep sets instead of its own real
+      // 70 kg/3-rep sets. This holds regardless of which of the two rows a
+      // SQL tie-break for an equal set_number happens to sort first, since
+      // main's first two sets (set_number 1-2) are never in dispute either
+      // way and would still leak into the FSL group under the bug.
+      const fslProposals = await executor.getAll<{
+        session_exercise_id: number;
+        reason: string;
+      }>(
+        `SELECT session_exercise_id, reason FROM Progression_Proposal
+         WHERE cycle_id = ? AND session_exercise_id IN (
+           SELECT session_exercise_id FROM SessionExercises
+           WHERE role = 'accessory' AND load_source = 'training_max_pct'
+         );`,
+        [cycleId],
+      );
+      expect(fslProposals.length).toBe(4);
+      for (const proposal of fslProposals) {
+        expect(proposal.reason).toContain('70 kg');
+        expect(proposal.reason).not.toContain('100 kg');
+      }
+    },
+  );
+});
+
+describe('F3 — setup fields that do nothing (§3.1, §3.2)', () => {
+  const singleLiftDraft = (overrides: Partial<WaveSetupDraft> = {}): WaveSetupDraft => ({
+    name: 'F3 Test',
+    unit: 'kg',
+    roundingIncrement: 2.5,
+    roundingDirection: 'nearest',
+    tmPercentage: 0.9,
+    includeDeload: false,
+    warmupsEnabled: true,
+    upperTmIncrement: 1.25,
+    lowerTmIncrement: 5,
+    assistanceBias: 'hybrid',
+    days: [
+      {
+        key: 'd1',
+        weekday: 1,
+        liftName: 'Squat',
+        catalogExerciseId: null,
+        category: 'upper',
+        trainingMax: 120,
+        assistanceStartWeight: null,
+        assistance: [],
+      } satisfies WaveDayDraft,
+    ],
+    ...overrides,
+  });
+
+  const acceptWeekReview = async (
+    executor: TestExecutor,
+    routineId: number,
+    cycleId: number,
+  ): Promise<void> => {
+    await generateReview(executor, routineId, cycleId);
+    const pending = await executor.getAll<{ proposal_id: number }>(
+      `SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = ? AND status = 'pending';`,
+      [cycleId],
+    );
+    for (const { proposal_id: proposalId } of pending) {
+      await resolveProposal(executor, proposalId, 'accepted');
+    }
+    await applyReview(executor, routineId, cycleId);
+  };
+
+  /** Logs the routine's one session for a given week with an AMRAP result. */
+  const logWeek = async (
+    executor: TestExecutor,
+    cycleId: number,
+    weekNumber: number,
+    amrapReps: number,
+    stamp: number,
+  ): Promise<void> => {
+    const weekSession = await executor.get(
+      `SELECT ws.week_session_id FROM WeekSessions ws
+       JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+       WHERE cw.cycle_id = ? AND cw.week_number = ? AND ws.status = 'pending'
+       ORDER BY ws.week_session_id LIMIT 1;`,
+      [cycleId, weekNumber],
+    );
+    if (weekSession === undefined) {
+      throw new Error(`No pending week session for week ${weekNumber}`);
+    }
+    const weekSessionId = Number(weekSession.week_session_id);
+    const session = await loadRunnerSession(executor, weekSessionId, stamp);
+    await saveSessionLog(executor, weekSessionId, session, [
+      [
+        { reps: 5, weight: 100 },
+        { reps: 5, weight: 100 },
+        { reps: amrapReps, weight: 100 },
+      ],
+    ]);
+  };
+
+  it(
+    'persists a custom TM increment and the setup category instead of discarding them; the ' +
+      'review opens after week 3 when the deload switch is off',
+    async () => {
+      const { executor } = connect();
+      await runSchema(executor);
+      const routineId = await writeWaveRoutine(executor, singleLiftDraft());
+      const cycleRow = await executor.get(
+        `SELECT cycle_id FROM Cycles WHERE routine_id = ? AND status = 'active';`,
+        [routineId],
+      );
+      if (cycleRow === undefined) {
+        throw new Error('Routine did not seed a cycle');
+      }
+      const cycleId = Number(cycleRow.cycle_id);
+
+      const day = Math.floor(Date.UTC(2026, 7, 14, 12, 0, 0) / 1000);
+      // Weeks 1 and 2's AMRAPs exactly meet their targets (5, then 3); accept
+      // each review to advance the cycle through the real applyReview path.
+      await logWeek(executor, cycleId, 1, 5, day);
+      await acceptWeekReview(executor, routineId, cycleId);
+      await logWeek(executor, cycleId, 2, 3, day + 7 * 86400);
+      await acceptWeekReview(executor, routineId, cycleId);
+      // Week 3's target is 1 — a 3-week (deload-off) cycle ends here; no
+      // week 4 was ever seeded (`cycleSeed.test.ts` proves that separately).
+      await logWeek(executor, cycleId, 3, 1, day + 14 * 86400);
+
+      const review = await loadCycleReview(executor, routineId, cycleId);
+      expect(review.atCycleEnd).toBe(true);
+      expect(review.amrap).toHaveLength(1);
+      expect(review.amrap[0].rows).toHaveLength(3);
+
+      const tmProposal = review.proposals.find((proposal) => proposal.isTmProposal);
+      if (tmProposal === undefined) {
+        throw new Error('No TM proposal generated at cycle end');
+      }
+      // 120 kg would infer 'lower' (>= the 100 kg threshold) and default to
+      // +5 kg — the setup screen's explicit 'upper' category must win over
+      // that guess, and the routine's own 1.25 kg upper increment must be
+      // what's actually added, not the 2.5 kg upper default.
+      expect(tmProposal.currentTarget).toBe(120);
+      expect(tmProposal.proposedTarget).toBe(121.25);
+    },
+  );
+});
+
+describe('F5 — accessories progress inside a wave routine', () => {
+  const TODAY = Math.floor(Date.UTC(2026, 7, 14, 12, 0, 0) / 1000);
+
+  it(
+    "after week 1 of the real '531' preset, every absolute-loaded accessory that hit its " +
+      'targets has its own +increment proposal, no bodyweight accessory has any proposal, and ' +
+      'the main lifts have a week-target proposal but no TM proposal yet (not at cycle end)',
+    async () => {
+      const { executor } = connect();
+      await runSchema(executor);
+      const { routineId } = await activatePresetRoutine(executor, '531', 'kg', new Map());
+      const cycleRow = await executor.get(
+        `SELECT cycle_id FROM Cycles WHERE routine_id = ? AND status = 'active';`,
+        [routineId],
+      );
+      if (cycleRow === undefined) {
+        throw new Error('531 preset activation did not seed a cycle');
+      }
+      const cycleId = Number((cycleRow as { cycle_id: number }).cycle_id);
+
+      const weekSessions = await executor.getAll<{ week_session_id: number }>(
+        `SELECT ws.week_session_id FROM WeekSessions ws
+         JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+         WHERE cw.cycle_id = ? AND cw.week_number = 1 AND ws.status = 'pending'
+         ORDER BY ws.week_session_id;`,
+        [cycleId],
+      );
+      expect(weekSessions.length).toBe(4);
+
+      // Log week 1 with every real (non-bodyweight) set meeting or beating
+      // its target — including the absolute accessories' own first-ever set,
+      // which both learns their baseline AND is the "met" week the F5
+      // proposal reads back, in the same pass (a real first session).
+      for (const { week_session_id: weekSessionId } of weekSessions) {
+        const session = await loadRunnerSession(executor, weekSessionId, TODAY);
+        const draft = session.exercises.map((exercise) =>
+          exercise.loadSource === 'bodyweight'
+            ? Array.from({ length: exercise.targetSets }, () => ({
+                reps: exercise.targetReps,
+                weight: null,
+              }))
+            : Array.from({ length: exercise.targetSets }, (_, index) => ({
+                reps:
+                  exercise.isAmrap && index === exercise.targetSets - 1
+                    ? exercise.targetReps + 2
+                    : exercise.targetReps,
+                weight: 100,
+              })),
+        );
+        await saveSessionLog(executor, weekSessionId, session, draft);
+      }
+
+      const review = await loadCycleReview(executor, routineId, cycleId);
+      expect(review.atCycleEnd).toBe(false);
+
+      const exerciseRows = await executor.getAll<{
+        session_exercise_id: number;
+        exercise_name: string;
+        role: string;
+        load_source: string;
+      }>(
+        `SELECT e.session_exercise_id, e.exercise_name, e.role, e.load_source
+         FROM SessionExercises e JOIN Sessions s ON s.session_id = e.session_id
+         WHERE s.routine_id = ?;`,
+        [routineId],
+      );
+
+      const absoluteAccessories = exerciseRows.filter(
+        (row) => row.role === 'accessory' && row.load_source === 'absolute',
+      );
+      expect(absoluteAccessories.length).toBe(3); // Leg Press, Seated Cable Rows, Face Pull
+
+      for (const accessory of absoluteAccessories) {
+        const proposal = review.proposals.find(
+          (p) => p.sessionExerciseId === accessory.session_exercise_id,
+        );
+        if (proposal === undefined) {
+          throw new Error(`No F5 proposal for accessory ${accessory.exercise_name}`);
+        }
+        expect(proposal.proposedTarget).toBe(proposal.currentTarget + 2.5);
+        expect(proposal.isTmProposal).toBe(false);
+      }
+
+      const bodyweightAccessories = exerciseRows.filter(
+        (row) => row.role === 'accessory' && row.load_source === 'bodyweight',
+      );
+      expect(bodyweightAccessories.length).toBe(5);
+      for (const accessory of bodyweightAccessories) {
+        expect(
+          review.proposals.some((p) => p.sessionExerciseId === accessory.session_exercise_id),
+        ).toBe(false);
+      }
+
+      const mains = exerciseRows.filter((row) => row.role === 'main');
+      expect(mains.length).toBe(4);
+      for (const main of mains) {
+        const proposal = review.proposals.find((p) => p.sessionExerciseId === main.session_exercise_id);
+        if (proposal === undefined) {
+          throw new Error(`No week-target proposal for main lift ${main.exercise_name}`);
+        }
+        // A real proposal exists (the week's target) but it is not yet a TM
+        // proposal — that only happens at cycle end (F3/F4).
+        expect(proposal.isTmProposal).toBe(false);
+      }
+    },
+  );
 });

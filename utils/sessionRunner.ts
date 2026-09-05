@@ -31,7 +31,7 @@ import { inferBaselineWeight, baselineColumn } from './learnedWeights';
 import { proposeJokerWeight } from './jokers';
 import { canSaveBarProfile, type BarProfileKey } from './barProfiles';
 import { loadSessionFinishContext, type SessionFinishContext } from './sessionFinish';
-import { targetSetsFor, targetWeightFor, type PlannedTargetSet } from './today';
+import { advanceCycleWeek, targetSetsFor, targetWeightFor, type PlannedTargetSet } from './today';
 import type {
   RoutineDatabase,
   RoutineLoadSource,
@@ -98,7 +98,13 @@ export type RunnerDraft = (LoggedSet | null)[][];
 
 export interface RunnerLogRows {
   workoutLog: { workoutName: string; dayName: string; workoutDate: number };
-  loggedExercises: { exerciseName: string; sets: number; reps: number }[];
+  loggedExercises: {
+    exerciseName: string;
+    sets: number;
+    reps: number;
+    /** Copied at log time (F2); null for a free-log exercise with no plan role. */
+    role: 'main' | 'accessory' | null;
+  }[];
   weightLog: {
     /** Position into `loggedExercises` — links sets to their log row by construction. */
     loggedExerciseIndex: number;
@@ -266,19 +272,28 @@ export function runnerTargetWeight(
 
 /**
  * The warm-up ramp for a weighted exercise: the standard 5/3/1 convention of
- * 40% x5, 50% x5, 60% x3 of the first work set's target, rounded to the
- * routine's increment (reuses the tested arithmetic from utils/fiveThreeOne.ts).
- * Bodyweight exercises have no bar to ramp — no warm-ups.
+ * 40% x5, 50% x5, 60% x3 (reuses the tested arithmetic from
+ * utils/fiveThreeOne.ts). F6: this is always a flat percentage of the
+ * TRAINING MAX, unchanged week to week — never of the week's own first work
+ * set (65% of TM in week 1, 70% in week 2, 40% in the deload week, ...),
+ * which is a different number every week and not the standard ramp at all.
+ * An absolute-loaded exercise has no training max distinct from its current
+ * target, so it still ramps off that (unaffected by this — it never varied
+ * by week to begin with). Bodyweight exercises have no bar to ramp — no
+ * warm-ups.
  */
 export function warmupSetsFor(
   exercise: RunnerExercise,
   session: RunnerSession,
 ): { weight: number; reps: number }[] {
-  const target = runnerTargetWeight(exercise, session.roundingIncrement, session.weekNumber);
-  if (target === null || target <= 0) {
+  const base =
+    exercise.loadSource === 'training_max_pct'
+      ? exercise.trainingMaxWeight
+      : runnerTargetWeight(exercise, session.roundingIncrement, session.weekNumber);
+  if (base === null || base <= 0) {
     return [];
   }
-  return warmupSets(target, {
+  return warmupSets(base, {
     increment: session.roundingIncrement,
     direction: 'nearest',
     unit: exerciseUnit(exercise, session),
@@ -327,9 +342,23 @@ export function belowTarget(
 }
 
 /**
+ * A logged slot that is still the runner's own "peso por aprender" default,
+ * untouched: the plan pre-fills a never-logged exercise's sets as done with
+ * `weight: null` (`buildPlannedDraft`), and finishing it without editing a
+ * single row must not fabricate a 0 kg/lb set that was never lifted (F1).
+ * Bodyweight sets have no weight by design — `null` there is a real answer,
+ * not a blank waiting to be learned.
+ */
+export function isUnlearnedSet(exercise: RunnerExercise, set: LoggedSet): boolean {
+  return set.weight === null && exercise.loadSource !== 'bodyweight';
+}
+
+/**
  * The §3.2 history rows for a finished session: exercises without a logged
  * set produce no rows at all; `set_number` sequences only the logged work
  * sets, in order, so a skipped middle set leaves a gapless 1..N per exercise.
+ * A set whose weight is still unlearned and untouched (`isUnlearnedSet`) is
+ * dropped like a removed set — it never reaches `Weight_Log` (F1).
  */
 export function buildLogRows(session: RunnerSession, draft: RunnerDraft): RunnerLogRows {
   const loggedExercises: RunnerLogRows['loggedExercises'] = [];
@@ -337,7 +366,7 @@ export function buildLogRows(session: RunnerSession, draft: RunnerDraft): Runner
 
   session.exercises.forEach((exercise, exerciseIndex) => {
     const sets = (draft[exerciseIndex] ?? []).filter(
-      (set): set is LoggedSet => set !== null,
+      (set): set is LoggedSet => set !== null && !isUnlearnedSet(exercise, set),
     );
     if (sets.length === 0) {
       return;
@@ -349,6 +378,7 @@ export function buildLogRows(session: RunnerSession, draft: RunnerDraft): Runner
       exerciseName: exercise.name,
       sets: isPlanned ? exercise.targetSets : sets.length,
       reps: isPlanned ? exercise.targetReps : lastSet.reps,
+      role: isPlanned ? exercise.role : null,
     });
     sets.forEach((set, index) => {
       weightLog.push({
@@ -383,11 +413,13 @@ export interface SavedSession {
 
 /**
  * The §3.2 baseline write, inside the session transaction: for every exercise
- * whose plan weight is still NULL, the first set the user actually logged
+ * whose plan weight is still NULL, the HEAVIEST set the user actually logged
  * becomes the baseline (training max for `training_max_pct`, starting load
- * otherwise). The `IS NULL` guard is what makes it "learned, never demanded"
- * — a value the user entered by hand is never overwritten, and an exercise
- * that already has a baseline is never touched again.
+ * otherwise) — a lifter naturally ramping up across a first-ever session
+ * should not have day-one's max calibrated off their lightest attempt (F1).
+ * The `IS NULL` guard is what makes it "learned, never demanded" — a value
+ * the user entered by hand is never overwritten, and an exercise that
+ * already has a baseline is never touched again.
  */
 async function applyLearnedBaselines(
   db: RoutineDatabase,
@@ -403,10 +435,15 @@ async function applyLearnedBaselines(
       continue;
     }
     const sets = draft[exerciseIndex] ?? [];
-    const first = sets.find((set): set is LoggedSet => set !== null);
-    if (first === undefined) {
+    const logged = sets.filter(
+      (set): set is LoggedSet => set !== null && !isUnlearnedSet(exercise, set),
+    );
+    if (logged.length === 0) {
       continue;
     }
+    const heaviest = logged.reduce((max, set) =>
+      (set.weight ?? 0) > (max.weight ?? 0) ? set : max,
+    );
     const planUnit = exerciseUnit(exercise, session);
     const baseline = inferBaselineWeight({
       loadSource: exercise.loadSource,
@@ -414,9 +451,9 @@ async function applyLearnedBaselines(
       roundingIncrement: session.roundingIncrement,
       planUnit,
       set: {
-        weight: first.weight ?? 0,
-        reps: first.reps,
-        unit: first.unit ?? planUnit,
+        weight: heaviest.weight ?? 0,
+        reps: heaviest.reps,
+        unit: heaviest.unit ?? planUnit,
       },
     });
     if (baseline === null) {
@@ -469,9 +506,9 @@ export async function saveSessionLog(
     for (let index = 0; index < rows.loggedExercises.length; index += 1) {
       const logged = rows.loggedExercises[index];
       await db.run(
-        `INSERT INTO Logged_Exercises (workout_log_id, exercise_name, sets, reps)
-         VALUES (?, ?, ?, ?);`,
-        [workoutLogId, logged.exerciseName, logged.sets, logged.reps],
+        `INSERT INTO Logged_Exercises (workout_log_id, exercise_name, sets, reps, role)
+         VALUES (?, ?, ?, ?, ?);`,
+        [workoutLogId, logged.exerciseName, logged.sets, logged.reps, logged.role],
       );
       const loggedRow = await db.get('SELECT last_insert_rowid() AS id;', []);
       if (!loggedRow) {
@@ -517,6 +554,9 @@ export async function saveSessionLog(
         throw new Error('saveSessionLog: week session is not pending');
       }
     }
+    // §3.4/F4: current_week advances the moment this was the week's last
+    // pending session, regardless of whether any week's review was opened.
+    await advanceCycleWeek(db, weekSessionId);
 
     const finishContext = await loadSessionFinishContext(db, weekSessionId);
 

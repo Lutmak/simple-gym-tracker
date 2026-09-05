@@ -15,15 +15,16 @@
  * routine copy or the activation that asked for it.
  */
 
+import { nominalSessionStamp } from './today';
 import type { RoutineDatabase } from './routineActions';
 
 /**
- * How many weeks a cycle spans when nothing else says. This is not a
- * preference: the wave table (utils/fiveThreeOne.ts) defines weeks 1-3 plus
- * the deload week 4 and throws beyond it, `waveProposeNextTargets` walks four
- * entries per cycle, and both demo routines are four-week cycles. A routine
- * stores no week count of its own, so its FIRST cycle takes this value and
- * every later cycle inherits the previous cycle's.
+ * The fallback cycle length (§3.2) for a routine whose own `Routines.cycle_weeks`
+ * cannot be read (a bare `linear`/`none` routine predating the column, or a row
+ * this DB layer's caller does not carry) — every wave routine has its own
+ * `cycle_weeks` (3, no deload, or 4) and `ensureActiveCycle`/`startNextCycle`
+ * read it directly rather than inheriting whatever the previous cycle ran with,
+ * so flipping the deload switch between cycles takes effect on the next one.
  */
 export const DEFAULT_CYCLE_WEEKS = 4;
 
@@ -45,10 +46,13 @@ export async function createCycle(
   startedAt: number,
 ): Promise<number> {
   const sessionRows = await db.getAll(
-    'SELECT session_id FROM Sessions WHERE routine_id = ? ORDER BY sort_order;',
+    'SELECT session_id, weekday FROM Sessions WHERE routine_id = ? ORDER BY sort_order;',
     [routineId],
   );
-  const sessionIds = sessionRows.map((row) => num(row.session_id));
+  const sessions = sessionRows.map((row) => ({
+    sessionId: num(row.session_id),
+    weekday: num(row.weekday),
+  }));
 
   const highestRow = await db.get(
     'SELECT MAX(cycle_number) AS highest FROM Cycles WHERE routine_id = ?;',
@@ -81,11 +85,15 @@ export async function createCycle(
       throw new Error('Could not read the new cycle week id');
     }
     const cycleWeekId = num(weekRow.id);
-    for (const sessionId of sessionIds) {
+    for (const session of sessions) {
+      // F7: nominal_date is a SNAPSHOT, taken once here — a later weekday
+      // edit restamps it only for a row still 'pending' (utils/editRoutine.ts);
+      // an already-resolved row keeps the day it was actually seeded with.
+      const nominalDate = nominalSessionStamp(startedAt, weekNumber, session.weekday);
       await db.run(
-        `INSERT INTO WeekSessions (cycle_week_id, session_id, status)
-         VALUES (?, ?, 'pending');`,
-        [cycleWeekId, sessionId],
+        `INSERT INTO WeekSessions (cycle_week_id, session_id, status, nominal_date)
+         VALUES (?, ?, 'pending', ?);`,
+        [cycleWeekId, session.sessionId, nominalDate],
       );
     }
   }
@@ -110,7 +118,9 @@ export async function createCycle(
  *   routine with nothing left to train would offer no session at all, which is
  *   the defect this module exists to close. The completed cycles and every set
  *   logged against them are left untouched; the new cycle is numbered after
- *   them and inherits their week count.
+ *   them and takes the routine's CURRENT `cycle_weeks` (§3.2) — not whatever
+ *   the previous cycle happened to run with, so a deload switch flipped
+ *   between cycles is honoured for the next one.
  * - **A routine with no training days gets no cycle.** There is nothing to
  *   put in a week, and an empty cycle would read as a week whose every session
  *   is resolved — it would offer a review of nothing.
@@ -138,11 +148,18 @@ export async function ensureActiveCycle(
     return null;
   }
 
-  const latestRow = await db.get(
-    'SELECT weeks FROM Cycles WHERE routine_id = ? ORDER BY cycle_number DESC LIMIT 1;',
+  const routineRow = await db.get(
+    'SELECT cycle_weeks FROM Routines WHERE routine_id = ?;',
     [routineId],
   );
-  const weeks = latestRow === undefined ? DEFAULT_CYCLE_WEEKS : num(latestRow.weeks);
+  const weeks =
+    routineRow === undefined || routineRow.cycle_weeks === null || routineRow.cycle_weeks === undefined
+      ? DEFAULT_CYCLE_WEEKS
+      : num(routineRow.cycle_weeks);
 
   return createCycle(db, routineId, weeks, startedAt);
 }
+
+// `advanceCycleWeek` (§3.4/F4) moved to utils/today.ts — F7 needs this module
+// to import date helpers FROM today.ts (`nominalSessionStamp`), and having
+// today.ts import back from here would be circular.

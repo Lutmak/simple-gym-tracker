@@ -43,6 +43,11 @@ export interface ReviewRoutine {
   unit: RoutineUnit;
   roundingIncrement: number;
   progressionRule: ReviewRule;
+  /** Per-routine TM increments (§3.1); null = the wave engine's own unit default. */
+  tmIncrementUpper: number | null;
+  tmIncrementLower: number | null;
+  /** The cycle length (§3.2) a NEW cycle of this routine seeds with: 3 or 4 weeks. */
+  cycleWeeks: number;
 }
 
 export interface ReviewCycle {
@@ -66,31 +71,57 @@ export interface ReviewExercise {
   trainingMaxPct: number | null;
   unitOverride: LoadUnit | null;
   isAmrap: boolean;
+  /** The 5/3/1 upper/lower role (§3.1); null = inferred from the training max. */
+  category: 'upper' | 'lower' | null;
 }
 
 export interface PerformedSetGroup {
   cycleNumber: number;
   weekNumber: number;
   exerciseName: string;
+  /**
+   * Copied at log time onto `Logged_Exercises` (F2, ADR-0006): disambiguates
+   * two SessionExercises rows that share a name — a preset's main lift and a
+   * back-off set on the same catalog exercise (the shipped '531' preset's FSL
+   * rows). Null for a free session (no plan role to copy) or a row logged
+   * before this column existed; a null-role group matches by name alone, same
+   * as before this fix, since there is nothing left to disambiguate with.
+   */
+  role: 'main' | 'accessory' | null;
   sets: PerformedSet[];
+}
+
+/**
+ * Whether a set group belongs to a given (name, role) exercise. Role is the
+ * disambiguator (F2): an exercise's own role must agree with the group's,
+ * unless either side has none to compare (a free-session or pre-fix group,
+ * or a caller that does not know the role) — then name alone decides, same
+ * as before role existed.
+ */
+export function groupMatchesExercise(
+  group: Pick<PerformedSetGroup, 'exerciseName' | 'role'>,
+  name: string,
+  role: 'main' | 'accessory' | null,
+): boolean {
+  return group.exerciseName === name && (group.role === null || role === null || group.role === role);
 }
 
 /**
  * Extra sets (§3.4) never reach a proposal or the AMRAP review: each group is
  * cut to its exercise's planned set count, keeping only the first `targetSets`
  * logged sets. Applied once at load time, so `buildCycleHistory` and the
- * AMRAP rows both read planned work sets only.
+ * AMRAP rows both read planned work sets only. Matched by (name, role) so a
+ * main lift and a same-named accessory (F2) each get their own count.
  */
 export function plannedWorkSets(
   groups: readonly PerformedSetGroup[],
   exercises: readonly ReviewExercise[],
 ): PerformedSetGroup[] {
-  const targetByExercise = new Map(exercises.map((exercise) => [exercise.name, exercise.targetSets]));
   return groups.map((group) => {
-    const targetSets = targetByExercise.get(group.exerciseName);
-    return targetSets === undefined
+    const match = exercises.find((exercise) => groupMatchesExercise(group, exercise.name, exercise.role));
+    return match === undefined
       ? group
-      : { ...group, sets: group.sets.slice(0, targetSets) };
+      : { ...group, sets: group.sets.slice(0, match.targetSets) };
   });
 }
 
@@ -152,6 +183,8 @@ export function buildRoutineLike(
     unit: routine.unit,
     roundingIncrement: routine.roundingIncrement,
     progressionRule: routine.progressionRule,
+    tmIncrementUpper: routine.tmIncrementUpper,
+    tmIncrementLower: routine.tmIncrementLower,
     exercises: exercises.map((exercise) => ({
       identifier: exercise.sessionExerciseId,
       name: exercise.name,
@@ -162,6 +195,7 @@ export function buildRoutineLike(
       absoluteWeight: exercise.absoluteWeight,
       trainingMaxWeight: exercise.trainingMaxWeight,
       trainingMaxPct: exercise.trainingMaxPct,
+      ...(exercise.category === null ? {} : { category: exercise.category }),
     })),
   };
 }
@@ -202,6 +236,7 @@ export function buildCycleHistory(
       for (let weekNumber = 1; weekNumber <= cycle.weeks; weekNumber += 1) {
         const entry: CycleHistory = {
           cycleNumber: cycle.cycleNumber,
+          weeks: cycle.weeks,
           exercises: {},
         };
         for (const exercise of exercises) {
@@ -210,7 +245,7 @@ export function buildCycleHistory(
               (group) =>
                 group.cycleNumber === cycle.cycleNumber &&
                 group.weekNumber === weekNumber &&
-                group.exerciseName === exercise.name,
+                groupMatchesExercise(group, exercise.name, exercise.role),
             )
             .flatMap((group) => group.sets);
           entry.exercises[exercise.sessionExerciseId] = {
@@ -227,13 +262,13 @@ export function buildCycleHistory(
   }
 
   return cyclesAsc.map((cycle) => {
-    const entry: CycleHistory = { cycleNumber: cycle.cycleNumber, exercises: {} };
+    const entry: CycleHistory = { cycleNumber: cycle.cycleNumber, weeks: cycle.weeks, exercises: {} };
     for (const exercise of exercises) {
       const cycleSets = setGroups
         .filter(
           (group) =>
             group.cycleNumber === cycle.cycleNumber &&
-            group.exerciseName === exercise.name,
+            groupMatchesExercise(group, exercise.name, exercise.role),
         )
         .flatMap((group) => group.sets);
       entry.exercises[exercise.sessionExerciseId] = {
@@ -250,7 +285,11 @@ export function buildCycleHistory(
  * Which engine proposals become stored rows. One row per exercise per cycle
  * (UNIQUE(cycle_id, session_exercise_id)); at wave cycle end the TM proposal
  * — the row whose current target IS the training max — wins over the derived
- * week-1 target. Mid-cycle wave and every linear week store all proposals.
+ * week-1 target, for a `training_max_pct` exercise. Mid-cycle wave and every
+ * linear week store all proposals. So does a wave cycle's `absolute`-loaded
+ * accessory (F5) at ANY week, cycle end included: it is on the linear rule's
+ * own weekly cadence, with no week-target/TM duality to filter — every week's
+ * proposal for it is the real one, the same as inside a `linear` routine.
  */
 export function selectStoredProposals(
   rule: ReviewRule,
@@ -261,13 +300,17 @@ export function selectStoredProposals(
   if (rule !== 'wave' || cycle.currentWeek < cycle.weeks) {
     return [...proposals];
   }
-  const trainingMaxById = new Map(
-    exercises.map((exercise) => [exercise.sessionExerciseId, exercise.trainingMaxWeight]),
-  );
-  return proposals.filter(
-    (proposal) =>
-      trainingMaxById.get(proposal.exerciseIdentifier) === proposal.currentTarget,
-  );
+  const exercisesById = new Map(exercises.map((exercise) => [exercise.sessionExerciseId, exercise]));
+  return proposals.filter((proposal) => {
+    const exercise = exercisesById.get(proposal.exerciseIdentifier);
+    if (exercise === undefined) {
+      return false;
+    }
+    if (exercise.loadSource !== 'training_max_pct') {
+      return true;
+    }
+    return exercise.trainingMaxWeight === proposal.currentTarget;
+  });
 }
 
 const exerciseById = (exercises: readonly ReviewExercise[]): Map<number, ReviewExercise> =>
@@ -312,6 +355,15 @@ const amrapMisses = (rows: readonly AmrapRow[]): number => {
 };
 
 /**
+ * A cycle's AMRAP weeks are always its first three (§3.2, F3) — true whether
+ * it has a 4th (deload) week or not, since a deload-off cycle's week 3 is
+ * still a normal AMRAP week, not a renumbered deload. Never `cycle.weeks - 1`:
+ * that assumed every cycle has exactly one non-AMRAP week at the end, which
+ * is false for a 3-week cycle (none) and would silently drop its week 3.
+ */
+const AMRAP_WEEK_COUNT = 3;
+
+/**
  * The AMRAP sets of one exercise in one cycle: the last logged set of each
  * week with at least three sets. Weeks up to `maxWeek` only — the deload week
  * is a fixed-target week and carries no AMRAP result.
@@ -320,13 +372,14 @@ const amrapRowsFor = (
   setGroups: readonly PerformedSetGroup[],
   cycleNumber: number,
   exerciseName: string,
+  role: 'main' | 'accessory' | null,
   maxWeek: number,
 ): AmrapRow[] => {
   const rows: AmrapRow[] = [];
   for (const group of setGroups) {
     if (
       group.cycleNumber !== cycleNumber ||
-      group.exerciseName !== exerciseName ||
+      !groupMatchesExercise(group, exerciseName, role) ||
       group.weekNumber > maxWeek
     ) {
       continue;
@@ -382,6 +435,7 @@ const toExercise = (row: Record<string, unknown>): ReviewExercise => ({
   trainingMaxPct: nullableNum(row.training_max_pct),
   unitOverride: nullableStr(row.unit_override) as LoadUnit | null,
   isAmrap: num(row.is_amrap) === 1,
+  category: nullableStr(row.category) as ReviewExercise['category'],
 });
 
 const toProposalRow = (row: Record<string, unknown>): ProposalRow => ({
@@ -426,6 +480,9 @@ async function loadReviewSource(
     unit: source.routine.unit as RoutineUnit,
     roundingIncrement: source.routine.roundingIncrement,
     progressionRule: source.routine.progressionRule,
+    tmIncrementUpper: source.routine.tmIncrementUpper,
+    tmIncrementLower: source.routine.tmIncrementLower,
+    cycleWeeks: source.routine.cycleWeeks,
   };
   const exercises: ReviewExercise[] = source.exercises.map((exercise) => ({
     sessionExerciseId: exercise.exerciseId,
@@ -440,6 +497,7 @@ async function loadReviewSource(
     trainingMaxPct: exercise.trainingMaxPct,
     unitOverride: exercise.unitOverride,
     isAmrap: exercise.isAmrap,
+    category: exercise.category,
   }));
 
   const cycleRows = await db.getAll(
@@ -454,7 +512,7 @@ async function loadReviewSource(
   }
 
   const setRows = await db.getAll(
-    `SELECT c.cycle_number, cw.week_number, le.exercise_name, wl.set_number,
+    `SELECT c.cycle_number, cw.week_number, le.exercise_name, le.role, wl.set_number,
             wl.weight_logged, wl.reps_logged, wl.unit
      FROM Cycles c
      JOIN CycleWeeks cw ON cw.cycle_id = c.cycle_id
@@ -463,22 +521,28 @@ async function loadReviewSource(
      JOIN Logged_Exercises le ON le.workout_log_id = wol.workout_log_id
      JOIN Weight_Log wl ON wl.logged_exercise_id = le.logged_exercise_id
      WHERE c.routine_id = ?
-     ORDER BY c.cycle_number, cw.week_number, le.exercise_name, wl.set_number;`,
+     ORDER BY c.cycle_number, cw.week_number, le.exercise_name, le.role, wl.set_number;`,
     [routineId],
   );
   const setGroups: PerformedSetGroup[] = [];
   for (const row of setRows) {
+    // F2: grouped by (cycle, week, name, role) — role is what keeps a
+    // main lift and a same-catalog back-off row (the shipped '531' preset's
+    // FSL sets) from merging into one blob and corrupting the AMRAP read.
+    const role = nullableStr(row.role) as PerformedSetGroup['role'];
     let group = setGroups[setGroups.length - 1];
     if (
       group === undefined ||
       group.cycleNumber !== num(row.cycle_number) ||
       group.weekNumber !== num(row.week_number) ||
-      group.exerciseName !== str(row.exercise_name)
+      group.exerciseName !== str(row.exercise_name) ||
+      group.role !== role
     ) {
       group = {
         cycleNumber: num(row.cycle_number),
         weekNumber: num(row.week_number),
         exerciseName: str(row.exercise_name),
+        role,
         sets: [],
       };
       setGroups.push(group);
@@ -609,7 +673,8 @@ export function buildReviewData(source: ReviewSource): ReviewData {
             source.setGroups,
             cycle.cycleNumber,
             row.exerciseName,
-            cycle.weeks - 1,
+            exercise.role,
+            AMRAP_WEEK_COUNT,
           )
         : [];
     return {
@@ -644,7 +709,8 @@ export function buildReviewData(source: ReviewSource): ReviewData {
           source.setGroups,
           cycle.cycleNumber,
           proposal.exerciseName,
-          cycle.weeks - 1,
+          exercise.role,
+          AMRAP_WEEK_COUNT,
         ),
       });
     }
@@ -815,10 +881,12 @@ export async function applyReview(
 /**
  * Explicitly generates the next cycle after a completed review, through the
  * shared `createCycle` (utils/cycleSeed.ts): a new Cycles row (status
- * 'active', current week 1) with the reviewed cycle's weeks structure, all
- * CycleWeeks, and one pending WeekSessions row per session per week. The
- * confirmed plan values — absolute weights or training maxes — are already in
- * SessionExercises, which is where the new week's targets derive from.
+ * 'active', current week 1) with the ROUTINE'S CURRENT `cycle_weeks` (§3.2) —
+ * not the just-completed cycle's own length, so a deload switch flipped since
+ * then is honoured — all CycleWeeks, and one pending WeekSessions row per
+ * session per week. The confirmed plan values — absolute weights or training
+ * maxes — are already in SessionExercises, which is where the new week's
+ * targets derive from.
  */
 export async function startNextCycle(
   db: RoutineDatabase,
@@ -835,7 +903,7 @@ export async function startNextCycle(
     const newCycleId = await createCycle(
       db,
       routineId,
-      source.cycle.weeks,
+      source.routine.cycleWeeks,
       Math.floor(Date.now() / 1000),
     );
     await db.run('COMMIT;');

@@ -1313,14 +1313,15 @@ async function insertRoutineRows(db: DemoDatabase, rows: DemoRoutineRows): Promi
     await run(
       db,
       `INSERT INTO WeekSessions
-         (cycle_week_id, session_id, status, resolved_on_date, completed_log_id)
-       VALUES (?, ?, ?, ?, ?);`,
+         (cycle_week_id, session_id, status, resolved_on_date, completed_log_id, nominal_date)
+       VALUES (?, ?, ?, ?, ?, ?);`,
       [
         weekId,
         sessionId,
         weekSession.status,
         weekSession.status === 'pending' ? null : weekSession.date,
         completedLogId,
+        weekSession.date,
       ],
     );
   }

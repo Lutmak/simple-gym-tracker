@@ -26,6 +26,9 @@ import {
   type QueueWeekSessionRow,
   type SessionQueueInput,
 } from './today';
+import { applyReview, generateReview, resolveProposal, startNextCycle } from './cycleReview';
+import { buildPlannedDraft, loadRunnerSession, saveSessionLog } from './sessionRunner';
+import { writeWaveRoutine, type WaveSetupDraft } from './waveSetup';
 
 type TestExecutor = SchemaExecutor & {
   get: RoutineDatabase['get'];
@@ -418,7 +421,7 @@ describe('computeSessionQueue pure, without a cycle', () => {
 describe('computeSessionQueue with a cycle, pure', () => {
   const input = (weekSessions: SessionQueueInput['weekSessions']): SessionQueueInput => ({
     routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
-    cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04') }],
+    cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04'), currentWeek: 1, weeks: 4, status: 'active' }],
     sessions: [
       { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
       { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
@@ -449,6 +452,7 @@ describe('computeSessionQueue with a cycle, pure', () => {
     sessionId: 1,
     status,
     resolvedOnDate,
+    nominalDate: null,
   });
 
   test('nothing pending on a rest day: no head, the plan preview is upcoming', () => {
@@ -549,8 +553,8 @@ describe('computeSessionQueue with a cycle, pure', () => {
     const today = dayStampFromYmd('2026-05-06');
     const state = computeSessionQueue(
       input([
-        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-        { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null , nominalDate: null},
+        { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null , nominalDate: null},
       ]),
       today,
     );
@@ -572,7 +576,7 @@ describe('computeSessionQueue with a cycle, pure', () => {
 describe('resolution transformations, pure', () => {
   const input = (weekSessions: SessionQueueInput['weekSessions']): SessionQueueInput => ({
     routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
-    cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04') }],
+    cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04'), currentWeek: 1, weeks: 4, status: 'active' }],
     sessions: [
       { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
       { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
@@ -582,8 +586,8 @@ describe('resolution transformations, pure', () => {
   });
 
   const baseRows: QueueWeekSessionRow[] = [
-    { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-    { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+    { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null , nominalDate: null},
+    { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null , nominalDate: null},
   ];
 
   test('a moved session landing on a day that already has one is rejected', () => {
@@ -594,7 +598,7 @@ describe('resolution transformations, pure', () => {
   test('a move onto a resolved session\'s day is also rejected', () => {
     const rows: QueueWeekSessionRow[] = [
       { ...baseRows[0] },
-      { ...baseRows[1], status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-06') },
+      { ...baseRows[1], status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-06') , nominalDate: null},
     ];
     const outcome = applyMove(input(rows), 1, dayStampFromYmd('2026-05-06'));
     expect(outcome).toEqual({ ok: false, reason: 'dayOccupied' });
@@ -611,7 +615,7 @@ describe('resolution transformations, pure', () => {
         weekNumber: 1,
         sessionId: 1,
         status: 'moved',
-        resolvedOnDate: target,
+        resolvedOnDate: target, nominalDate: null
       });
       expect(outcome.weekSessions[1]).toEqual(baseRows[1]);
     }
@@ -620,7 +624,7 @@ describe('resolution transformations, pure', () => {
   test('do it today is rejected while another session occupies today', () => {
     const rows: QueueWeekSessionRow[] = [
       { ...baseRows[0] },
-      { ...baseRows[1], status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-06') },
+      { ...baseRows[1], status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-06') , nominalDate: null},
     ];
     const outcome = applyDoToday(input(rows), 1, dayStampFromYmd('2026-05-06'));
     expect(outcome).toEqual({ ok: false, reason: 'dayOccupied' });
@@ -629,8 +633,8 @@ describe('resolution transformations, pure', () => {
   test('do it today onto a free day keeps the session pending and due today', () => {
     const today = dayStampFromYmd('2026-05-06');
     const rows: QueueWeekSessionRow[] = [
-      { ...baseRows[0], resolvedOnDate: null },
-      { ...baseRows[1], weekNumber: 1, status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-04') },
+      { ...baseRows[0], resolvedOnDate: null , nominalDate: null},
+      { ...baseRows[1], weekNumber: 1, status: 'completed', resolvedOnDate: dayStampFromYmd('2026-05-04') , nominalDate: null},
     ];
     const outcome = applyDoToday(input(rows), 1, today);
     expect(outcome.ok).toBe(true);
@@ -641,7 +645,7 @@ describe('resolution transformations, pure', () => {
         weekNumber: 1,
         sessionId: 1,
         status: 'pending',
-        resolvedOnDate: today,
+        resolvedOnDate: today, nominalDate: null
       });
       const state = computeSessionQueue(input(outcome.weekSessions), today);
       expect(state.resolution).toBe('due');
@@ -659,7 +663,7 @@ describe('resolution transformations, pure', () => {
         weekNumber: 1,
         sessionId: 1,
         status: 'discarded',
-        resolvedOnDate: dayStampFromYmd('2026-05-04'),
+        resolvedOnDate: dayStampFromYmd('2026-05-04'), nominalDate: null
       });
       const state = computeSessionQueue(input(outcome.weekSessions), dayStampFromYmd('2026-05-06'));
       expect(state.head?.weekSessionId).toBe(2);
@@ -669,7 +673,7 @@ describe('resolution transformations, pure', () => {
 
   test('resolving a session that is not pending is rejected', () => {
     const rows: QueueWeekSessionRow[] = [
-      { ...baseRows[0], status: 'moved', resolvedOnDate: dayStampFromYmd('2026-05-06') },
+      { ...baseRows[0], status: 'moved', resolvedOnDate: dayStampFromYmd('2026-05-06') , nominalDate: null},
       { ...baseRows[1] },
     ];
     expect(applyMove(input(rows), 1, dayStampFromYmd('2026-05-07'))).toEqual({
@@ -717,7 +721,7 @@ describe('resolution transformations, pure', () => {
     expect(undone).toEqual({
       ok: true,
       weekSessions: [
-        { ...baseRows[0], status: 'pending', resolvedOnDate: null },
+        { ...baseRows[0], status: 'pending', resolvedOnDate: null , nominalDate: null},
         baseRows[1],
       ],
     });
@@ -731,7 +735,16 @@ describe('resolution transformations, pure', () => {
 describe('applyPullForwardSession ("adelantar"), pure', () => {
   const input = (weekSessions: SessionQueueInput['weekSessions']): SessionQueueInput => ({
     routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
-    cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04') }],
+    cycles: [
+      {
+        cycleId: 1,
+        cycleNumber: 1,
+        startedAt: dayStampFromYmd('2026-05-04'),
+        currentWeek: 1,
+        weeks: 4,
+        status: 'active',
+      },
+    ],
     sessions: [
       { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
       { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
@@ -741,8 +754,8 @@ describe('applyPullForwardSession ("adelantar"), pure', () => {
   });
 
   const baseRows: QueueWeekSessionRow[] = [
-    { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-    { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+    { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null, nominalDate: null },
+    { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null, nominalDate: null },
   ];
 
   test('on a rest day, pulls the next upcoming session onto today', () => {
@@ -850,15 +863,15 @@ describe('queue boundaries', () => {
   test('a session unresolved across a week boundary stays the head', () => {
     const input: SessionQueueInput = {
       routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
-      cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04') }],
+      cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04'), currentWeek: 1, weeks: 4, status: 'active' }],
       sessions: [
         { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
         { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
       ],
       exercises: [],
       weekSessions: [
-        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-        { weekSessionId: 2, cycleId: 1, weekNumber: 4, sessionId: 2, status: 'pending', resolvedOnDate: null },
+        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null , nominalDate: null},
+        { weekSessionId: 2, cycleId: 1, weekNumber: 4, sessionId: 2, status: 'pending', resolvedOnDate: null , nominalDate: null},
       ],
     };
     const state = computeSessionQueue(input, dayStampFromYmd('2026-06-08'));
@@ -872,8 +885,8 @@ describe('queue boundaries', () => {
     const input: SessionQueueInput = {
       routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
       cycles: [
-        { cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-04-06') },
-        { cycleId: 2, cycleNumber: 2, startedAt: dayStampFromYmd('2026-05-04') },
+        { cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-04-06'), currentWeek: 1, weeks: 4, status: 'active' },
+        { cycleId: 2, cycleNumber: 2, startedAt: dayStampFromYmd('2026-05-04'), currentWeek: 1, weeks: 4, status: 'active' },
       ],
       sessions: [
         { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
@@ -881,9 +894,9 @@ describe('queue boundaries', () => {
       ],
       exercises: [],
       weekSessions: [
-        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-        { weekSessionId: 2, cycleId: 2, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
-        { weekSessionId: 3, cycleId: 2, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null , nominalDate: null},
+        { weekSessionId: 2, cycleId: 2, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null , nominalDate: null},
+        { weekSessionId: 3, cycleId: 2, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null , nominalDate: null},
       ],
     };
     const state = computeSessionQueue(input, dayStampFromYmd('2026-05-18'));
@@ -892,4 +905,124 @@ describe('queue boundaries', () => {
     expect(state.head?.originDate).toBe(dayStampFromYmd('2026-04-06'));
     expect(state.upcoming?.weekSessionId).toBe(2);
   });
+});
+
+describe('F4 — the queue reports a pending cycle review (§3.4)', () => {
+  const singleLiftDraft = (overrides: Partial<WaveSetupDraft> = {}): WaveSetupDraft => ({
+    name: 'F4 Test',
+    unit: 'kg',
+    roundingIncrement: 2.5,
+    roundingDirection: 'nearest',
+    tmPercentage: 0.9,
+    includeDeload: true,
+    warmupsEnabled: true,
+    upperTmIncrement: 2.5,
+    lowerTmIncrement: 5,
+    assistanceBias: 'hybrid',
+    days: [
+      {
+        key: 'd1',
+        weekday: 1,
+        liftName: 'Squat',
+        catalogExerciseId: null,
+        category: 'lower',
+        trainingMax: 100,
+        assistanceStartWeight: null,
+        assistance: [],
+      },
+    ],
+    ...overrides,
+  });
+
+  it(
+    'reports the review as its head once week 4 resolves with no review ever opened, and ' +
+      'cycle 2 week 1 once the review is applied and the next cycle started',
+    async () => {
+      const { executor } = connect();
+      await runSchema(executor);
+      const routineId = await writeWaveRoutine(executor, singleLiftDraft());
+      const cycle1Row = await executor.get(
+        `SELECT cycle_id FROM Cycles WHERE routine_id = ? AND status = 'active';`,
+        [routineId],
+      );
+      if (cycle1Row === undefined) {
+        throw new Error('Routine did not seed a cycle');
+      }
+      const cycle1Id = Number((cycle1Row as { cycle_id: number }).cycle_id);
+
+      const day = Math.floor(Date.UTC(2026, 7, 14, 12, 0, 0) / 1000);
+      // Weeks 1-4, logged through the real saveSessionLog path. No week's
+      // review is ever opened along the way — the whole point of the test.
+      for (let weekNumber = 1; weekNumber <= 4; weekNumber += 1) {
+        const weekSessionRow = await executor.get(
+          `SELECT ws.week_session_id FROM WeekSessions ws
+           JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+           WHERE cw.cycle_id = ? AND cw.week_number = ? AND ws.status = 'pending'
+           ORDER BY ws.week_session_id LIMIT 1;`,
+          [cycle1Id, weekNumber],
+        );
+        if (weekSessionRow === undefined) {
+          throw new Error(`No pending week ${weekNumber} session`);
+        }
+        const weekSessionId = Number((weekSessionRow as { week_session_id: number }).week_session_id);
+        const stamp = day + (weekNumber - 1) * 7 * 86400;
+        const session = await loadRunnerSession(executor, weekSessionId, stamp);
+        await saveSessionLog(executor, weekSessionId, session, [
+          [
+            { reps: 5, weight: 100 },
+            { reps: 5, weight: 100 },
+            { reps: 5, weight: 100 },
+          ],
+        ]);
+      }
+
+      // current_week reached the cycle's own last week on its own (F4) —
+      // nothing here ever called generateReview/applyReview.
+      const cycleAfterWeek4 = await executor.get(
+        `SELECT current_week, weeks, status FROM Cycles WHERE cycle_id = ?;`,
+        [cycle1Id],
+      );
+      expect(cycleAfterWeek4).toMatchObject({ current_week: 4, weeks: 4, status: 'active' });
+
+      const laterStamp = day + 60 * 86400;
+      const queueBefore = await loadSessionQueue(executor, laterStamp);
+      expect(queueBefore.head).toBeNull();
+      expect(queueBefore.review).toEqual({
+        cycleId: cycle1Id,
+        cycleNumber: 1,
+        completedSessions: 4,
+        totalSessions: 4,
+      });
+
+      // Now actually apply the review and start the next cycle.
+      await generateReview(executor, routineId, cycle1Id);
+      const pending = await executor.getAll<{ proposal_id: number }>(
+        `SELECT proposal_id FROM Progression_Proposal WHERE cycle_id = ? AND status = 'pending';`,
+        [cycle1Id],
+      );
+      expect(pending.length).toBeGreaterThan(0);
+      for (const { proposal_id: proposalId } of pending) {
+        await resolveProposal(executor, proposalId, 'accepted');
+      }
+      const result = await applyReview(executor, routineId, cycle1Id);
+      expect(result.completed).toBe(true);
+      const cycle2Id = await startNextCycle(executor, routineId, cycle1Id);
+
+      const cycle2Week1 = await executor.get(
+        `SELECT ws.week_session_id FROM WeekSessions ws
+         JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+         WHERE cw.cycle_id = ? AND cw.week_number = 1;`,
+        [cycle2Id],
+      );
+      if (cycle2Week1 === undefined) {
+        throw new Error('Cycle 2 was not seeded');
+      }
+
+      const queueAfter = await loadSessionQueue(executor, laterStamp);
+      expect(queueAfter.review).toBeNull();
+      expect(queueAfter.head?.weekSessionId).toBe(
+        Number((cycle2Week1 as { week_session_id: number }).week_session_id),
+      );
+    },
+  );
 });

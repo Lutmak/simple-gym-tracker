@@ -3,6 +3,7 @@ import { runSchema, type SchemaExecutor } from './schema';
 import { loadDemoData } from './demoData';
 import {
   buildEditRows,
+  editRemovalWarning,
   EditRoutineValidationError,
   saveRoutineEdit,
   type EditExercise,
@@ -10,10 +11,13 @@ import {
   type EditSession,
 } from './editRoutine';
 import {
+  createBlankRoutine,
   loadRoutineSourceById,
   type RoutineDatabase,
   type RoutineSourceBundle,
 } from './routineActions';
+import { blankRoutineDraft } from './routineLibrary';
+import { nominalSessionStamp } from './today';
 
 type TestExecutor = SchemaExecutor & {
   get: RoutineDatabase['get'];
@@ -434,6 +438,128 @@ describe('saveRoutineEdit — rewriting the plan without touching history', () =
     );
   });
 
+  it(
+    "F7: restamps a still-pending week session's nominal_date to the new weekday, but " +
+      'leaves an already-resolved one at the day it actually happened on',
+    async () => {
+      const { db, executor } = connect();
+      const base = await demoRoutineDraft(executor);
+
+      // Press Day is the one day the demo fixture leaves with a genuinely
+      // pending week session (Friday's press, per the M1 queue fixtures) —
+      // its earlier weeks are completed, giving both states on one session.
+      const beforeRows = db
+        .prepare(
+          `SELECT ws.week_session_id AS week_session_id, ws.status AS status,
+                  ws.nominal_date AS nominal_date, cw.week_number AS week_number,
+                  c.started_at AS started_at
+           FROM WeekSessions ws
+           JOIN Sessions s ON s.session_id = ws.session_id
+           JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
+           JOIN Cycles c ON c.cycle_id = cw.cycle_id
+           WHERE s.routine_id = 1 AND s.name = 'Press Day'
+           ORDER BY ws.week_session_id;`,
+        )
+        .all() as {
+        week_session_id: number;
+        status: string;
+        nominal_date: number | null;
+        week_number: number;
+        started_at: number;
+      }[];
+      const completedBefore = beforeRows.find((row) => row.status === 'completed');
+      const pendingBefore = beforeRows.find((row) => row.status === 'pending');
+      if (completedBefore === undefined || pendingBefore === undefined) {
+        throw new Error('Fixture needs both a completed and a pending Press Day week session');
+      }
+
+      // Press Day moves from Friday (5) to Sunday (0) — free on this routine.
+      await saveRoutineEdit(executor, 1, {
+        ...base,
+        sessions: base.sessions.map((s) => (s.name === 'Press Day' ? { ...s, weekday: 0 } : s)),
+      });
+
+      // The completed week session is untouched — the day it actually
+      // happened on never changes underneath it.
+      const completedAfter = db
+        .prepare('SELECT nominal_date FROM WeekSessions WHERE week_session_id = ?;')
+        .get(completedBefore.week_session_id) as { nominal_date: number | null };
+      expect(completedAfter.nominal_date).toBe(completedBefore.nominal_date);
+
+      // The still-pending one is restamped to the new weekday.
+      const pendingAfter = db
+        .prepare('SELECT nominal_date FROM WeekSessions WHERE week_session_id = ?;')
+        .get(pendingBefore.week_session_id) as { nominal_date: number | null };
+      const expectedNewNominal = nominalSessionStamp(
+        pendingBefore.started_at,
+        pendingBefore.week_number,
+        0,
+      );
+      expect(pendingAfter.nominal_date).toBe(expectedNewNominal);
+      expect(pendingAfter.nominal_date).not.toBe(pendingBefore.nominal_date);
+    },
+  );
+
+  it(
+    'F7: names a removed day with logged history and a removed exercise with a stored ' +
+      'proposal, both in the active cycle, and nothing when there is nothing to lose',
+    async () => {
+      const { db, executor } = connect();
+      const base = await demoRoutineDraft(executor);
+
+      const activeCycle = (await executor.get(
+        `SELECT cycle_id FROM Cycles WHERE routine_id = 1 AND status = 'active'
+         ORDER BY cycle_number DESC LIMIT 1;`,
+      )) as { cycle_id: number } | undefined;
+      if (activeCycle === undefined) {
+        throw new Error('Fixture has no active cycle for routine 1');
+      }
+      const cycleId = Number(activeCycle.cycle_id);
+
+      const benchSession = base.sessions.find((s) => s.name === 'Bench Day');
+      const removedExercise = benchSession?.exercises[0];
+      if (benchSession === undefined || removedExercise === undefined || removedExercise.exerciseId === null) {
+        throw new Error('Fixture missing a Bench Day exercise with an id');
+      }
+      // A stored proposal for that exercise in the active cycle — exactly
+      // what removing it would discard.
+      db.prepare(
+        `INSERT INTO Progression_Proposal
+           (routine_id, cycle_id, session_exercise_id, catalog_exercise_id, exercise_name,
+            current_target, proposed_target, unit, reason, status, created_at)
+         VALUES (1, ?, ?, NULL, ?, 10, 12.5, 'kg', 'test', 'pending', 1);`,
+      ).run(cycleId, removedExercise.exerciseId, removedExercise.name);
+
+      // Remove Press Day entirely (it has completed history, per the F7
+      // test above) and one exercise from Bench Day (which survives).
+      const draftWithRemovals: EditRoutine = {
+        ...base,
+        sessions: base.sessions
+          .filter((s) => s.name !== 'Press Day')
+          .map((s) =>
+            s.name === 'Bench Day'
+              ? {
+                  ...s,
+                  exercises: s.exercises.filter(
+                    (e) => e.exerciseId !== removedExercise.exerciseId,
+                  ),
+                }
+              : s,
+          ),
+      };
+
+      const warning = await editRemovalWarning(executor, 1, draftWithRemovals);
+      expect(warning.days).toEqual(['Press Day']);
+      expect(warning.exercises).toEqual([removedExercise.name]);
+
+      // An edit that removes nothing has nothing to confirm.
+      expect(await editRemovalWarning(executor, 1, base)).toEqual({
+        days: [],
+        exercises: [],
+      });
+    },
+  );
+
   it('keeps the SessionExercises CHECK valid across a load-source switch', async () => {
     const { db, executor } = connect();
     const base = await demoRoutineDraft(executor);
@@ -837,5 +963,69 @@ describe('R3 — the per-exercise warm-up answer survives an edit (§3.6)', () =
     expect(stored(second.name)).toBe(true);
     expect(stored(others[0].name)).toBeNull();
     expect(count(db, 'Weight_Log')).toBe(historyBefore);
+  });
+});
+
+describe('F8 — "Desde cero" does not persist a draft until saved', () => {
+  it('discarding an unsaved draft leaves no Routines row at all', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    // The screen builds this draft entirely in memory (blankRoutineDraft) and
+    // never calls createBlankRoutine unless/until the user actually saves.
+    // Simulating "the user backed out" is simply: never call it.
+    blankRoutineDraft('My Routine', 'kg');
+
+    expect(count(db, 'Routines')).toBe(0);
+    expect(count(db, 'Sessions')).toBe(0);
+    expect(count(db, 'SessionExercises')).toBe(0);
+  });
+
+  it('the first explicit save creates exactly one Routines row and its plan', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    const draft = blankRoutineDraft('My Routine', 'kg');
+    const routineId = await createBlankRoutine(executor, draft);
+    expect(count(db, 'Routines')).toBe(1);
+
+    await saveRoutineEdit(executor, routineId, {
+      name: draft.name,
+      unit: draft.unit,
+      roundingIncrement: draft.roundingIncrement,
+      restMainSeconds: draft.restMainSeconds,
+      restAccessorySeconds: draft.restAccessorySeconds,
+      sessions: [
+        {
+          sessionId: null,
+          weekday: 1,
+          name: 'Upper',
+          exercises: [
+            {
+              exerciseId: null,
+              catalogExerciseId: null,
+              name: 'My custom lift',
+              role: 'main',
+              targetSets: 3,
+              targetReps: 10,
+              loadSource: 'absolute',
+              trainingMaxPct: null,
+              trainingMaxWeight: null,
+              absoluteWeight: 60,
+              unitOverride: null,
+              isAmrap: false,
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(count(db, 'Routines')).toBe(1);
+    expect(count(db, 'Sessions')).toBe(1);
+    expect(count(db, 'SessionExercises')).toBe(1);
+    const reloaded = await loadRoutineSourceById(executor, routineId);
+    expect(reloaded.routine.name).toBe('My Routine');
+    expect(reloaded.sessions[0]?.name).toBe('Upper');
+    expect(reloaded.exercises[0]?.name).toBe('My custom lift');
   });
 });

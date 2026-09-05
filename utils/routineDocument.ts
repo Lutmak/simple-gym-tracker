@@ -607,6 +607,9 @@ export function parseRoutineDocument(
         barProfile,
         barWeight,
         warmupsEnabled,
+        // §3.1 is per-exercise 5/3/1 upper/lower classification; the document format does not
+        // carry it yet, so an imported exercise always starts inferred, same as a hand-built one.
+        category: null,
       });
     });
   });
@@ -628,6 +631,11 @@ export function parseRoutineDocument(
       isActive: false,
       createdAt: Date.now(),
       plannedJokers,
+      // §3.1/§3.2 are per-routine 5/3/1 knobs the document format does not carry yet; an
+      // imported routine starts at the wave engine's own defaults, same as one built by hand.
+      tmIncrementUpper: null,
+      tmIncrementLower: null,
+      cycleWeeks: 4,
     },
     sessions: sessionsOut,
     exercises: exercisesOut,

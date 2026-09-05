@@ -11,6 +11,8 @@ import {
   ensureWeightLogTimingColumns,
   ensureSessionExercisesColumns,
   ensureRoutinesPlannedJokers,
+  ensureRoutinesWaveSetupColumns,
+  ensureLoggedExercisesRoleColumn,
   type SchemaExecutor,
 } from './schema';
 
@@ -365,36 +367,57 @@ describe('runSchema', () => {
         is_active INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL
       );
+      CREATE TABLE Logged_Exercises (
+        logged_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+        workout_log_id INTEGER NOT NULL,
+        exercise_name TEXT NOT NULL,
+        sets INTEGER NOT NULL,
+        reps INTEGER NOT NULL
+      );
     `);
 
     expect(columnNames(db, 'Weight_Log')).not.toContain('started_at');
     expect(columnNames(db, 'SessionExercises')).not.toContain('bar_profile');
+    expect(columnNames(db, 'SessionExercises')).not.toContain('category');
     expect(columnNames(db, 'Routines')).not.toContain('planned_jokers');
+    expect(columnNames(db, 'Routines')).not.toContain('cycle_weeks');
+    expect(columnNames(db, 'Logged_Exercises')).not.toContain('role');
 
     await ensureWeightLogTimingColumns(executor);
     await ensureSessionExercisesColumns(executor);
     await ensureRoutinesPlannedJokers(executor);
+    await ensureRoutinesWaveSetupColumns(executor);
+    await ensureLoggedExercisesRoleColumn(executor);
 
     expect(columnNames(db, 'Weight_Log')).toEqual(
       expect.arrayContaining(['started_at', 'completed_at']),
     );
     expect(columnNames(db, 'SessionExercises')).toEqual(
-      expect.arrayContaining(['bar_profile', 'bar_weight']),
+      expect.arrayContaining(['bar_profile', 'bar_weight', 'category']),
     );
     expect(columnNames(db, 'Routines')).toEqual(
-      expect.arrayContaining(['planned_jokers']),
+      expect.arrayContaining([
+        'planned_jokers',
+        'tm_increment_upper',
+        'tm_increment_lower',
+        'cycle_weeks',
+      ]),
     );
+    expect(columnNames(db, 'Logged_Exercises')).toEqual(expect.arrayContaining(['role']));
 
     // Idempotent: a second pass changes nothing.
     await ensureWeightLogTimingColumns(executor);
     await ensureSessionExercisesColumns(executor);
     await ensureRoutinesPlannedJokers(executor);
+    await ensureRoutinesWaveSetupColumns(executor);
+    await ensureLoggedExercisesRoleColumn(executor);
     expect(columnNames(db, 'Weight_Log')).toEqual(
       expect.arrayContaining(['started_at', 'completed_at']),
     );
     expect(columnNames(db, 'Routines')).toEqual(
-      expect.arrayContaining(['planned_jokers']),
+      expect.arrayContaining(['planned_jokers', 'cycle_weeks']),
     );
+    expect(columnNames(db, 'Logged_Exercises')).toEqual(expect.arrayContaining(['role']));
   });
 
   it('seeds the catalog idempotently', async () => {

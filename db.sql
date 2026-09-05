@@ -57,12 +57,18 @@ CREATE TABLE IF NOT EXISTS Workout_Log (
     UNIQUE (workout_date, day_name, workout_name)
 );
 
+-- role (F2) is copied at log time from the planned SessionExercises row —
+-- NULL for a free session with no plan role. It disambiguates two rows that
+-- share exercise_name (a preset's main lift and a back-off set on the same
+-- catalog exercise, e.g. the shipped '531' preset's FSL rows), which the name
+-- alone cannot.
 CREATE TABLE IF NOT EXISTS Logged_Exercises (
     logged_exercise_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     workout_log_id INTEGER NOT NULL,
     exercise_name TEXT NOT NULL,
     sets INTEGER NOT NULL,
     reps INTEGER NOT NULL,
+    role TEXT CHECK (role IS NULL OR role IN ('main', 'accessory')),
     FOREIGN KEY (workout_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE CASCADE
 );
 
@@ -121,6 +127,10 @@ CREATE INDEX IF NOT EXISTS Catalog_Exercise_Muscles_muscle
 -- weekday uses Date.getDay(): 0 = Sunday … 6 = Saturday.
 -- planned_jokers (SPECS.md §3.4): how many jokers a wave routine plans ahead,
 -- 0 = off. Only meaningful for progression_rule 'wave'; other rules ignore it.
+-- tm_increment_upper/lower and cycle_weeks (§3.1/§3.2, F3): a wave routine's
+-- own training-max increments and deload choice. NULL increments mean the
+-- wave engine's own unit default (2.5/5 kg, 5/10 lb); cycle_weeks is 3 (no
+-- deload week) or 4.
 
 CREATE TABLE IF NOT EXISTS Routines (
     routine_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -134,7 +144,10 @@ CREATE TABLE IF NOT EXISTS Routines (
     rest_accessory_seconds INTEGER NOT NULL CHECK (rest_accessory_seconds >= 0),
     is_active INTEGER NOT NULL DEFAULT 0 CHECK (is_active IN (0, 1)),
     created_at INTEGER NOT NULL,
-    planned_jokers INTEGER NOT NULL DEFAULT 0 CHECK (planned_jokers >= 0)
+    planned_jokers INTEGER NOT NULL DEFAULT 0 CHECK (planned_jokers >= 0),
+    tm_increment_upper REAL CHECK (tm_increment_upper IS NULL OR tm_increment_upper > 0),
+    tm_increment_lower REAL CHECK (tm_increment_lower IS NULL OR tm_increment_lower > 0),
+    cycle_weeks INTEGER NOT NULL DEFAULT 4 CHECK (cycle_weeks IN (3, 4))
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS Routines_single_active
@@ -185,6 +198,10 @@ CREATE TABLE IF NOT EXISTS SessionExercises (
     -- R3/§3.6: NULL means "whatever this role does by default" — on for a main
     -- lift, off for an accessory. 0/1 is the user overriding that per exercise.
     warmups_enabled INTEGER CHECK (warmups_enabled IS NULL OR warmups_enabled IN (0, 1)),
+    -- §3.1/F3: the 5/3/1 upper/lower role, chosen at setup, actually used for
+    -- the cycle-end TM increment instead of being guessed from the load. NULL
+    -- = inferred from the training max, same as before this column existed.
+    category TEXT CHECK (category IS NULL OR category IN ('upper', 'lower')),
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (catalog_exercise_id) REFERENCES Catalog_Exercises(exercise_key) ON DELETE SET NULL,
     UNIQUE (session_id, sort_order),
@@ -229,6 +246,11 @@ CREATE TABLE IF NOT EXISTS CycleWeeks (
 
 -- One row per session per week. completed_log_id is a non-destructive link to
 -- history: deleting a log nulls it (SET NULL), never the other way round.
+-- nominal_date (F7): the session's planned day, snapshot at cycle-seed time
+-- instead of derived live from Sessions.weekday. A later weekday edit
+-- restamps only this row's value when it is still 'pending'; an
+-- already-resolved row's displayed plan position never changes underneath
+-- it. NULL on a row from before this column existed.
 CREATE TABLE IF NOT EXISTS WeekSessions (
     week_session_id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     cycle_week_id INTEGER NOT NULL,
@@ -236,6 +258,7 @@ CREATE TABLE IF NOT EXISTS WeekSessions (
     status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'moved', 'discarded')),
     resolved_on_date INTEGER,
     completed_log_id INTEGER,
+    nominal_date INTEGER,
     FOREIGN KEY (cycle_week_id) REFERENCES CycleWeeks(cycle_week_id) ON DELETE CASCADE,
     FOREIGN KEY (session_id) REFERENCES Sessions(session_id) ON DELETE CASCADE,
     FOREIGN KEY (completed_log_id) REFERENCES Workout_Log(workout_log_id) ON DELETE SET NULL,

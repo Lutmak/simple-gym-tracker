@@ -19,6 +19,7 @@ const state = (overrides: Partial<SessionQueueState>): SessionQueueState => ({
   head: null,
   resolution: null,
   upcoming: null,
+  review: null,
   ...overrides,
 });
 
@@ -27,11 +28,18 @@ describe('centreActionFor', () => {
     expect(centreActionFor(state({ routine: null }))).toEqual({
       kind: 'newRoutine',
       weekSessionId: null,
+      cycleId: null,
+      routineId: null,
     });
   });
 
   it('is a rest day when nothing is pending or scheduled', () => {
-    expect(centreActionFor(state({}))).toEqual({ kind: 'restDay', weekSessionId: null });
+    expect(centreActionFor(state({}))).toEqual({
+      kind: 'restDay',
+      weekSessionId: null,
+      cycleId: null,
+      routineId: null,
+    });
   });
 
   it('is a rest day when nothing is pending but the next session is upcoming', () => {
@@ -41,7 +49,7 @@ describe('centreActionFor', () => {
           upcoming: { weekSessionId: null, sessionId: null, name: 'Día A', weekday: 3, date: 200 },
         }),
       ),
-    ).toEqual({ kind: 'restDay', weekSessionId: null });
+    ).toEqual({ kind: 'restDay', weekSessionId: null, cycleId: null, routineId: null });
   });
 
   it('offers to resolve an unresolved past session', () => {
@@ -52,7 +60,7 @@ describe('centreActionFor', () => {
           resolution: 'unresolved',
         }),
       ),
-    ).toEqual({ kind: 'resolve', weekSessionId: 7 });
+    ).toEqual({ kind: 'resolve', weekSessionId: 7, cycleId: null, routineId: null });
   });
 
   it('offers to start the head when it sits on its nominal day', () => {
@@ -63,7 +71,7 @@ describe('centreActionFor', () => {
           resolution: 'due',
         }),
       ),
-    ).toEqual({ kind: 'start', weekSessionId: 7 });
+    ).toEqual({ kind: 'start', weekSessionId: 7, cycleId: null, routineId: null });
   });
 
   it('offers to continue the head when it was moved onto today', () => {
@@ -74,6 +82,16 @@ describe('centreActionFor', () => {
           resolution: 'due',
         }),
       ),
-    ).toEqual({ kind: 'continue', weekSessionId: 7 });
+    ).toEqual({ kind: 'continue', weekSessionId: 7, cycleId: null, routineId: null });
+  });
+
+  it('opens the cycle review when it is pending, ahead of the rest-day sheet (§3.4, F4)', () => {
+    expect(
+      centreActionFor(
+        state({
+          review: { cycleId: 9, cycleNumber: 3, completedSessions: 16, totalSessions: 16 },
+        }),
+      ),
+    ).toEqual({ kind: 'review', weekSessionId: null, cycleId: 9, routineId: 1 });
   });
 });

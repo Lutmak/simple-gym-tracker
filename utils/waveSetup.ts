@@ -245,21 +245,22 @@ export function estimateTrainingMax(
 
 /**
  * The warm-up ramp a day shows when warm-ups are on: the standard 40% x5,
- * 50% x5, 60% x3 of the first work set — TM x TM percentage — rounded to the
- * routine's increment. The same base the D6 session runner uses, so the ramp
- * seen at setup is the ramp seen in the gym.
+ * 50% x5, 60% x3 of the TRAINING MAX itself (F6) — never TM x TM percentage,
+ * which is not the training max and matches no real work set in the wave
+ * table (weeks 1-3 top out at 85/90/95% of TM, never flatly at the TM
+ * percentage). The same base the D6 session runner uses, so the ramp seen
+ * at setup is the ramp seen in the gym, unchanged week to week.
  */
 export function warmupRampFor(
   day: WaveDayDraft,
   unit: RoutineUnit,
   roundingIncrement: number,
   roundingDirection: RoundingDirection,
-  tmPercentage: number,
 ): WarmupSet[] | null {
   if (day.trainingMax === null || !Number.isFinite(day.trainingMax) || day.trainingMax <= 0) {
     return null;
   }
-  return warmupSets(day.trainingMax * tmPercentage, {
+  return warmupSets(day.trainingMax, {
     increment: roundingIncrement,
     direction: roundingDirection,
     unit,
@@ -388,6 +389,9 @@ export function buildWaveRoutineRows(draft: WaveSetupDraft): RoutineCopyRows {
       // (§3.6). The program switch turning them off is a real answer, so it
       // is stored as one.
       warmupsEnabled: day.warmupsEnabled ?? (draft.warmupsEnabled ? null : false),
+      // §3.1/F3: the lift's own upper/lower role, actually persisted — only
+      // the main lift carries one; accessories have no TM increment concept.
+      category: day.category,
     };
     const accessories = day.assistance.map((exercise, index) => ({
       sessionIndex,
@@ -406,6 +410,7 @@ export function buildWaveRoutineRows(draft: WaveSetupDraft): RoutineCopyRows {
       barProfile: defaultBarProfileForEquipment(exercise.equipment ?? null),
       barWeight: null,
       warmupsEnabled: exercise.warmupsEnabled ?? null,
+      category: null,
     }));
     return [main, ...accessories];
   });
@@ -423,6 +428,10 @@ export function buildWaveRoutineRows(draft: WaveSetupDraft): RoutineCopyRows {
       isActive: true,
       createdAt: Date.now(),
       plannedJokers: draft.plannedJokers ?? 0,
+      // §3.1/§3.2 (F3): persisted instead of validated-then-discarded.
+      tmIncrementUpper: draft.upperTmIncrement,
+      tmIncrementLower: draft.lowerTmIncrement,
+      cycleWeeks: draft.includeDeload ? 4 : 3,
     },
     sessions,
     exercises,
@@ -448,8 +457,9 @@ export async function writeWaveRoutine(
     await db.run(
       `INSERT INTO Routines
          (routine_key, name, origin, progression_rule, unit, rounding_increment,
-          rest_main_seconds, rest_accessory_seconds, is_active, created_at, planned_jokers)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+          rest_main_seconds, rest_accessory_seconds, is_active, created_at, planned_jokers,
+          tm_increment_upper, tm_increment_lower, cycle_weeks)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
       [
         rows.routine.routineKey,
         rows.routine.name,
@@ -462,6 +472,9 @@ export async function writeWaveRoutine(
         rows.routine.isActive ? 1 : 0,
         rows.routine.createdAt,
         rows.routine.plannedJokers,
+        rows.routine.tmIncrementUpper,
+        rows.routine.tmIncrementLower,
+        rows.routine.cycleWeeks,
       ],
     );
     const routineIdRow = await db.get('SELECT last_insert_rowid() AS id;', []);
@@ -492,8 +505,9 @@ export async function writeWaveRoutine(
         `INSERT INTO SessionExercises
            (session_id, catalog_exercise_id, exercise_name, role, target_sets, target_reps,
             load_source, training_max_pct, training_max_weight, absolute_weight,
-            unit_override, is_amrap, sort_order, bar_profile, bar_weight, warmups_enabled)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+            unit_override, is_amrap, sort_order, bar_profile, bar_weight, warmups_enabled,
+            category)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
         [
           sessionId,
           exercise.catalogExerciseId,
@@ -511,6 +525,7 @@ export async function writeWaveRoutine(
           exercise.barProfile,
           exercise.barWeight,
           exercise.warmupsEnabled === null ? null : exercise.warmupsEnabled ? 1 : 0,
+          exercise.category,
         ],
       );
     }

@@ -3,8 +3,20 @@
  * no registry. Pure module — no database, no React. The app proposes, the user
  * decides; nothing here ever writes anything.
  *
- * `proposeNextTargets` dispatches on the routine's `progressionRule` to the
- * `linear` implementation or the `wave` adapter over `utils/fiveThreeOne.ts`.
+ * `proposeNextTargets` dispatches on the routine's `progressionRule`, but the
+ * dispatch is not purely per-routine (F5): a `wave` routine's own main lifts
+ * still go through `waveProposeNextTargets`, but its `absolute`-loaded rows
+ * (assistance work, e.g. the shipped '531' preset's FSL/accessory rows) get
+ * the SAME hit-or-miss linear rule a `linear` routine's exercises get — one
+ * evaluation per exercise, per entry in `cycleHistory` (a week, for a wave
+ * routine; a cycle, for a linear one — the rule itself does not care which).
+ * Gating dispatch on the routine's rule alone left every absolute/bodyweight
+ * accessory inside a wave routine permanently frozen at its starting load,
+ * with no proposal ever, contradicting §7.4 ("every automated decision that
+ * changes future training surfaces as a proposal"). A `bodyweight` row still
+ * gets no proposal at all — there is no weight to progress and no reps-based
+ * proposal shape in the schema (`Progression_Proposal` is a weight column);
+ * see ADR-0029 §7.4 if that changes.
  *
  * Extra sets (§3.4) can never move a proposal on their own: every evaluation
  * reads only the first `targetSets` sets of an exercise's history — the
@@ -60,6 +72,12 @@ export interface RoutineLike {
   roundingIncrement: number;
   progressionRule: ProgressionRule;
   exercises: RoutineExercise[];
+  /**
+   * Per-routine TM increments (§3.1); null = `suggestNextTM`'s own upper/lower
+   * default for the routine's unit (2.5/5 kg, 5/10 lb).
+   */
+  tmIncrementUpper?: number | null;
+  tmIncrementLower?: number | null;
 }
 
 export interface PerformedSet {
@@ -79,6 +97,13 @@ export interface ExerciseHistory {
 /** Ascending by cycle number; the last entry is the cycle under review. */
 export interface CycleHistory {
   cycleNumber: number;
+  /**
+   * This entry's cycle length (§3.2) — 3 or 4 weeks. The wave rule reads it
+   * instead of assuming every cycle is four weeks, so a deload-off routine's
+   * review opens after week 3 rather than waiting for a week 4 that never
+   * gets seeded.
+   */
+  weeks: number;
   exercises: Record<number, ExerciseHistory>;
 }
 
@@ -93,6 +118,30 @@ export interface LoadProposal {
   advisory: boolean;
 }
 
+/**
+ * `linearProposeNextTargets` reads `cycleHistory[length - 1]` as "the current
+ * cycle" — correct for a `linear` routine, where `buildCycleHistory` gives it
+ * one entry per actual cycle. A `wave` routine's `cycleHistory` is different
+ * (F3): one entry per week the cycle is STRUCTURALLY seeded for, whether that
+ * week has happened yet or not, so its true final entry is very often a
+ * not-yet-reached future week with empty sets, not "now". This trims the
+ * array to end at the latest entry that actually has a logged set, the same
+ * notion of progress `waveProposeNextTargets` reads — so a wave routine's
+ * absolute-loaded accessory is evaluated against the week that really just
+ * happened. No week has any data yet (a freshly seeded, untouched cycle) is
+ * kept as a single empty entry, so the rule still holds with its own
+ * "sin registros este ciclo" reason, the same as a linear routine's exercise.
+ */
+function relevantHistoryFor(cycleHistory: readonly CycleHistory[]): CycleHistory[] {
+  let lastLogged = -1;
+  cycleHistory.forEach((entry, index) => {
+    if (Object.values(entry.exercises).some((exercise) => exercise.sets.length > 0)) {
+      lastLogged = index;
+    }
+  });
+  return lastLogged === -1 ? cycleHistory.slice(0, 1) : cycleHistory.slice(0, lastLogged + 1);
+}
+
 export function proposeNextTargets(
   routine: RoutineLike,
   cycleHistory: CycleHistory[],
@@ -100,15 +149,31 @@ export function proposeNextTargets(
   switch (routine.progressionRule) {
     case 'linear':
       return linearProposeNextTargets(routine, cycleHistory);
-    case 'wave':
-      return waveProposeNextTargets(routine, cycleHistory);
+    case 'wave': {
+      // F5: the wave rule only ever looks at training_max_pct exercises
+      // (`waveTrainingMax`'s own gate) — every absolute-loaded row (assistance
+      // work) gets the linear rule instead, so it is not just decoration.
+      const absoluteExercises = routine.exercises.filter(
+        (exercise) => exercise.loadSource === 'absolute',
+      );
+      return [
+        ...waveProposeNextTargets(routine, cycleHistory),
+        ...(absoluteExercises.length === 0
+          ? []
+          : linearProposeNextTargets(
+              { ...routine, exercises: absoluteExercises },
+              relevantHistoryFor(cycleHistory),
+            )),
+      ];
+    }
     case 'none':
       return [];
   }
 }
 
-const WAVE_CYCLE_LENGTH = 4;
 const AMRAP_SET_INDEX = 2;
+/** The deload week is always week 4 when a cycle has one (§3.2) — never a function of cycle length. */
+const DELOAD_WEEK = 4;
 
 /**
  * The wave rule as an adapter over the surviving 5/3/1 helpers (§3.4):
@@ -123,12 +188,18 @@ const AMRAP_SET_INDEX = 2;
  * Rounding is always 'nearest': the model has no rounding direction, and it
  * is the helpers' default.
  *
- * `cycleHistory` entries are weeks. A wave cycle is four consecutive entries
- * (weeks 1-3 plus the deload week 4); the last incomplete cycle's next week
- * is proposed, and a completed cycle additionally proposes the next cycle's
- * week 1 and a new training max. Week targets are computed from the current
- * TM — after the user settles the TM proposal, the caller regenerates the
- * next cycle's weeks from the accepted value.
+ * `cycleHistory` entries are weeks, spanning every cycle the routine has ever
+ * run — not just the current one, AND every week the current cycle is
+ * STRUCTURALLY seeded for (`utils/cycleSeed.ts` writes all of a cycle's weeks
+ * upfront, so a not-yet-reached week is a real entry with empty sets, not a
+ * missing one). The current cycle is whichever trailing run of entries shares
+ * the LAST entry's `cycleNumber`; how much of it is actually DONE is read from
+ * which of those entries have logged sets, not from how many entries exist —
+ * the entry count is fixed at seed time and never tells you where you are.
+ * Its `weeks` (§3.2, 3 or 4) says how long it is, so a deload-off (3-week)
+ * cycle completes after week 3 without waiting for a week 4 that was never
+ * seeded. The last incomplete cycle's next week is proposed, and a completed
+ * cycle additionally proposes the next cycle's week 1 and a new training max.
  */
 export function waveProposeNextTargets(
   routine: RoutineLike,
@@ -138,8 +209,22 @@ export function waveProposeNextTargets(
     return [];
   }
 
-  const completedWeek = ((cycleHistory.length - 1) % WAVE_CYCLE_LENGTH) + 1;
-  const cycleComplete = completedWeek === WAVE_CYCLE_LENGTH;
+  const currentCycleNumber = cycleHistory[cycleHistory.length - 1].cycleNumber;
+  const currentCycleWeeks = cycleHistory.filter(
+    (entry) => entry.cycleNumber === currentCycleNumber,
+  );
+  // A week "happened" when some exercise has a logged set in it — entry COUNT
+  // is the cycle's fixed structural length, not its progress.
+  const hasLoggedData = (entry: CycleHistory): boolean =>
+    Object.values(entry.exercises).some((exercise) => exercise.sets.length > 0);
+  let completedWeek = 0;
+  currentCycleWeeks.forEach((entry, index) => {
+    if (hasLoggedData(entry)) {
+      completedWeek = index + 1;
+    }
+  });
+  const cycleLength = currentCycleWeeks[currentCycleWeeks.length - 1].weeks;
+  const cycleComplete = completedWeek === cycleLength;
   const nextWeek = cycleComplete ? 1 : completedWeek + 1;
 
   const proposals: LoadProposal[] = [];
@@ -149,11 +234,7 @@ export function waveProposeNextTargets(
     }
     const unit = exercise.unitOverride ?? routine.unit;
     const increment = routine.roundingIncrement;
-    const currentWeekTop = waveTopSet(
-      waveForWeek(cycleComplete ? WAVE_CYCLE_LENGTH : completedWeek),
-      exercise.trainingMaxWeight,
-      increment,
-    );
+    const currentWeekTop = waveTopSet(waveForWeek(completedWeek), exercise.trainingMaxWeight, increment);
     const nextWeekTop = waveTopSet(
       waveForWeek(nextWeek),
       exercise.trainingMaxWeight,
@@ -172,8 +253,9 @@ export function waveProposeNextTargets(
 
     if (cycleComplete) {
       const tmProposal = cycleEndTmProposal(
+        routine,
         exercise,
-        cycleHistory,
+        currentCycleWeeks,
         unit,
         exercise.trainingMaxWeight,
       );
@@ -209,7 +291,7 @@ function waveTopSet(wave: WeekWave, trainingMax: number, increment: number): num
 
 function weekTargetReason(week: number, weight: number, unit: LoadUnit): string {
   const targetReps = waveForWeek(week).sets[AMRAP_SET_INDEX].targetReps;
-  if (week === WAVE_CYCLE_LENGTH) {
+  if (week === DELOAD_WEEK) {
     return `semana 4 de descarga: ${targetReps} reps con ${weight} ${unit}`;
   }
   return `semana ${week}: ${targetReps}+ reps con ${weight} ${unit} (AMRAP)`;
@@ -217,21 +299,21 @@ function weekTargetReason(week: number, weight: number, unit: LoadUnit): string 
 
 /**
  * The TM proposal at cycle end: `suggestNextTM` over the AMRAP sets of the
- * last cycle's weeks 1-3. A week with fewer than three logged sets has no
- * AMRAP result and is left out; without any, there is nothing to propose.
- * The advisory mirrors `suggestNextTM.reviewRequired` — two or more misses —
- * and never changes a target by itself.
+ * cycle's weeks 1-3 — always the first three entries of `currentCycleWeeks`,
+ * whether the cycle has a 4th (deload) week or not (§3.2). A week with fewer
+ * than three logged sets has no AMRAP result and is left out; without any,
+ * there is nothing to propose. The advisory mirrors
+ * `suggestNextTM.reviewRequired` — two or more misses — and never changes a
+ * target by itself.
  */
 function cycleEndTmProposal(
+  routine: RoutineLike,
   exercise: RoutineExercise,
-  cycleHistory: CycleHistory[],
+  currentCycleWeeks: readonly CycleHistory[],
   unit: LoadUnit,
   trainingMax: number,
 ): LoadProposal | null {
-  const amrapWeeks = cycleHistory.slice(
-    cycleHistory.length - WAVE_CYCLE_LENGTH,
-    cycleHistory.length - 1,
-  );
+  const amrapWeeks = currentCycleWeeks.slice(0, 3);
   const cycleResults: CycleResult[] = [];
   const amrapSets: PerformedSet[] = [];
 
@@ -265,6 +347,10 @@ function cycleEndTmProposal(
       category: exercise.category ?? inferCategoryFromTrainingMax(trainingMax, unit),
     },
     cycleResults,
+    {
+      upperIncrement: routine.tmIncrementUpper ?? undefined,
+      lowerIncrement: routine.tmIncrementLower ?? undefined,
+    },
   );
 
   const missedTargets = suggestion.missedTargets;

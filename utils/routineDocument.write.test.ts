@@ -246,6 +246,9 @@ describe('writeRoutineDocument — the transactional edge', () => {
         isActive: false,
         createdAt: Date.now(),
         plannedJokers: 0,
+        tmIncrementUpper: null,
+        tmIncrementLower: null,
+        cycleWeeks: 4,
       },
       sessions: [{ weekday: 1, name: 'Day', sortOrder: 1 }],
       exercises: [
@@ -267,6 +270,7 @@ describe('writeRoutineDocument — the transactional edge', () => {
           barProfile: null,
           barWeight: null,
           warmupsEnabled: null,
+          category: null,
         },
       ],
     };

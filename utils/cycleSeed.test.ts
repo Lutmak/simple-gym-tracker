@@ -231,7 +231,21 @@ describe('activation seeds the first cycle', () => {
   it('makes a preset trainable: the head is week 1 of the new cycle, on its own day', async () => {
     const { db, executor } = connect();
     await runSchema(executor);
-    await activatePresetRoutine(executor, 'newbie-gains', 'kg', new Map());
+
+    // Pinned: activation lands on Sunday 2026-08-16 UTC (weekday 0), so newbie-gains'
+    // Mon/Wed/Fri (1/3/5) sessions are genuinely nearest-first in that order. Activation
+    // reads the real clock (`Date.now()` in `routineActions.ts`) and `nominalSessionStamp`'s
+    // offset is forward-only from whatever weekday that real clock lands on — on a day (or,
+    // near midnight UTC, a time of day) where Monday isn't the nearest training day, this
+    // test's premise "sort-order-first == chronologically-first" does not hold. Pin the clock
+    // instead of relying on whichever day/hour the suite happens to run at (SPEC.md Phase F, F0).
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    jest.setSystemTime(Date.UTC(2026, 7, 16, 9, 0, 0));
+    try {
+      await activatePresetRoutine(executor, 'newbie-gains', 'kg', new Map());
+    } finally {
+      jest.useRealTimers();
+    }
     const routineId = Number(
       (db.prepare('SELECT routine_id FROM Routines WHERE is_active = 1;').get() as {
         routine_id: number;

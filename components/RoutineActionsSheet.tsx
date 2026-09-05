@@ -47,6 +47,11 @@ export type RoutineActionsSheetProps = {
   onEdit: (routineId: number) => void;
   onDuplicate: (routineId: number) => void;
   onDelete: (routineId: number) => void;
+  /** X3 — a user routine's fifth action: write it to a `.sgtroutine.json` file and share it.
+   *  Omitted where the caller has no export door yet; a preset never offers it (ADR-0048 — a
+   *  preset is already portable as data, and exporting a curated preset verbatim was not asked
+   *  for). No confirmation: export creates nothing and changes nothing (§7.5). */
+  onExport?: (routineId: number) => void;
   /** A write is in flight; every action is inert until it lands. */
   busy?: boolean;
   testID?: string;
@@ -62,6 +67,7 @@ export function RoutineActionsSheet({
   onEdit,
   onDuplicate,
   onDelete,
+  onExport,
   busy,
   testID,
 }: RoutineActionsSheetProps) {
@@ -140,6 +146,17 @@ export function RoutineActionsSheet({
             divided
             testID="routine-action-duplicate"
           />
+          {onExport !== undefined && (
+            <Row
+              label={t('export')}
+              detail={t('routineActionExportDetail')}
+              detailBelow
+              onPress={() => onExport(shown.routineId)}
+              disabled={busy}
+              divided
+              testID="routine-action-export"
+            />
+          )}
           <Row
             label={t('delete')}
             detail={t('routineActionDeleteDetail')}

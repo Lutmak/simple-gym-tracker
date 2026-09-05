@@ -1,0 +1,41 @@
+{
+  "format": "sgt-routine",
+  "version": 1,
+  "routine": {
+    "name": "Push Pull Legs",
+    "progressionRule": "linear",
+    "unit": "kg",
+    "roundingIncrement": 2.5,
+    "restMainSeconds": 120,
+    "restAccessorySeconds": 60
+  },
+  "sessions": [
+    {
+      "weekday": 1,
+      "name": "Push",
+      "exercises": [
+        { "catalogKey": "Barbell_Bench_Press_-_Medium_Grip", "role": "main", "targetSets": 4, "targetReps": 8, "loadSource": "absolute" },
+        { "catalogKey": "Barbell_Shoulder_Press", "role": "main", "targetSets": 3, "targetReps": 8, "loadSource": "absolute" },
+        { "catalogKey": "Triceps_Pushdown", "role": "accessory", "targetSets": 3, "targetReps": 12, "loadSource": "absolute" }
+      ]
+    },
+    {
+      "weekday": 3,
+      "name": "Pull",
+      "exercises": [
+        { "catalogKey": "Bent_Over_Barbell_Row", "role": "main", "targetSets": 4, "targetReps": 8, "loadSource": "absolute" },
+        { "catalogKey": "Chin-Up", "role": "main", "targetSets": 3, "targetReps": 8, "loadSource": "bodyweight" },
+        { "catalogKey": "Dumbbell_Bicep_Curl", "role": "accessory", "targetSets": 3, "targetReps": 12, "loadSource": "absolute" }
+      ]
+    },
+    {
+      "weekday": 5,
+      "name": "Legs",
+      "exercises": [
+        { "catalogKey": "Barbell_Squat", "role": "main", "targetSets": 4, "targetReps": 8, "loadSource": "absolute" },
+        { "catalogKey": "Lying_Leg_Curls", "role": "accessory", "targetSets": 3, "targetReps": 12, "loadSource": "absolute" },
+        { "catalogKey": "Standing_Calf_Raises", "role": "accessory", "targetSets": 4, "targetReps": 15, "loadSource": "absolute" }
+      ]
+    }
+  ]
+}

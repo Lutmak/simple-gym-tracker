@@ -1,8 +1,10 @@
 import React, { useCallback, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Alert, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSQLiteContext } from 'expo-sqlite';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
@@ -13,6 +15,12 @@ import { ScreenTitle } from '../components/ScreenTitle';
 import { Section } from '../components/Section';
 import { fontSize, spacing, tabBar } from '../utils/scale';
 import { createBlankRoutine, type RoutineDatabase, type RoutineUnit } from '../utils/routineActions';
+import { loadCatalogExercises } from '../utils/exerciseCatalog';
+import {
+  parseRoutineDocumentText,
+  writeRoutineDocument,
+  type RoutineDocumentError,
+} from '../utils/routineDocument';
 import {
   blankRoutineDraft,
   loadPresetLibrary,
@@ -23,6 +31,40 @@ import {
   type RoutineLevel,
 } from '../utils/routineLibrary';
 import type { RoutinesStackParamList } from '../App';
+
+const IMPORT_PICKER_TYPES = ['application/json', 'text/plain', 'application/octet-stream'];
+
+/**
+ * One line per problem `parseRoutineDocument` found, in the user's language. `detail` is only
+ * ever a raw value (a version number, an unresolved reference) — never itself localised — so it
+ * is passed through as an interpolation, never concatenated into the reason string here.
+ */
+const describeImportError = (
+  issue: RoutineDocumentError,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string => {
+  const reason = t(
+    `importRoutineReason_${issue.code}`,
+    issue.detail !== null ? { detail: issue.detail } : undefined,
+  );
+  if (issue.session !== null && issue.exercise !== null) {
+    return t('routineImportErrorLineFull', {
+      session: issue.session.index + 1,
+      sessionName: issue.session.name,
+      exercise: issue.exercise.index + 1,
+      exerciseName: issue.exercise.name,
+      reason,
+    });
+  }
+  if (issue.session !== null) {
+    return t('routineImportErrorLineSession', {
+      session: issue.session.index + 1,
+      sessionName: issue.session.name,
+      reason,
+    });
+  }
+  return t('routineImportErrorLineTop', { reason });
+};
 
 type Props = NativeStackScreenProps<RoutinesStackParamList, 'NewRoutine'>;
 
@@ -110,6 +152,79 @@ export default function NewRoutineScreen({ navigation }: Props) {
     }
   };
 
+  /**
+   * X2 — the fourth door to a new routine: a hand-authored or exported `.sgtroutine.json` file
+   * (ADR-0048). Validates the whole document in memory before any write, mirroring
+   * `databaseImport.ts`'s bar; every problem reaches the user as a line naming its session,
+   * exercise and field, never a crash or a silent no-op. The import always lands inactive.
+   */
+  const importRoutine = async () => {
+    if (busy) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: IMPORT_PICKER_TYPES,
+        copyToCacheDirectory: true,
+      });
+      if (picked.canceled) {
+        return;
+      }
+      const uri = picked.assets?.[0]?.uri;
+      if (uri === undefined) {
+        Alert.alert(t('importRoutineFailedTitle'), t('fileNotSelectedError'));
+        return;
+      }
+
+      let catalog;
+      try {
+        const rows = await loadCatalogExercises(routineDb);
+        catalog = new Map(rows.map((row) => [row.exerciseKey, row]));
+      } catch {
+        Alert.alert(t('importRoutineFailedTitle'), t('importRoutineCatalogError'));
+        return;
+      }
+
+      const text = await FileSystem.readAsStringAsync(uri);
+      const result = parseRoutineDocumentText(text, catalog);
+      if (!result.ok) {
+        const lines = result.errors.map((issue) => describeImportError(issue, t)).join('\n');
+        const message = `${t('importRoutineProblemsFound', { count: result.errors.length })}\n${lines}`;
+        Alert.alert(t('importRoutineFailedTitle'), message);
+        return;
+      }
+
+      const { customExerciseCount } = await writeRoutineDocument(
+        routineDb,
+        result.rows,
+        result.newCustomExercises,
+      );
+
+      const successMessage = [
+        t('importRoutineSuccessMessage', {
+          name: result.rows.routine.name,
+          sessionCount: t('sessionCount', { count: result.rows.sessions.length }),
+        }),
+        customExerciseCount > 0
+          ? t('importRoutineCustomExercisesCreated', { count: customExerciseCount })
+          : null,
+      ]
+        .filter((line): line is string => line !== null)
+        .join('\n');
+
+      Alert.alert(t('importRoutineSuccessTitle'), successMessage, [
+        { text: t('ok'), onPress: () => navigation.goBack() },
+      ]);
+    } catch (err) {
+      console.error('Routine import error:', err);
+      Alert.alert(t('importRoutineFailedTitle'), t('importRoutineErrorGeneric'));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const presetDetail = (entry: PresetEntry): string => {
     const days = weekdaySequence(entry.weekdays, firstWeekday).map((weekday) =>
       t(WEEKDAY_SHORT_KEYS[weekday]),
@@ -150,6 +265,16 @@ export default function NewRoutineScreen({ navigation }: Props) {
           disabled={busy}
           divided
           testID="new-routine-wave"
+        />
+        <Row
+          label={t('newRoutineImport')}
+          detail={t('newRoutineImportDetail')}
+          detailBelow
+          right={chevron('chevron-forward')}
+          onPress={() => void importRoutine()}
+          disabled={busy}
+          divided
+          testID="new-routine-import"
         />
       </Section>
 

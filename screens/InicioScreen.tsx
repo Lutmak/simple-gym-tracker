@@ -718,11 +718,12 @@ export default function InicioScreen({ navigation, route }: Props) {
 
   if (data.queue.routine === null) {
     return (
-      <Screen testID="inicio-screen">
+      <Screen fill testID="inicio-screen">
         <EmptyState
           title={t('inicioNoRoutineMessage')}
           actionLabel={t('goToRoutines')}
           onAction={openRoutines}
+          fill
           testID="inicio-no-routine"
         />
       </Screen>

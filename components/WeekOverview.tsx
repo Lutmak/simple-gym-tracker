@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTheme } from '../context/ThemeContext';
 import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from './AppTextInput';
 import { hexWithOpacity, type DataStateKey } from '../utils/theme';
-import { fontSize, spacing, touchTarget } from '../utils/scale';
+import { dataMark, fontSize, spacing, touchTarget } from '../utils/scale';
 import type { InicioDay, InicioDayStatus, InicioSessionTarget } from '../utils/inicio';
 
 /**
@@ -19,14 +19,23 @@ import type { InicioDay, InicioDayStatus, InicioSessionTarget } from '../utils/i
  * Only a resolved day (`completed`/`moved`/`discarded`) is tappable, opening the same session
  * sheet the calendar does (`day.target !== null` — computed once in `utils/inicio.ts`, not
  * re-derived here); `pending` and `rest` are inert, nothing has happened there to open.
+ *
+ * **Every cell shares one outer footprint** (`DISC_SIZE`, the same box `touchTarget.icon` used
+ * everywhere else) so today's ring lands in the same place regardless of what the day carries —
+ * found on review: a `pending` day drawn as a bare glyph, with no disc at all, read as a "tiny o"
+ * next to the filled discs beside it. `pending` now draws that same box as a hollow ring
+ * (`divider`, no fill — an un-happened day is the *absence* of colour, ADR-0047), which is a real
+ * ring rather than a character standing in for one. `rest` stays visually quiet on purpose — it
+ * is not a training day to weigh equally against the four that are — as a small dot at
+ * `dataMark.dot`, the same token the app's other identity dots already use, centred inside that
+ * same outer box.
  */
 
-const GLYPH: Record<InicioDayStatus, string> = {
+/** Only the resolved statuses carry a glyph; `pending`'s ring and `rest`'s dot need no character. */
+const GLYPH: Partial<Record<InicioDayStatus, string>> = {
   completed: '✓',
   moved: '→',
   discarded: '✕',
-  pending: '○',
-  rest: '·',
 };
 
 /** `pending`/`rest` carry no `data.state` entry — an unhappened day is the absence of colour. */
@@ -92,7 +101,10 @@ export function WeekOverview({
       <View style={styles.dayRow}>
         {days.map((day, index) => {
           const isToday = day.stamp === todayStamp;
+          const isPending = day.status === 'pending';
+          const isRest = day.status === 'rest';
           const fill = discFill(day.status);
+          const glyph = GLYPH[day.status];
           const label = `${weekdayLabels[index]} · ${statusLabels[day.status]}`;
           return (
             <Pressable
@@ -117,16 +129,23 @@ export function WeekOverview({
               <View
                 style={[
                   styles.disc,
+                  isPending && { borderColor: tokens.divider, borderWidth: 2 },
                   fill !== null && { backgroundColor: fill },
                   isToday && { borderColor: tokens.textPrimary, borderWidth: 2 },
                 ]}
               >
-                <Text
-                  style={[styles.glyph, { color: glyphColor(day.status) }]}
-                  maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-                >
-                  {GLYPH[day.status]}
-                </Text>
+                {isRest ? (
+                  <View style={[styles.restDot, { backgroundColor: tokens.divider }]} />
+                ) : (
+                  glyph !== undefined && (
+                    <Text
+                      style={[styles.glyph, { color: glyphColor(day.status) }]}
+                      maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+                    >
+                      {glyph}
+                    </Text>
+                  )
+                )}
               </View>
             </Pressable>
           );
@@ -172,6 +191,11 @@ const styles = StyleSheet.create({
   glyph: {
     fontSize: fontSize.body,
     fontWeight: '700',
+  },
+  restDot: {
+    width: dataMark.dot,
+    height: dataMark.dot,
+    borderRadius: dataMark.dot / 2,
   },
   caption: {
     fontSize: fontSize.caption,

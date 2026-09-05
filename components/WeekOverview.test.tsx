@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen } from '@testing-library/react-native';
 import { WeekOverview } from './WeekOverview';
 import { ThemeProvider } from '../context/ThemeContext';
 import { lightTokens, hexWithOpacity } from '../utils/theme';
+import { touchTarget } from '../utils/scale';
 import type { InicioDay, InicioDayStatus } from '../utils/inicio';
 
 /**
@@ -66,13 +67,35 @@ describe('WeekOverview — state discs (ADR-0047)', () => {
     );
   });
 
-  it('leaves a pending day with no fill', () => {
-    const days = [day(0, 'pending'), day(1, 'rest'), day(2, 'rest'), day(3, 'rest'), day(4, 'rest'), day(5, 'rest'), day(6, 'rest')];
+  it('leaves a pending day with no fill, but a divider ring at the same footprint as a filled disc (U2 review fix)', () => {
+    const pendingDays = [day(0, 'pending'), day(1, 'rest'), day(2, 'rest'), day(3, 'rest'), day(4, 'rest'), day(5, 'rest'), day(6, 'rest')];
+    renderWeek(pendingDays, STAMP(10));
+    const pendingDisc = screen.getByTestId(`week-day-${STAMP(0)}`).findAllByType(View)[0];
+    const flatStyle = ([] as unknown[]).concat(pendingDisc.props.style) as Record<string, unknown>[];
+    expect(flatStyle.some((entry) => entry?.backgroundColor !== undefined)).toBe(false);
+    expect(flatStyle).toEqual(
+      expect.arrayContaining([expect.objectContaining({ borderColor: lightTokens.divider, borderWidth: 2 })]),
+    );
+    // Same box (`touchTarget.icon`) a filled disc uses — no "tiny o" next to a full disc.
+    expect(flatStyle).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ width: touchTarget.icon, height: touchTarget.icon }),
+      ]),
+    );
+  });
+
+  it('draws a rest day as a small dot, distinct from a training day\'s full disc footprint', () => {
+    const days = [day(0, 'rest'), day(1, 'rest'), day(2, 'rest'), day(3, 'rest'), day(4, 'rest'), day(5, 'rest'), day(6, 'rest')];
     renderWeek(days, STAMP(10));
     const cell = screen.getByTestId(`week-day-${STAMP(0)}`);
-    const disc = cell.findAllByType(View)[0];
-    const flatStyle = ([] as unknown[]).concat(disc.props.style);
-    expect(flatStyle.some((entry) => (entry as Record<string, unknown>)?.backgroundColor)).toBe(false);
+    const [outerDisc, restDot] = cell.findAllByType(View);
+    const outerStyle = ([] as unknown[]).concat(outerDisc.props.style) as Record<string, unknown>[];
+    const dotStyle = ([] as unknown[]).concat(restDot.props.style) as Record<string, unknown>[];
+    expect(dotStyle).toEqual(expect.arrayContaining([expect.objectContaining({ backgroundColor: lightTokens.divider })]));
+    const outerWidth = outerStyle.find((entry) => entry?.width !== undefined)?.width;
+    const dotWidth = dotStyle.find((entry) => entry?.width !== undefined)?.width;
+    expect(outerWidth).toBe(touchTarget.icon);
+    expect(dotWidth).toBeLessThan(outerWidth as number);
   });
 
   it('rings today in textPrimary regardless of state', () => {

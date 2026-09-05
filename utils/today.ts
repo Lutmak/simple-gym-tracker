@@ -634,6 +634,45 @@ export function applyDiscard(
   };
 }
 
+/** Why "adelantar" (pull the next session forward to today) cannot be applied. */
+export type PullForwardRejection = QueueApplyRejection | 'notRestDay' | 'noUpcoming';
+
+export type PullForwardOutcome =
+  | { ok: true; weekSessions: QueueWeekSessionRow[]; weekSessionId: number }
+  | { ok: false; reason: PullForwardRejection };
+
+/**
+ * "Adelantar la próxima sesión" (SPEC.md §3.3): on a rest day — nothing due, nothing already
+ * logged today — the queue's next upcoming session can be pulled onto today instead of waiting
+ * for its nominal day. This is `applyDoToday` under its own name for its one real precondition:
+ * the queue's head must be empty, which is exactly "nothing is due and nothing was logged today"
+ * (a head that were due would mean today is already spoken for, and `applyDoToday`'s own occupancy
+ * check would reject it anyway — this makes the precondition explicit and testable rather than
+ * leaving every caller to reconstruct it).
+ *
+ * Stacking stays impossible for the same reason it is everywhere else in this module: a head that
+ * is not null after one pull-forward means today is now occupied, so a second call is rejected by
+ * `notRestDay` before it ever reaches the occupancy check.
+ */
+export function applyPullForwardSession(
+  input: SessionQueueInput,
+  todayStamp: number,
+): PullForwardOutcome {
+  const state = computeSessionQueue(input, todayStamp);
+  if (state.head !== null) {
+    return { ok: false, reason: 'notRestDay' };
+  }
+  const weekSessionId = state.upcoming?.weekSessionId ?? null;
+  if (weekSessionId === null) {
+    return { ok: false, reason: 'noUpcoming' };
+  }
+  const outcome = applyDoToday(input, weekSessionId, todayStamp);
+  if (!outcome.ok) {
+    return outcome;
+  }
+  return { ok: true, weekSessions: outcome.weekSessions, weekSessionId };
+}
+
 /** Undo a recorded discard by restoring the unresolved queue row in place. */
 export function applyUndoDiscard(
   input: SessionQueueInput,
@@ -789,6 +828,24 @@ export async function resolveDoTodaySession(
      WHERE week_session_id = ? AND status = 'pending';`,
     [todayStamp, weekSessionId],
   );
+}
+
+/** The writer for `applyPullForwardSession`; returns the week session it pulled onto today. */
+export async function resolvePullForwardSession(
+  db: RoutineDatabase,
+  todayStamp: number,
+): Promise<number> {
+  const input = await loadSessionQueueInput(db);
+  const outcome = applyPullForwardSession(input, todayStamp);
+  if (!outcome.ok) {
+    throw new Error(`resolvePullForwardSession: ${outcome.reason}`);
+  }
+  await db.run(
+    `UPDATE WeekSessions SET resolved_on_date = ?
+     WHERE week_session_id = ? AND status = 'pending';`,
+    [todayStamp, outcome.weekSessionId],
+  );
+  return outcome.weekSessionId;
 }
 
 export async function resolveMoveSession(

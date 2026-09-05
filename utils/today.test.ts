@@ -6,6 +6,7 @@ import {
   applyDiscard,
   applyDoToday,
   applyMove,
+  applyPullForwardSession,
   applyUndoDiscard,
   buildMoveDayPlan,
   computeSessionQueue,
@@ -16,6 +17,7 @@ import {
   resolveDiscardSession,
   resolveDoTodaySession,
   resolveMoveSession,
+  resolvePullForwardSession,
   undoDiscardSession,
   targetSetsFor,
   targetWeightFor,
@@ -723,6 +725,124 @@ describe('resolution transformations, pure', () => {
       ok: false,
       reason: 'notDiscarded',
     });
+  });
+});
+
+describe('applyPullForwardSession ("adelantar"), pure', () => {
+  const input = (weekSessions: SessionQueueInput['weekSessions']): SessionQueueInput => ({
+    routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
+    cycles: [{ cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04') }],
+    sessions: [
+      { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
+      { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
+    ],
+    exercises: [],
+    weekSessions,
+  });
+
+  const baseRows: QueueWeekSessionRow[] = [
+    { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null },
+    { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null },
+  ];
+
+  test('on a rest day, pulls the next upcoming session onto today', () => {
+    const restDay = dayStampFromYmd('2026-05-01');
+    const outcome = applyPullForwardSession(input(baseRows), restDay);
+    expect(outcome).toEqual({
+      ok: true,
+      weekSessionId: 1,
+      weekSessions: [
+        { ...baseRows[0], resolvedOnDate: restDay },
+        baseRows[1],
+      ],
+    });
+    if (outcome.ok) {
+      const state = computeSessionQueue(input(outcome.weekSessions), restDay);
+      expect(state.resolution).toBe('due');
+      expect(state.head?.weekSessionId).toBe(1);
+      expect(state.head?.name).toBe('Squat Day');
+    }
+  });
+
+  test('stacking stays impossible: a second pull-forward the same day is rejected', () => {
+    const restDay = dayStampFromYmd('2026-05-01');
+    const first = applyPullForwardSession(input(baseRows), restDay);
+    expect(first.ok).toBe(true);
+    if (!first.ok) {
+      return;
+    }
+    const second = applyPullForwardSession(input(first.weekSessions), restDay);
+    expect(second).toEqual({ ok: false, reason: 'notRestDay' });
+  });
+
+  test('rejected when a session is already due today', () => {
+    const dueToday = dayStampFromYmd('2026-05-04');
+    expect(applyPullForwardSession(input(baseRows), dueToday)).toEqual({
+      ok: false,
+      reason: 'notRestDay',
+    });
+  });
+
+  test('rejected when a past session is unresolved (not a rest day either)', () => {
+    const outcome = applyPullForwardSession(input(baseRows), dayStampFromYmd('2026-05-10'));
+    expect(outcome).toEqual({ ok: false, reason: 'notRestDay' });
+  });
+
+  test('rejected when there is nothing to pull forward: no cycle seeded yet', () => {
+    const noCycleInput: SessionQueueInput = {
+      routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
+      cycles: [],
+      sessions: [
+        { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
+        { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
+      ],
+      exercises: [],
+      weekSessions: [],
+    };
+    expect(applyPullForwardSession(noCycleInput, dayStampFromYmd('2026-05-01'))).toEqual({
+      ok: false,
+      reason: 'noUpcoming',
+    });
+  });
+});
+
+describe('resolvePullForwardSession, against the demo data', () => {
+  test('writes resolved_on_date for the pulled-forward session and returns its id', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+    await loadDemoData(executor);
+
+    const restDay = dayStampFromYmd('2026-08-09');
+    const before = await loadSessionQueue(executor, restDay);
+    expect(before.head).toBeNull();
+    const upcomingId = before.upcoming?.weekSessionId;
+    expect(upcomingId).not.toBeNull();
+
+    const weekSessionId = await resolvePullForwardSession(executor, restDay);
+    expect(weekSessionId).toBe(upcomingId);
+
+    const row = await weekSessionRow(executor, weekSessionId);
+    expect(row?.resolved_on_date).toBe(restDay);
+    expect(row?.status).toBe('pending');
+
+    const after = await loadSessionQueue(executor, restDay);
+    expect(after.resolution).toBe('due');
+    expect(after.head?.weekSessionId).toBe(weekSessionId);
+
+    db.close();
+  });
+
+  test('rejects when called again the same day (already pulled forward)', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+    await loadDemoData(executor);
+
+    const restDay = dayStampFromYmd('2026-08-09');
+    await resolvePullForwardSession(executor, restDay);
+
+    await expect(resolvePullForwardSession(executor, restDay)).rejects.toThrow('notRestDay');
+
+    db.close();
   });
 });
 

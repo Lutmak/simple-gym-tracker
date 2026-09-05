@@ -23,25 +23,25 @@ const state = (overrides: Partial<SessionQueueState>): SessionQueueState => ({
 });
 
 describe('centreActionFor', () => {
-  it('offers free logging when there is no active routine', () => {
+  it('opens the new-routine door when there is no active routine', () => {
     expect(centreActionFor(state({ routine: null }))).toEqual({
-      label: 'freeLog',
+      kind: 'newRoutine',
       weekSessionId: null,
     });
   });
 
-  it('offers free logging when nothing is pending or scheduled', () => {
-    expect(centreActionFor(state({}))).toEqual({ label: 'freeLog', weekSessionId: null });
+  it('is a rest day when nothing is pending or scheduled', () => {
+    expect(centreActionFor(state({}))).toEqual({ kind: 'restDay', weekSessionId: null });
   });
 
-  it('offers free logging when nothing is pending but the next session is upcoming', () => {
+  it('is a rest day when nothing is pending but the next session is upcoming', () => {
     expect(
       centreActionFor(
         state({
           upcoming: { weekSessionId: null, sessionId: null, name: 'Día A', weekday: 3, date: 200 },
         }),
       ),
-    ).toEqual({ label: 'freeLog', weekSessionId: null });
+    ).toEqual({ kind: 'restDay', weekSessionId: null });
   });
 
   it('offers to resolve an unresolved past session', () => {
@@ -52,7 +52,7 @@ describe('centreActionFor', () => {
           resolution: 'unresolved',
         }),
       ),
-    ).toEqual({ label: 'resolve', weekSessionId: 7 });
+    ).toEqual({ kind: 'resolve', weekSessionId: 7 });
   });
 
   it('offers to start the head when it sits on its nominal day', () => {
@@ -63,7 +63,7 @@ describe('centreActionFor', () => {
           resolution: 'due',
         }),
       ),
-    ).toEqual({ label: 'start', weekSessionId: 7 });
+    ).toEqual({ kind: 'start', weekSessionId: 7 });
   });
 
   it('offers to continue the head when it was moved onto today', () => {
@@ -74,6 +74,6 @@ describe('centreActionFor', () => {
           resolution: 'due',
         }),
       ),
-    ).toEqual({ label: 'continue', weekSessionId: 7 });
+    ).toEqual({ kind: 'continue', weekSessionId: 7 });
   });
 });

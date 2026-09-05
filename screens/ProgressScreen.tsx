@@ -9,18 +9,21 @@ import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
 import AppTextInput from '../components/AppTextInput';
 import { ChartRangeControl } from '../components/ChartRangeControl';
+import { CollapsibleRow } from '../components/CollapsibleRow';
 import { EmptyState } from '../components/EmptyState';
 import { ExerciseHistoryView } from '../components/ExerciseHistoryView';
 import { ExerciseSheet } from '../components/ExerciseSheet';
 import { ProgressCalendar } from '../components/ProgressCalendar';
-import { ProgressChart } from '../components/ProgressChart';
+import { ProgressChart, type ProgressChartSeries } from '../components/ProgressChart';
 import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { Section } from '../components/Section';
+import { Stat } from '../components/Stat';
 import {
   SessionDetailSheet,
   type SessionDetailTarget,
 } from '../components/SessionDetailSheet';
+import { WeekStateDiscs } from '../components/WeekStateDiscs';
 import { fontSize, spacing, tabBar } from '../utils/scale';
 import { dayStampOf, loadSessionQueueInput } from '../utils/today';
 import {
@@ -36,19 +39,23 @@ import {
   type ProgressDayState,
 } from '../utils/progressCalendar';
 import {
+  buildStrengthChart,
   cycleAdherence,
   hasProgressFocus,
-  loadMainLiftSeries,
   loadProgressRoutines,
   loadRoutineProgress,
+  loadStrengthSeries,
   weekSessionsDone,
-  type MainLiftSeries,
+  windowStrengthChart,
   type ProgressCycle,
   type ProgressFocus,
   type ProgressRoutine,
   type ProgressWeek,
   type RoutineProgressData,
+  type StrengthLift,
+  type WeekSessionStatus,
 } from '../utils/routineProgress';
+import { mainLiftColours } from '../utils/liftColours';
 import {
   historyShortfall,
   loadExercisesWithHistory,
@@ -60,37 +67,22 @@ import type { RoutineDatabase } from '../utils/routineActions';
 import type { RootTabParamList } from '../App';
 
 /**
- * Progreso — one screen about the routine you are training (SPECS.md P1–P4).
+ * Progreso — one screen about the routine you are training (SPEC.md U3, ADR-0047).
  *
- * The two recorded defects were *"dos botones gigantes hasta arriba… tengo que mover la mano
- * incomodísimo"* and *"Ciclo 1, ciclo completado, un 1, un 3 de 3 — ¿qué estoy viendo? Estoy
- * perdido."* Both came from the same cause: the screen was two screens behind a segmented control,
- * and it printed numbers without ever saying what they counted.
+ * Iteration 5's audit found the screen unusable in a new way: the exercise index led, the calendar
+ * was bare numbers, and the main-lift charts plotted the 5/3/1 wave's own sawtooth — a session's
+ * raw top weight, up and down by design every week — which reads as noise, not progress (defect
+ * 10). U3 reorders the screen (tiles → calendar → strength → this cycle → past cycles → exercise
+ * index, last) and replaces the main-lift trend with each lift's **estimated 1RM from its AMRAP
+ * set**, plus the **training max it actually trained against**, both derived in `utils/
+ * routineProgress.ts` (`loadStrengthSeries`) from `Progression_Proposal` rows and never from the
+ * runner's raw log.
  *
- * What replaced it:
- *
- * - **No mode switch.** The Rutina/Ejercicios control is gone. This screen is the active routine;
- *   an exercise's own history is one search away and one tap from R2's shared sheet.
- * - **Every number carries its noun.** `Semana 2 · 3 de 3 sesiones`, `Ciclo 1 · completado el
- *   12 de marzo · 16 de 16 sesiones (100 %)`. There is no bare `3 de 3` anywhere (§0.5).
- * - **One primitive per repeated thing.** Every week of every cycle is the same `Row`, so cycle 1
- *   and cycle 2 cannot look different from each other, which they did.
- * - **The calendar is first-class**, above the cycle history rather than at the bottom of a scroll,
- *   and every marked day opens its session through the same `Sheet` a week opens through.
- *
- * P3 and P4 added the two things it was still missing:
- *
- * - **A range every chart is read through** — 1 semana · 1 mes · 6 meses · todo — chosen once and
- *   kept across both views. The axis rescales and thins its own labels (`utils/chart.ts`), and no
- *   chart ever draws two units on one axis.
- * - **The exercise history is a place.** It replaces this view rather than growing under it, and
- *   it is reached from a searchable list here, from R2's exercise sheet, and from any exercise row
- *   in the app through the tab's `exercise` parameter — one destination, several doors.
- *
- * The screen holds no rules: cycles, adherence, day states, the streak, range windowing, axis
- * thinning and the "not enough data yet" test all come from `utils/routineProgress.ts`,
+ * The screen holds no rules: cycles, adherence, day states, the streak, strength points, training
+ * maxes, range windowing and axis thinning all come from `utils/routineProgress.ts`,
  * `utils/progressCalendar.ts`, `utils/inicio.ts`, `utils/chart.ts` and `utils/exerciseHistory.ts`,
- * which are tested without a device.
+ * which are tested without a device. The screen composes primitives; the calendar and the tiles
+ * are its one filled/anchored level (the tiles carry no surface at all — `Stat` never nests).
  */
 
 const MONTH_KEYS = [
@@ -148,7 +140,7 @@ export default function ProgressScreen({ navigation, route }: Props) {
   const [routines, setRoutines] = useState<ProgressRoutine[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [routineData, setRoutineData] = useState<RoutineProgressData | null>(null);
-  const [series, setSeries] = useState<MainLiftSeries[]>([]);
+  const [strengthLifts, setStrengthLifts] = useState<StrengthLift[]>([]);
   const [calendarDays, setCalendarDays] = useState<Map<number, ProgressCalendarDay>>(
     () => new Map(),
   );
@@ -156,7 +148,7 @@ export default function ProgressScreen({ navigation, route }: Props) {
   const [summaries, setSummaries] = useState<ExerciseSummary[]>([]);
   const [query, setQuery] = useState('');
   const [chartedExercise, setChartedExercise] = useState<string | null>(null);
-  /** P3: one range for every chart on this tab, kept across the two views. */
+  /** One range for every chart on this tab, kept across the strength chart and exercise history. */
   const [range, setRange] = useState<ChartRange>('sixMonths');
   /** R2: the exercise whose shared sheet is open. */
   const [information, setInformation] = useState<string | null>(null);
@@ -218,7 +210,7 @@ export default function ProgressScreen({ navigation, route }: Props) {
 
         if (preferred === null) {
           setRoutineData(null);
-          setSeries([]);
+          setStrengthLifts([]);
           setCalendarDays(new Map());
           setStreak(null);
           setLoaded(true);
@@ -228,9 +220,9 @@ export default function ProgressScreen({ navigation, route }: Props) {
           return;
         }
 
-        const [data, liftSeries, calendar, queueInput] = await Promise.all([
+        const [data, lifts, calendar, queueInput] = await Promise.all([
           loadRoutineProgress(routineDb, preferred),
-          loadMainLiftSeries(routineDb, preferred),
+          loadStrengthSeries(routineDb, preferred),
           loadProgressCalendar(routineDb, preferred),
           loadSessionQueueInput(routineDb),
         ]);
@@ -238,7 +230,7 @@ export default function ProgressScreen({ navigation, route }: Props) {
           return;
         }
         setRoutineData(data);
-        setSeries(liftSeries);
+        setStrengthLifts(lifts);
         setCalendarDays(buildProgressCalendarDays(calendar));
         setStreak(
           queueInput.routine !== null && queueInput.routine.routineId === preferred
@@ -270,7 +262,7 @@ export default function ProgressScreen({ navigation, route }: Props) {
         console.error('Error loading progress:', error);
         if (!cancelled) {
           setRoutineData(null);
-          setSeries([]);
+          setStrengthLifts([]);
           setCalendarDays(new Map());
           setStreak(null);
           setLoaded(true);
@@ -349,6 +341,29 @@ export default function ProgressScreen({ navigation, route }: Props) {
     [t],
   );
 
+  /** The word each `WeekSessionStatus` reads as — the state discs' accessibility label. */
+  const sessionStatusLabels = useMemo(
+    (): Record<WeekSessionStatus, string> => ({
+      completed: t('progressStatusCompleted'),
+      moved: t('progressStatusMoved'),
+      discarded: t('progressStatusDiscarded'),
+      pending: t('progressStatusPending'),
+    }),
+    [t],
+  );
+
+  /** Each main lift's fixed series slot, by `sort_order` — `loadStrengthSeries` already returns
+   * its lifts in ascending `sort_order`, so mapping them in array order is the routine's own
+   * order (ADR-0047 §4.1). `mainLiftColours` returns the `theme.data.series` index, resolved to
+   * an actual colour below wherever one is needed. */
+  const liftColours = useMemo(
+    () =>
+      mainLiftColours(strengthLifts.map((lift) => ({ name: lift.exerciseName, role: 'main' as const }))),
+    [strengthLifts],
+  );
+
+  const strengthChart = useMemo(() => buildStrengthChart(strengthLifts), [strengthLifts]);
+
   const openExerciseSheet = (exerciseName: string) => setInformation(exerciseName);
 
   const openWeek = (cycle: ProgressCycle, week: ProgressWeek) => {
@@ -390,6 +405,8 @@ export default function ProgressScreen({ navigation, route }: Props) {
     );
   };
 
+  /** A past (always-complete) cycle's subheading — reused as-is for the current cycle too, when
+   * it is not the review call (the one text this cycle can also be in). */
   const cycleHint = (cycle: ProgressCycle, weeks: readonly ProgressWeek[]): string => {
     const adherence = cycleAdherence(weeks);
     const sessions = t('progressSessionsOf', {
@@ -402,10 +419,6 @@ export default function ProgressScreen({ navigation, route }: Props) {
         ? `${t('progressCycleDone')} · ${sessions}`
         : `${t('progressCycleDoneOn', { date: formatDate(cycle.completedAt) })} · ${sessions}`;
     }
-    // §3.4/F4: the cycle's last week resolved, still unreviewed.
-    if (cycle.status === 'active' && cycle.currentWeek >= cycle.weeks) {
-      return `${t('inicioReviewOverline')} · ${sessions}`;
-    }
     if (cycle.status === 'active') {
       return `${t('progressCycleWeekOf', {
         week: cycle.currentWeek,
@@ -415,28 +428,246 @@ export default function ProgressScreen({ navigation, route }: Props) {
     return t('progressCycleNotStarted', { weeks: cycle.weeks });
   };
 
-  const renderWeekRow = (cycle: ProgressCycle, week: ProgressWeek) => {
-    const done = weekSessionsDone(week.adherence);
-    const detail = week.isCurrent
-      ? `${t('progressWeekSessions', { done, planned: week.adherence.planned })} · ${t(
-          'progressWeekCurrent',
-        )}`
-      : t('progressWeekSessions', { done, planned: week.adherence.planned });
-    return (
-      <Row
-        key={`${cycle.cycleId}-${week.weekNumber}`}
-        label={t('progressWeekLabel', { week: week.weekNumber })}
-        detail={detail}
-        detailBelow
-        right={
+  const renderWeekRow = (cycle: ProgressCycle, week: ProgressWeek) => (
+    <Row
+      key={`${cycle.cycleId}-${week.weekNumber}`}
+      label={t('progressWeekLabel', { week: week.weekNumber })}
+      detailContent={
+        <WeekStateDiscs
+          statuses={week.sessionStatuses}
+          statusLabels={sessionStatusLabels}
+          testID={`progress-week-${cycle.cycleNumber}-${week.weekNumber}-discs`}
+        />
+      }
+      right={
+        <View style={styles.weekRowRight}>
+          {week.isCurrent && (
+            <Text style={[styles.currentTag, { color: tokens.textSecondary }]}>
+              {t('progressWeekCurrent')}
+            </Text>
+          )}
           <Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />
-        }
-        onPress={() => openWeek(cycle, week)}
-        divided
-        testID={`progress-week-${cycle.cycleNumber}-${week.weekNumber}`}
-      />
+        </View>
+      }
+      onPress={() => openWeek(cycle, week)}
+      divided
+      testID={`progress-week-${cycle.cycleNumber}-${week.weekNumber}`}
+    />
+  );
+
+  /** Three Stat tiles: streak (or, for a saved/inactive routine, cycles completed), this cycle's
+   * adherence, and the current position — a colour swatch names the routine by its first main
+   * lift, the same identity the strength chart uses (Stat's own documented use, ADR-0047). */
+  const renderTiles = () => {
+    if (routineData === null || routineData.cycles.length === 0) {
+      return null;
+    }
+    const routine = routines.find((entry) => entry.routineId === selectedId);
+    const current = routineData.cycles[routineData.cycles.length - 1];
+    const adherence = cycleAdherence(current.weeks);
+    const completedCycles = routineData.cycles.filter(
+      (view) => view.cycle.status === 'complete',
+    ).length;
+    const showStreak = routine?.isActive === true && streak !== null;
+    const swatchIndex =
+      strengthLifts.length > 0 ? liftColours.get(strengthLifts[0].exerciseName) : undefined;
+    const swatch = swatchIndex !== undefined ? tokens.data.series[swatchIndex] : undefined;
+
+    return (
+      <View style={styles.tileRow} testID="progress-tiles">
+        <Stat
+          value={showStreak ? String(streak.weeks) : String(completedCycles)}
+          label={showStreak ? t('progressStreakTileLabel') : t('progressCyclesTileLabel')}
+          testID="progress-tile-streak"
+        />
+        <Stat
+          value={String(adherence.percent)}
+          unit="%"
+          label={t('progressAdherenceTileLabel')}
+          testID="progress-tile-adherence"
+        />
+        <Stat
+          value={t('progressCycleHeader', { n: current.cycle.cycleNumber })}
+          label={t('progressCycleWeekOf', {
+            week: current.cycle.currentWeek,
+            weeks: current.cycle.weeks,
+          })}
+          color={swatch}
+          testID="progress-tile-cycle"
+        />
+      </View>
     );
   };
+
+  const renderCalendar = () => (
+    <Section
+      title={t('progressCalendar')}
+      hint={t('progressCalendarHint')}
+      testID="progress-calendar"
+    >
+      <ProgressCalendar
+        initialMonth={calendarBounds.initial}
+        firstMonth={calendarBounds.first}
+        lastMonth={calendarBounds.last}
+        firstWeekday={firstWeekday}
+        days={calendarDays}
+        todayStamp={todayStamp}
+        weekdayLabels={weekdayOrder(firstWeekday).map((weekday) =>
+          t(WEEKDAY_SHORT_KEYS[weekday]),
+        )}
+        monthLabels={MONTH_KEYS.map((key) => t(key))}
+        stateLabels={stateLabels}
+        previousMonthLabel={t('progressPreviousMonth')}
+        nextMonthLabel={t('progressNextMonth')}
+        todayLabel={t('inicioToday')}
+        dateLabel={formatDate}
+        onSelectDay={openDay}
+        testID="progress-calendar-grid"
+      />
+    </Section>
+  );
+
+  /**
+   * FUERZA (renamed from "Levantamientos principales"): one chart, every main lift as its own
+   * line in its series colour, estimated 1RM from the AMRAP set with the training max as a dotted
+   * step — never the session's raw top weight (audit defect 10). Tapping a legend item opens that
+   * lift's full history (ADR-0040's standing "tap the exercise" contract).
+   */
+  const renderStrength = () => {
+    if (strengthLifts.length === 0) {
+      return null;
+    }
+    const windowed = windowStrengthChart(strengthChart, range, todayStamp);
+    const series: ProgressChartSeries[] = windowed.lifts.flatMap((lift) => {
+      const colourIndex = liftColours.get(lift.exerciseName);
+      const color = colourIndex !== undefined ? tokens.data.series[colourIndex] : tokens.textSecondary;
+      const openHistory = () => setChartedExercise(lift.exerciseName);
+      const entries: ProgressChartSeries[] = [
+        {
+          key: `${lift.exerciseName}-1rm`,
+          label: lift.exerciseName,
+          color,
+          values: lift.estimated1RM,
+          onPress: openHistory,
+        },
+      ];
+      if (lift.hasTrainingMax) {
+        entries.push({
+          key: `${lift.exerciseName}-tm`,
+          label: lift.exerciseName,
+          color,
+          values: lift.trainingMax,
+          style: 'step',
+          onPress: openHistory,
+        });
+      }
+      return entries;
+    });
+    const unit = windowed.lifts[0]?.unit ?? routines.find((r) => r.routineId === selectedId)?.unit ?? 'kg';
+
+    return (
+      <Section testID="progress-strength">
+        <View style={styles.rangeRow}>
+          <ChartRangeControl value={range} onChange={setRange} testID="progress-strength-range" />
+        </View>
+        <ProgressChart
+          title={t('progressMainLifts')}
+          note={t('progressStrengthHint')}
+          dates={windowed.axis.map((point) => point.date)}
+          series={series}
+          unit={unit}
+          range={range}
+          emptyLabel={range === 'all' ? t('progressNoData') : t('progressNoDataInRange')}
+          singlePointLabel={
+            range === 'all' ? t('progressSinglePoint') : t('progressSinglePointInRange')
+          }
+          testID="progress-strength-chart"
+        />
+      </Section>
+    );
+  };
+
+  /**
+   * ESTE CICLO — the routine's current cycle, one row per week. When the cycle's last week is
+   * resolved and the review has not been applied yet, the block's headline IS the review call
+   * (§3.4/F4) rather than the usual "Este ciclo" title.
+   */
+  const renderThisCycle = () => {
+    if (routineData === null || routineData.cycles.length === 0) {
+      return null;
+    }
+    const current = routineData.cycles[routineData.cycles.length - 1];
+    const { cycle, weeks } = current;
+    const reviewPending = cycle.status === 'active' && cycle.currentWeek >= cycle.weeks;
+
+    return (
+      <View style={styles.block} testID="progress-this-cycle">
+        {reviewPending ? (
+          <>
+            <Text style={[styles.sectionTitle, { color: tokens.textPrimary }]}>
+              {t('progressReviewFinishedTitle', { cycle: cycle.cycleNumber })}
+            </Text>
+            <Row
+              label={t('sessionSummaryReview')}
+              detail={t('progressReviewProposalDetail', { next: cycle.cycleNumber + 1 })}
+              detailBelow
+              right={
+                <Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />
+              }
+              onPress={() => openReview(cycle)}
+              divided
+              testID="progress-this-cycle-review"
+            />
+          </>
+        ) : (
+          <>
+            <Text style={[styles.sectionTitle, { color: tokens.textPrimary }]}>
+              {t('progressThisCycle')}
+            </Text>
+            <Text style={[styles.hint, { color: tokens.textSecondary }]}>
+              {`${t('progressCycleHeader', { n: cycle.cycleNumber })} · ${cycleHint(cycle, weeks)}`}
+            </Text>
+          </>
+        )}
+        <View style={styles.blockContent}>{weeks.map((week) => renderWeekRow(cycle, week))}</View>
+      </View>
+    );
+  };
+
+  /** CICLOS ANTERIORES — every earlier cycle, collapsed behind one row, most recent first. */
+  const renderPastCycles = () => {
+    if (routineData === null || routineData.cycles.length < 2) {
+      return null;
+    }
+    const past = [...routineData.cycles.slice(0, -1)].reverse();
+    return (
+      <View style={styles.block} testID="progress-past-cycles">
+        <CollapsibleRow
+          label={t('progressPastCycles')}
+          detail={t('progressPastCyclesCount', { count: past.length })}
+          testID="progress-past-cycles-row"
+        >
+          {past.map((view) => (
+            <View key={view.cycle.cycleId} style={styles.pastCycleGroup}>
+              <Text style={[styles.pastCycleTitle, { color: tokens.textPrimary }]}>
+                {t('progressCycleHeader', { n: view.cycle.cycleNumber })}
+              </Text>
+              <Text style={[styles.hint, { color: tokens.textSecondary }]}>
+                {cycleHint(view.cycle, view.weeks)}
+              </Text>
+              {view.weeks.map((week) => renderWeekRow(view.cycle, week))}
+            </View>
+          ))}
+        </CollapsibleRow>
+      </View>
+    );
+  };
+
+  const renderNoCycles = () => (
+    <Section title={t('progressCycles')} testID="progress-no-cycles">
+      <Text style={[styles.hint, { color: tokens.textSecondary }]}>{t('progressNoCycles')}</Text>
+    </Section>
+  );
 
   const renderAnswer = () => {
     const routine = routines.find((entry) => entry.routineId === selectedId);
@@ -447,18 +678,8 @@ export default function ProgressScreen({ navigation, route }: Props) {
       <View testID="progress-answer">
         <Text style={[styles.overline, { color: tokens.textSecondary }]}>{t('progress')}</Text>
         <Text style={[styles.routineName, { color: tokens.textPrimary }]}>{routine.name}</Text>
-        {routine.isActive && streak !== null && (
-          <Text style={[styles.helper, { color: tokens.textSecondary }]} testID="progress-streak">
-            {t('inicioStreak', {
-              count: streak.weeks,
-              weeks: streak.weeks,
-              completed: streak.current.completed,
-              planned: streak.current.planned,
-            })}
-          </Text>
-        )}
         {!routine.isActive && (
-          <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+          <Text style={[styles.hint, { color: tokens.textSecondary }]}>
             {t('progressSavedRoutine')}
           </Text>
         )}
@@ -467,9 +688,9 @@ export default function ProgressScreen({ navigation, route }: Props) {
   };
 
   /**
-   * P4's index: a searchable list, never a carousel. With the field empty it is the most recently
-   * logged exercises, so picking the one trained yesterday costs no typing at all; an exercise
-   * that cannot be charted yet is greyed and says why, instead of opening into three empty charts.
+   * The last of the six blocks: a searchable index, most recently logged first. With the field
+   * empty it is still only exercises with history, never the whole catalog; an exercise with too
+   * little history is greyed and says why instead of opening into an empty chart (P4).
    */
   const renderExerciseIndex = () => (
     <Section
@@ -516,134 +737,17 @@ export default function ProgressScreen({ navigation, route }: Props) {
         );
       })}
       {query.trim() !== '' && searchResults.length === 0 && (
-        <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+        <Text style={[styles.hint, { color: tokens.textSecondary }]}>
           {t('progressSearchNoMatch')}
         </Text>
       )}
       {query.trim() === '' && summaries.length > MAX_SEARCH_RESULTS && (
-        <Text style={[styles.helper, { color: tokens.textSecondary }]}>
+        <Text style={[styles.hint, { color: tokens.textSecondary }]}>
           {t('progressSearchMore', { count: summaries.length - MAX_SEARCH_RESULTS })}
         </Text>
       )}
     </Section>
   );
-
-  const renderCalendar = () => (
-    <Section
-      title={t('progressCalendar')}
-      hint={t('progressCalendarHint')}
-      testID="progress-calendar"
-    >
-      <ProgressCalendar
-        initialMonth={calendarBounds.initial}
-        firstMonth={calendarBounds.first}
-        lastMonth={calendarBounds.last}
-        firstWeekday={firstWeekday}
-        days={calendarDays}
-        todayStamp={todayStamp}
-        weekdayLabels={weekdayOrder(firstWeekday).map((weekday) =>
-          t(WEEKDAY_SHORT_KEYS[weekday]),
-        )}
-        monthLabels={MONTH_KEYS.map((key) => t(key))}
-        stateLabels={stateLabels}
-        previousMonthLabel={t('progressPreviousMonth')}
-        nextMonthLabel={t('progressNextMonth')}
-        todayLabel={t('inicioToday')}
-        dateLabel={formatDate}
-        onSelectDay={openDay}
-        testID="progress-calendar-grid"
-      />
-    </Section>
-  );
-
-  const renderCycles = () => {
-    if (routineData === null || routineData.routine.routineId !== selectedId) {
-      return null;
-    }
-    if (routineData.cycles.length === 0) {
-      return (
-        <Section title={t('progressCycles')} testID="progress-no-cycles">
-          <Text style={[styles.helper, { color: tokens.textSecondary }]}>
-            {t('progressNoCycles')}
-          </Text>
-        </Section>
-      );
-    }
-    return routineData.cycles.map((view) => (
-      <Section
-        key={view.cycle.cycleId}
-        title={t('progressCycleHeader', { n: view.cycle.cycleNumber })}
-        hint={cycleHint(view.cycle, view.weeks)}
-        testID={`progress-cycle-${view.cycle.cycleNumber}`}
-      >
-        {view.weeks.map((week) => renderWeekRow(view.cycle, week))}
-        {view.cycle.status === 'active' && view.cycle.currentWeek >= view.cycle.weeks && (
-          <Row
-            label={t('sessionSummaryReview')}
-            right={<Ionicons name="chevron-forward" size={tabBar.icon} color={tokens.textSecondary} />}
-            onPress={() => openReview(view.cycle)}
-            divided
-            testID={`progress-cycle-${view.cycle.cycleNumber}-review`}
-          />
-        )}
-      </Section>
-    ));
-  };
-
-  /**
-   * The routine's main lifts, one chart per lift and one more per unit that lift was ever logged
-   * in (P3 — a series never spans a unit change). The range control belongs to the section, not to
-   * each chart: the question is "over what period", asked once.
-   */
-  const renderMainLifts = () => {
-    if (series.length === 0) {
-      return null;
-    }
-    return (
-      <Section title={t('progressMainLifts')} testID="progress-main-lifts">
-        <ChartRangeControl
-          value={range}
-          onChange={setRange}
-          testID="progress-main-lifts-range"
-        />
-        {series.map((entry, liftIndex) =>
-          entry.series.map((unitSeries) => {
-            const points = windowByRange(unitSeries.points, range, todayStamp);
-            const seriesColor = tokens.data.series[liftIndex] ?? tokens.textSecondary;
-            return (
-              <ProgressChart
-                key={`${entry.exerciseName}-${unitSeries.unit}`}
-                title={
-                  entry.series.length > 1
-                    ? t('progressChartInUnit', {
-                        title: entry.exerciseName,
-                        unit: unitSeries.unit,
-                      })
-                    : entry.exerciseName
-                }
-                dates={points.map((point) => point.date)}
-                series={[
-                  {
-                    key: 'weight',
-                    label: entry.exerciseName,
-                    color: seriesColor,
-                    values: points.map((point) => point.weight),
-                  },
-                ]}
-                unit={unitSeries.unit}
-                range={range}
-                emptyLabel={range === 'all' ? t('progressNoData') : t('progressNoDataInRange')}
-                singlePointLabel={
-                  range === 'all' ? t('progressSinglePoint') : t('progressSinglePointInRange')
-                }
-                testID={`progress-main-lift-${entry.exerciseName}-${unitSeries.unit}`}
-              />
-            );
-          }),
-        )}
-      </Section>
-    );
-  };
 
   const renderOtherRoutines = () => {
     const others = routines.filter((routine) => routine.routineId !== selectedId);
@@ -709,6 +813,8 @@ export default function ProgressScreen({ navigation, route }: Props) {
     );
   }
 
+  const hasCycles = routineData !== null && routineData.cycles.length > 0;
+
   return (
     <>
       <Screen scroll testID="progress-screen">
@@ -727,16 +833,24 @@ export default function ProgressScreen({ navigation, route }: Props) {
         ) : (
           <>
             <Section testID="progress-header">{renderAnswer()}</Section>
-            {renderExerciseIndex()}
+            {renderTiles()}
             {renderCalendar()}
-            {renderCycles()}
-            {renderMainLifts()}
+            {renderStrength()}
+            {hasCycles ? (
+              <>
+                {renderThisCycle()}
+                {renderPastCycles()}
+              </>
+            ) : (
+              renderNoCycles()
+            )}
+            {renderExerciseIndex()}
             {renderOtherRoutines()}
           </>
         )}
       </Screen>
 
-      {/* P1/P2: a week and a day open the same sheet. */}
+      {/* One week and one calendar day open the same sheet. */}
       <SessionDetailSheet
         target={detailTarget}
         visible={detailTarget !== null && information === null}
@@ -770,8 +884,42 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: spacing.label,
   },
-  helper: {
+  hint: {
     fontSize: fontSize.helper,
     marginTop: spacing.label,
+  },
+  tileRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing.section,
+  },
+  rangeRow: {
+    marginBottom: spacing.cardGap,
+  },
+  block: {
+    marginBottom: spacing.section,
+  },
+  blockContent: {
+    marginTop: spacing.cardGap,
+  },
+  sectionTitle: {
+    fontSize: fontSize.sectionTitle,
+    fontWeight: '700',
+  },
+  weekRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.inline,
+  },
+  currentTag: {
+    fontSize: fontSize.caption,
+    fontWeight: '600',
+  },
+  pastCycleGroup: {
+    gap: spacing.cardGap,
+  },
+  pastCycleTitle: {
+    fontSize: fontSize.cardTitle,
+    fontWeight: '700',
   },
 });

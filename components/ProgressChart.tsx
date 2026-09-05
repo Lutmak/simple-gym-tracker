@@ -1,5 +1,5 @@
 import React from 'react';
-import { StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
@@ -10,6 +10,7 @@ import {
   CHART_RANGE_LABEL_MAX,
   chartLabelStyle,
   chartLabels,
+  niceAxisBounds,
   type ChartRange,
 } from '../utils/chart';
 import { dataMark, fontSize, spacing } from '../utils/scale';
@@ -33,9 +34,12 @@ import { dataMark, fontSize, spacing } from '../utils/scale';
  * **The area fill is drawn only when there is exactly one non-step series.** Overlapping
  * translucent fills from several simultaneous lines read as noise, not signal, so a chart with
  * more than one solid series keeps its lines but not its fills — legend and colour carry identity
- * instead. A legend appears whenever there is more than one series, each entry a colour dot next
- * to its name in `textSecondary` — never in the series colour itself (dataviz rule: text wears
- * text tokens, a mark carries identity).
+ * instead. A legend appears whenever there is more than one distinct **label** — never in the
+ * series colour itself (dataviz rule: text wears text tokens, a mark carries identity) — one entry
+ * per label, first occurrence wins: a lift's e1RM line and its own `step` training-max line share
+ * one legend dot when the caller gives them the same label (SPEC.md U3's combined strength chart),
+ * so the legend names lifts, not lines. A legend entry is tappable when its series carries
+ * `onPress` (U3: opens that lift's full history).
  *
  * A series of fewer than two points is **not** drawn (B7's rule): the chart says what it has
  * and what is missing instead of sitting under an axis pretending to be a chart.
@@ -52,6 +56,8 @@ export interface ProgressChartSeries {
   values: readonly number[];
   /** `solid` (default): the drawn line. `step`: a dashed, dot-less reference line (e.g. a training max). */
   style?: 'solid' | 'step';
+  /** Makes this series' legend entry tappable (U3: opens the tapped lift's full history). */
+  onPress?: () => void;
 }
 
 export type ProgressChartProps = {
@@ -189,39 +195,74 @@ export function ProgressChart({
   const solidSeriesCount = series.filter((entry) => entry.style !== 'step').length;
   const drawsAreaFill = solidSeriesCount === 1;
 
+  // chart-kit has no "nice axis" option of its own: it always interpolates its three labels
+  // between the plotted data's own raw min and max. The fix is a fourth, invisible dataset whose
+  // two values ARE the rounded axis (utils/chart.ts's niceAxisBounds) — chart-kit's min/max
+  // widens to include them, which is what pulls the three labels onto round numbers, and
+  // `withDots: false` plus a fully transparent stroke keep it undrawn.
+  const axis = niceAxisBounds(
+    series.flatMap((entry) => entry.values),
+    unit,
+  );
+  const axisPadding = dates.map((_, index) => (index === 0 ? axis.min : axis.max));
+
+  // One legend entry per distinct label, first occurrence wins: a lift's e1RM line and its own
+  // `step` training-max line share one dot when the caller gives them the same label.
+  const legendEntries = series.filter(
+    (entry, index) => series.findIndex((candidate) => candidate.label === entry.label) === index,
+  );
+
   return (
     <View style={styles.chartBlock} testID={testID}>
       {heading}
-      {series.length > 1 && (
+      {legendEntries.length > 1 && (
         <View style={styles.legend}>
-          {series.map((entry) => (
-            <View key={entry.key} style={styles.legendItem}>
+          {legendEntries.map((entry) => (
+            <Pressable
+              key={entry.key}
+              onPress={entry.onPress}
+              disabled={entry.onPress === undefined}
+              accessibilityRole={entry.onPress === undefined ? undefined : 'button'}
+              style={styles.legendItem}
+              testID={testID === undefined ? undefined : `${testID}-legend-${entry.key}`}
+            >
               <View style={[styles.legendDot, { backgroundColor: entry.color }]} />
               <Text
-                style={[styles.legendLabel, { color: tokens.textSecondary }]}
+                style={[
+                  styles.legendLabel,
+                  { color: entry.onPress === undefined ? tokens.textSecondary : tokens.textPrimary },
+                ]}
                 maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
               >
                 {entry.label}
               </Text>
-            </View>
+            </Pressable>
           ))}
         </View>
       )}
       <LineChart
         data={{
           labels: chartLabels(dates, axisLabel, CHART_RANGE_LABEL_MAX[range]),
-          datasets: series.map((entry) => ({
-            data: entry.values as number[],
-            color: (opacity = 1) => hexWithOpacity(entry.color, opacity),
-            strokeWidth: entry.style === 'step' ? 1.5 : 2,
-            withDots: entry.style !== 'step',
-            // react-native-svg's Android DashPathEffect throws on a zero- or one-length dash
-            // array (a solid line must simply omit strokeDashArray, never pass `[]`); a step
-            // line needs an even-length pair, `[6, 6]` (found on the emulator, 2026-09-05 —
-            // `Progreso` crashed the whole app on open with
-            // `ArrayIndexOutOfBoundsException` from `DashPathEffect.<init>`).
-            ...(entry.style === 'step' ? { strokeDashArray: STEP_DASH } : {}),
-          })),
+          datasets: [
+            ...series.map((entry) => ({
+              data: entry.values as number[],
+              color: (opacity = 1) => hexWithOpacity(entry.color, opacity),
+              strokeWidth: entry.style === 'step' ? 1.5 : 2,
+              withDots: entry.style !== 'step',
+              // react-native-svg's Android DashPathEffect throws on a zero- or one-length dash
+              // array (a solid line must simply omit strokeDashArray, never pass `[]`); a step
+              // line needs an even-length pair, `[6, 6]` (found on the emulator, 2026-09-05 —
+              // `Progreso` crashed the whole app on open with
+              // `ArrayIndexOutOfBoundsException` from `DashPathEffect.<init>`).
+              ...(entry.style === 'step' ? { strokeDashArray: STEP_DASH } : {}),
+            })),
+            {
+              data: axisPadding,
+              color: () => 'rgba(0, 0, 0, 0)',
+              strokeWidth: 0,
+              withDots: false,
+            },
+          ],
         }}
         width={chartWidth}
         height={180}
@@ -237,7 +278,8 @@ export function ProgressChart({
           backgroundColor: tokens.surface,
           backgroundGradientFrom: tokens.surface,
           backgroundGradientTo: tokens.surface,
-          decimalPlaces: 1,
+          // niceAxisBounds only ever produces whole-number gridlines (multiples of 5 kg/10 lb).
+          decimalPlaces: 0,
           color: () => tokens.textSecondary,
           labelColor: () => tokens.textSecondary,
           useShadowColorFromDataset: true,

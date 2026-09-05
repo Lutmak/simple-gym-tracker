@@ -4,8 +4,7 @@
  * Pure core plus thin database edges, same split as utils/today.ts. The
  * primary progress surface answers the maintainer's "el progreso principal
  * que nos interesa es por rutina": cycles and weeks in ascending order with
- * the current week marked, per-week adherence from WeekSessions statuses, and
- * the trend of each main-role exercise as its top logged weight per session.
+ * the current week marked, and per-week adherence from WeekSessions statuses.
  * Charts render the weight_logged value with the row's own unit (§3.7 —
  * nothing is ever converted; the unit travels with the log row).
  *
@@ -14,6 +13,11 @@
  * shows, and `cycleAdherence` states a cycle in the numbers the tiles read.
  * The calendar's own model moved to `utils/progressCalendar.ts` when it stopped
  * being "a dot per log" and became a day state (P2).
+ *
+ * U3 replaced the main-lift trend: `loadStrengthSeries` (and its pure
+ * `buildStrengthPoints`/`buildTrainingMaxByCycle`/`buildStrengthChart` core) plots each main
+ * lift's estimated 1RM from its AMRAP set and the training max it trained against, instead of the
+ * session's raw top weight — the audit's defect 10, "the sawtooth is the wave, not progress".
  */
 
 import type {
@@ -21,8 +25,9 @@ import type {
   RoutineLoadSource,
   RoutineUnit,
 } from './routineActions';
-import { groupByUnit } from './chart';
-import { nominalSessionStamp, targetWeightFor } from './today';
+import { chartRangeStart, type ChartRange } from './chart';
+import { estimate1RM } from './fiveThreeOne';
+import { DAY_SECONDS, nominalSessionStamp, targetWeightFor } from './today';
 
 export type WeekSessionStatus = 'pending' | 'completed' | 'moved' | 'discarded';
 export type CycleStatus = 'planned' | 'active' | 'complete';
@@ -60,40 +65,14 @@ export interface ProgressWeek {
   resolved: boolean;
   /** The active cycle's current week, marked in the UI. */
   isCurrent: boolean;
+  /** One status per planned session, in the routine's own session order — U3's four state
+   * discs, which need each session's own status, not just the week's totals. */
+  sessionStatuses: WeekSessionStatus[];
 }
 
 export interface ProgressCycleView {
   cycle: ProgressCycle;
   weeks: ProgressWeek[];
-}
-
-export interface LiftWeightRow {
-  /** Whole UTC day (noon) stamp of the log date. */
-  date: number;
-  weight: number;
-  reps: number;
-  unit: RoutineUnit;
-}
-
-export interface MainLiftPoint {
-  date: number;
-  weight: number;
-  reps: number;
-}
-
-export interface LiftUnitSeries {
-  /** The unit every point of this series is in — never mixed within one series (§3.7). */
-  unit: RoutineUnit;
-  points: MainLiftPoint[];
-}
-
-export interface MainLiftSeries {
-  exerciseName: string;
-  /**
-   * One chartable series per logged unit, most recently logged first, and never empty: an
-   * exercise with nothing logged still carries its plan's unit so the chart can say so.
-   */
-  series: LiftUnitSeries[];
 }
 
 export interface PlannedExercise {
@@ -243,7 +222,11 @@ export function cycleAdherence(weeks: readonly ProgressWeek[]): CycleAdherence {
   };
 }
 
-/** Weeks 1..N in ascending order; the active cycle's current week is marked. */
+/**
+ * Weeks 1..N in ascending order; the active cycle's current week is marked. `rows` must already
+ * be in the routine's own session order (its caller's `ORDER BY ... sort_order`) — that order is
+ * what `sessionStatuses` reads for U3's per-session state discs, and this function never reorders.
+ */
 export function buildCycleWeeks(
   cycle: { status: CycleStatus; currentWeek: number },
   weekCount: number,
@@ -251,39 +234,17 @@ export function buildCycleWeeks(
 ): ProgressWeek[] {
   const weeks: ProgressWeek[] = [];
   for (let weekNumber = 1; weekNumber <= weekCount; weekNumber += 1) {
-    const adherence = computeWeekAdherence(
-      rows.filter((row) => row.weekNumber === weekNumber),
-    );
+    const weekRows = rows.filter((row) => row.weekNumber === weekNumber);
+    const adherence = computeWeekAdherence(weekRows);
     weeks.push({
       weekNumber,
       adherence,
       resolved: adherence.pending === 0,
       isCurrent: cycle.status === 'active' && weekNumber === cycle.currentWeek,
+      sessionStatuses: weekRows.map((row) => row.status),
     });
   }
   return weeks;
-}
-
-/**
- * The top logged weight per session day, ascending by date. A session logs an
- * exercise several times; the series plots the heaviest set of each day. All
- * values stay in the unit they were logged in (§3.7).
- */
-export function buildLiftSeries(rows: readonly LiftWeightRow[]): MainLiftPoint[] {
-  const bestByDate = new Map<number, LiftWeightRow>();
-  for (const row of rows) {
-    const current = bestByDate.get(row.date);
-    if (
-      current === undefined ||
-      row.weight > current.weight ||
-      (row.weight === current.weight && row.reps > current.reps)
-    ) {
-      bestByDate.set(row.date, row);
-    }
-  }
-  return [...bestByDate.values()]
-    .sort((a, b) => a.date - b.date)
-    .map(({ date, weight, reps }) => ({ date, weight, reps }));
 }
 
 /**
@@ -291,7 +252,7 @@ export function buildLiftSeries(rows: readonly LiftWeightRow[]): MainLiftPoint[]
  * two points; empty and single-point series are handled by the caller instead
  * of being handed to the chart library.
  */
-export function hasChartableSeries(points: readonly MainLiftPoint[]): boolean {
+export function hasChartableSeries<T extends { date: number }>(points: readonly T[]): boolean {
   return points.length >= 2;
 }
 
@@ -433,8 +394,9 @@ export async function loadRoutineProgress(
      FROM WeekSessions ws
      JOIN CycleWeeks cw ON cw.cycle_week_id = ws.cycle_week_id
      JOIN Cycles c ON c.cycle_id = cw.cycle_id
+     JOIN Sessions s ON s.session_id = ws.session_id
      WHERE c.routine_id = ?
-     ORDER BY cw.cycle_id, cw.week_number;`,
+     ORDER BY cw.cycle_id, cw.week_number, s.sort_order;`,
     [routineId],
   )).map((row) => ({
     cycleId: num(row.cycle_id),
@@ -452,20 +414,260 @@ export async function loadRoutineProgress(
   return { routine, cycles: cyclesView };
 }
 
-/** One main-role exercise of the routine per series: top weight per session. */
-export async function loadMainLiftSeries(
+/**
+ * U3 — Progreso's strength chart (SPEC.md U3, ADR-0047, audit defect 10): one main lift's
+ * estimated 1RM from each non-deload week's AMRAP set, and the training max it was actually
+ * trained against that cycle, as a step. Replaces `loadMainLiftSeries`'s top-weight-per-session
+ * series, which plotted the wave's own sawtooth (5/3/1 loads by design, week to week) rather than
+ * whether the lifter got stronger.
+ */
+
+/** A cycle's AMRAP weeks are always its first three (§3.2, F3) — same rule `cycleReview.ts` uses:
+ * true whether the cycle has a 4th (deload) week or not, since a deload-off cycle's week 3 is
+ * still a normal AMRAP week, not a renumbered deload. */
+export const AMRAP_WEEK_COUNT = 3;
+
+export interface AmrapSetRow {
+  cycleNumber: number;
+  weekNumber: number;
+  /** The day this week's set was logged — folded into a per-week anchor, never used bare (see
+   * `buildStrengthChart`): different main lifts of the same routine can log their AMRAP set on
+   * different weekdays of the same training week. */
+  date: number;
+  setNumber: number;
+  weight: number;
+  reps: number;
+}
+
+export interface StrengthWeekPoint {
+  cycleNumber: number;
+  weekNumber: number;
+  /** The cycle's start plus `(weekNumber - 1)` weeks — a lift-independent anchor, so every main
+   * lift of the routine plots the same training week at the same x-position even when they were
+   * each trained on a different day of it. */
+  date: number;
+  estimated1RM: number;
+}
+
+/**
+ * One e1RM point per (cycle, week) with a logged AMRAP result: the last of at least three logged
+ * sets, the same detection `cycleReview.ts`'s own AMRAP history uses. A week with fewer than three
+ * logged sets (not trained, discarded, or still pending) contributes no point — deload weeks
+ * (`weekNumber > AMRAP_WEEK_COUNT`) are never even considered.
+ */
+export function buildStrengthPoints(
+  rows: readonly AmrapSetRow[],
+  cycleWeekAnchor: (cycleNumber: number, weekNumber: number) => number,
+): StrengthWeekPoint[] {
+  const groups = new Map<string, AmrapSetRow[]>();
+  for (const row of rows) {
+    if (row.weekNumber > AMRAP_WEEK_COUNT) {
+      continue;
+    }
+    const key = `${row.cycleNumber}:${row.weekNumber}`;
+    const bucket = groups.get(key);
+    if (bucket === undefined) {
+      groups.set(key, [row]);
+    } else {
+      bucket.push(row);
+    }
+  }
+
+  const points: StrengthWeekPoint[] = [];
+  for (const bucket of groups.values()) {
+    if (bucket.length < 3) {
+      continue;
+    }
+    const amrapSet = [...bucket].sort((a, b) => a.setNumber - b.setNumber)[bucket.length - 1];
+    points.push({
+      cycleNumber: amrapSet.cycleNumber,
+      weekNumber: amrapSet.weekNumber,
+      date: cycleWeekAnchor(amrapSet.cycleNumber, amrapSet.weekNumber),
+      estimated1RM: estimate1RM(amrapSet.weight, amrapSet.reps),
+    });
+  }
+  return points.sort(
+    (a, b) => a.cycleNumber - b.cycleNumber || a.weekNumber - b.weekNumber,
+  );
+}
+
+export interface StrengthCycleTM {
+  cycleNumber: number;
+  trainingMax: number;
+}
+
+export interface TmProposalRow {
+  cycleNumber: number;
+  /** The cycle had reached its last week when this row was stored — the TM-type row (§3.4)
+   * `selectStoredProposals` keeps, as opposed to a mid-cycle derived week target. */
+  atCycleEnd: boolean;
+  currentTarget: number;
+}
+
+/**
+ * The training max in effect during each cycle of the routine: the TM-type Progression_Proposal
+ * row stored at that cycle's own end (`current_target` — the value BEFORE that cycle's review
+ * changed it, since `Progression_Proposal` rows are scoped to their own cycle and are never
+ * rewritten by a later one), or, for a cycle whose own review has not stored one yet, the live
+ * plan value — correct precisely because nothing has overwritten it since (a plan write only
+ * happens on that cycle's own apply, `cycleReview.ts`'s `planWrite`).
+ */
+export function buildTrainingMaxByCycle(
+  cycleNumbers: readonly number[],
+  proposalRows: readonly TmProposalRow[],
+  liveTrainingMax: number,
+): StrengthCycleTM[] {
+  const stored = new Map(
+    proposalRows.filter((row) => row.atCycleEnd).map((row) => [row.cycleNumber, row.currentTarget]),
+  );
+  return cycleNumbers.map((cycleNumber) => ({
+    cycleNumber,
+    trainingMax: stored.get(cycleNumber) ?? liveTrainingMax,
+  }));
+}
+
+export interface StrengthLift {
+  sessionExerciseId: number;
+  exerciseName: string;
+  unit: RoutineUnit;
+  /** True for a `training_max_pct` lift — the only load source with a training max to step. */
+  hasTrainingMax: boolean;
+  /** Ascending by (cycleNumber, weekNumber); deload weeks are never in this list. */
+  points: StrengthWeekPoint[];
+  /** Ascending by cycleNumber; empty when `hasTrainingMax` is false. */
+  trainingMax: StrengthCycleTM[];
+}
+
+export interface StrengthAxisPoint {
+  cycleNumber: number;
+  weekNumber: number;
+  date: number;
+}
+
+export interface StrengthChartLift {
+  exerciseName: string;
+  unit: RoutineUnit;
+  hasTrainingMax: boolean;
+  /** Aligned 1:1 with `StrengthChartData.axis`: a week this lift has no AMRAP point of its own
+   * carries the last known value forward (or, before its first point, repeats that first value),
+   * so every lift hands the chart a full-length numeric array — `ProgressChart`'s parallel-array
+   * contract — without inventing a value the log never produced. */
+  estimated1RM: number[];
+  /** Same alignment as `estimated1RM`; empty when `hasTrainingMax` is false. */
+  trainingMax: number[];
+}
+
+export interface StrengthChartData {
+  axis: StrengthAxisPoint[];
+  /** Only lifts with at least one logged AMRAP point — an untrained lift draws no flat line. */
+  lifts: StrengthChartLift[];
+}
+
+/**
+ * One shared axis for every main lift's chart (P3/U3 — "one point per training week", the cadence
+ * `ProgressChart`'s own docstring already anticipates), built from the union of every lift's own
+ * (cycle, week) points so a lift trained on a different weekday of the same week still lands on
+ * the same x-position as its training partners.
+ */
+export function buildStrengthChart(lifts: readonly StrengthLift[]): StrengthChartData {
+  const charted = lifts.filter((lift) => lift.points.length > 0);
+
+  const axisEntries = new Map<string, StrengthAxisPoint>();
+  for (const lift of charted) {
+    for (const point of lift.points) {
+      const key = `${point.cycleNumber}:${point.weekNumber}`;
+      if (!axisEntries.has(key)) {
+        axisEntries.set(key, {
+          cycleNumber: point.cycleNumber,
+          weekNumber: point.weekNumber,
+          date: point.date,
+        });
+      }
+    }
+  }
+  const axis = [...axisEntries.values()].sort((a, b) => a.date - b.date);
+
+  const alignedValues = (byKey: ReadonlyMap<string, number>): number[] => {
+    const raw = axis.map((point) => byKey.get(`${point.cycleNumber}:${point.weekNumber}`) ?? null);
+    const firstKnown = raw.find((value): value is number => value !== null) ?? 0;
+    let last = firstKnown;
+    return raw.map((value) => {
+      if (value !== null) {
+        last = value;
+      }
+      return last;
+    });
+  };
+
+  return {
+    axis,
+    lifts: charted.map((lift) => {
+      const e1rmByKey = new Map(
+        lift.points.map((point) => [`${point.cycleNumber}:${point.weekNumber}`, point.estimated1RM]),
+      );
+      const tmByCycle = new Map(lift.trainingMax.map((tm) => [tm.cycleNumber, tm.trainingMax]));
+      return {
+        exerciseName: lift.exerciseName,
+        unit: lift.unit,
+        hasTrainingMax: lift.hasTrainingMax,
+        estimated1RM: alignedValues(e1rmByKey),
+        trainingMax: lift.hasTrainingMax
+          ? axis.map((point) => tmByCycle.get(point.cycleNumber) ?? 0)
+          : [],
+      };
+    }),
+  };
+}
+
+/**
+ * `chart` windowed to a range (P3/U3 — the one range control every chart on this tab reads
+ * through): the axis and every lift's `estimated1RM`/`trainingMax` are cut to the same kept
+ * indices, so `ProgressChart`'s parallel-array contract survives the window.
+ */
+export function windowStrengthChart(
+  chart: StrengthChartData,
+  range: ChartRange,
+  todayStamp: number,
+): StrengthChartData {
+  const start = chartRangeStart(range, todayStamp);
+  const keep = chart.axis
+    .map((point, index) => index)
+    .filter((index) => start === null || chart.axis[index].date >= start);
+  return {
+    axis: keep.map((index) => chart.axis[index]),
+    lifts: chart.lifts.map((lift) => ({
+      ...lift,
+      estimated1RM: keep.map((index) => lift.estimated1RM[index]),
+      trainingMax: lift.hasTrainingMax ? keep.map((index) => lift.trainingMax[index]) : [],
+    })),
+  };
+}
+
+/**
+ * The routine's main lifts, keyed by exercise name (a lift appearing as `role = 'main'` in more
+ * than one session — unusual, but not forbidden — is represented once, by its lowest `sort_order`
+ * row: the one `mainLiftColours` also reads).
+ */
+async function loadMainLiftPlanRows(
   db: RoutineDatabase,
   routineId: number,
-): Promise<MainLiftSeries[]> {
-  const routineRow = await db.get(
-    'SELECT unit FROM Routines WHERE routine_id = ?;',
-    [routineId],
-  );
+): Promise<
+  {
+    sessionExerciseId: number;
+    exerciseName: string;
+    sortOrder: number;
+    loadSource: RoutineLoadSource;
+    trainingMaxWeight: number | null;
+    unit: RoutineUnit;
+  }[]
+> {
+  const routineRow = await db.get('SELECT unit FROM Routines WHERE routine_id = ?;', [routineId]);
   const routineUnit: RoutineUnit =
     routineRow === undefined ? 'kg' : (str(routineRow.unit) as RoutineUnit);
 
-  const planRows = await db.getAll(
-    `SELECT se.session_exercise_id, se.exercise_name, se.unit_override
+  const rows = await db.getAll(
+    `SELECT se.session_exercise_id, se.exercise_name, se.sort_order, se.load_source,
+            se.training_max_weight, se.unit_override
      FROM SessionExercises se
      JOIN Sessions s ON s.session_id = se.session_id
      WHERE s.routine_id = ? AND se.role = 'main'
@@ -473,42 +675,113 @@ export async function loadMainLiftSeries(
     [routineId],
   );
 
-  const weightRows = await db.getAll(
-    `SELECT wol.workout_date AS date, le.exercise_name, wl.weight_logged,
-            wl.reps_logged, wl.unit
+  const byName = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) {
+    const name = str(row.exercise_name);
+    if (!byName.has(name)) {
+      byName.set(name, row);
+    }
+  }
+  return [...byName.values()].map((row) => ({
+    sessionExerciseId: num(row.session_exercise_id),
+    exerciseName: str(row.exercise_name),
+    sortOrder: num(row.sort_order),
+    loadSource: str(row.load_source) as RoutineLoadSource,
+    trainingMaxWeight: nullableNum(row.training_max_weight),
+    unit: (nullableStr(row.unit_override) as RoutineUnit | null) ?? routineUnit,
+  }));
+}
+
+/**
+ * Every main lift of the routine, its estimated-1RM points and its per-cycle training max
+ * (SPEC.md U3). One lift per name; see `loadMainLiftPlanRows`.
+ */
+export async function loadStrengthSeries(
+  db: RoutineDatabase,
+  routineId: number,
+): Promise<StrengthLift[]> {
+  const plan = await loadMainLiftPlanRows(db, routineId);
+  if (plan.length === 0) {
+    return [];
+  }
+
+  const cycleRows = await db.getAll(
+    `SELECT cycle_number, started_at FROM Cycles WHERE routine_id = ? ORDER BY cycle_number;`,
+    [routineId],
+  );
+  const cycleNumbers = cycleRows.map((row) => num(row.cycle_number));
+  const cycleStartOf = new Map<number, number>();
+  for (const row of cycleRows) {
+    if (row.started_at !== null && row.started_at !== undefined) {
+      cycleStartOf.set(num(row.cycle_number), num(row.started_at));
+    }
+  }
+  const cycleWeekAnchor = (cycleNumber: number, weekNumber: number): number => {
+    const startedAt = cycleStartOf.get(cycleNumber) ?? 0;
+    return startedAt + (weekNumber - 1) * 7 * DAY_SECONDS;
+  };
+
+  const setRows = await db.getAll(
+    `SELECT c.cycle_number, cw.week_number, wol.workout_date AS date, le.exercise_name,
+            wl.set_number, wl.weight_logged, wl.reps_logged
      FROM Cycles c
      JOIN CycleWeeks cw ON cw.cycle_id = c.cycle_id
      JOIN WeekSessions ws ON ws.cycle_week_id = cw.cycle_week_id
      JOIN Workout_Log wol ON wol.workout_log_id = ws.completed_log_id
      JOIN Logged_Exercises le ON le.workout_log_id = wol.workout_log_id
      JOIN Weight_Log wl ON wl.logged_exercise_id = le.logged_exercise_id
-     WHERE c.routine_id = ?
-     ORDER BY wol.workout_date;`,
-    [routineId],
+     WHERE c.routine_id = ? AND cw.week_number <= ?
+     ORDER BY c.cycle_number, cw.week_number, le.exercise_name, wl.set_number;`,
+    [routineId, AMRAP_WEEK_COUNT],
   );
 
-  return planRows.map((plan) => {
-    const name = str(plan.exercise_name);
-    const planUnit =
-      (nullableStr(plan.unit_override) as RoutineUnit | null) ?? routineUnit;
-    const rows: LiftWeightRow[] = weightRows
-      .filter((row) => str(row.exercise_name) === name)
-      .map((row) => ({
-        date: num(row.date),
-        weight: num(row.weight_logged),
-        reps: num(row.reps_logged),
-        unit: str(row.unit) as RoutineUnit,
-      }));
-    const groups = groupByUnit(rows);
-    const series: LiftUnitSeries[] =
-      groups.length === 0
-        ? [{ unit: planUnit, points: [] }]
-        : groups.map((group) => ({
-            unit: group.unit,
-            points: buildLiftSeries(group.rows),
-          }));
-    return { exerciseName: name, series };
-  });
+  return Promise.all(
+    plan.map(async (lift) => {
+      const rows: AmrapSetRow[] = setRows
+        .filter((row) => str(row.exercise_name) === lift.exerciseName)
+        .map((row) => ({
+          cycleNumber: num(row.cycle_number),
+          weekNumber: num(row.week_number),
+          date: num(row.date),
+          setNumber: num(row.set_number),
+          weight: num(row.weight_logged),
+          reps: num(row.reps_logged),
+        }));
+      const points = buildStrengthPoints(rows, cycleWeekAnchor);
+
+      const hasTrainingMax = lift.loadSource === 'training_max_pct';
+      let trainingMax: StrengthCycleTM[] = [];
+      if (hasTrainingMax) {
+        const proposalRows: TmProposalRow[] = (
+          await db.getAll(
+            `SELECT c.cycle_number, c.weeks, c.current_week, p.current_target
+             FROM Progression_Proposal p JOIN Cycles c ON c.cycle_id = p.cycle_id
+             WHERE p.routine_id = ? AND p.session_exercise_id = ?
+             ORDER BY c.cycle_number;`,
+            [routineId, lift.sessionExerciseId],
+          )
+        ).map((row) => ({
+          cycleNumber: num(row.cycle_number),
+          atCycleEnd: num(row.current_week) >= num(row.weeks),
+          currentTarget: num(row.current_target),
+        }));
+        trainingMax = buildTrainingMaxByCycle(
+          cycleNumbers,
+          proposalRows,
+          lift.trainingMaxWeight ?? 0,
+        );
+      }
+
+      return {
+        sessionExerciseId: lift.sessionExerciseId,
+        exerciseName: lift.exerciseName,
+        unit: lift.unit,
+        hasTrainingMax,
+        points,
+        trainingMax,
+      };
+    }),
+  );
 }
 
 interface PlanExerciseRow {

@@ -1,5 +1,6 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react-native';
+import { fireEvent, render, screen } from '@testing-library/react-native';
+import { LineChart } from 'react-native-chart-kit';
 
 import { ProgressChart } from './ProgressChart';
 import { ThemeProvider } from '../context/ThemeContext';
@@ -64,6 +65,24 @@ describe('ProgressChart', () => {
     expect(screen.getByText('Sentadilla (kg)')).toBeTruthy();
   });
 
+  it('rounds the y-axis to a nice value instead of the data\'s own raw min/max', () => {
+    // The exact spread the audit found unreadable: raw min/mid/max would be 49.1/95.5/142.9.
+    // chart-kit computes its axis labels from the raw min/max of every plotted dataset — react-
+    // native-svg's text nodes need native measurement to expose their rendered string, which this
+    // test environment cannot provide, so the assertion is on the hidden padding dataset
+    // ProgressChart hands chart-kit: niceAxisBounds([49.1, 96, 142.9], 'kg') is {45, 95, 145}
+    // (utils/chart.test.ts), and that pair is what pulls chart-kit's own min/max onto it.
+    renderChart({
+      dates: [1, 2, 3],
+      series: [{ key: 'a', label: 'Sentadilla', color: '#2A78D6', values: [49.1, 96.0, 142.9] }],
+    });
+    const chart = screen.UNSAFE_root.findByType(LineChart);
+    const datasets = chart.props.data.datasets as { data: number[] }[];
+    const padding = datasets[datasets.length - 1].data;
+    expect(Math.min(...padding)).toBe(45);
+    expect(Math.max(...padding)).toBe(145);
+  });
+
   it('shows no legend for a single series', () => {
     renderChart();
     expect(screen.queryByText('Sentadilla')).toBeNull();
@@ -78,6 +97,44 @@ describe('ProgressChart', () => {
     });
     expect(screen.getByText('Sentadilla')).toBeTruthy();
     expect(screen.getByText('Banca')).toBeTruthy();
+  });
+
+  it('collapses each lift\'s solid and step lines into one legend entry when they share a label', () => {
+    renderChart({
+      series: [
+        { key: 'squat-1rm', label: 'Sentadilla', color: '#2A78D6', values: [100, 105, 110] },
+        {
+          key: 'squat-tm',
+          label: 'Sentadilla',
+          color: '#2A78D6',
+          values: [95, 95, 100],
+          style: 'step',
+        },
+        { key: 'bench-1rm', label: 'Banca', color: '#EB6834', values: [80, 82, 84] },
+        {
+          key: 'bench-tm',
+          label: 'Banca',
+          color: '#EB6834',
+          values: [70, 70, 75],
+          style: 'step',
+        },
+      ],
+    });
+    // Four series, two labels — U3's combined strength chart never shows a lift's name twice.
+    expect(screen.getAllByText('Sentadilla')).toHaveLength(1);
+    expect(screen.getAllByText('Banca')).toHaveLength(1);
+  });
+
+  it('makes a legend entry tappable when its series carries onPress', () => {
+    const onPress = jest.fn();
+    renderChart({
+      series: [
+        { key: 'a', label: 'Sentadilla', color: '#2A78D6', values: [100, 105, 110], onPress },
+        { key: 'b', label: 'Banca', color: '#EB6834', values: [80, 82, 84] },
+      ],
+    });
+    fireEvent.press(screen.getByTestId('chart-legend-a'));
+    expect(onPress).toHaveBeenCalledTimes(1);
   });
 
   it('renders a dashed, dot-less step series alongside a solid one', () => {

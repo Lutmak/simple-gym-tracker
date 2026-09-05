@@ -29,6 +29,7 @@ const cycleView = (over: {
     adherence: week.adherence,
     resolved: week.adherence.pending === 0,
     isCurrent: over.status === 'active' && week.weekNumber === over.currentWeek,
+    sessionStatuses: [],
   })),
 });
 

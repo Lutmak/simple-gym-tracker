@@ -184,7 +184,7 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
 
   const liftColours = mainLiftColours(
     exercisesInRoutineOrder(sessions, exercises).map((exercise) => ({
-      id: exercise.exerciseId,
+      name: exercise.name,
       role: exercise.role,
     })),
   );
@@ -216,7 +216,7 @@ export default function RoutineDetailsScreen({ navigation, route }: Props) {
    * lift, a plain ring for an accessory — one mark carries both the role (filled vs ring) and,
    * for a main lift, which lift it is (the hue). Colour is never the only cue. */
   const roleMarker = (exercise: ExerciseSource) => {
-    const colourIndex = liftColours.get(exercise.exerciseId);
+    const colourIndex = liftColours.get(exercise.name);
     if (colourIndex === undefined) {
       return (
         <View

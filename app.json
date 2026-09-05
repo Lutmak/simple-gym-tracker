@@ -2,14 +2,14 @@
   "expo": {
     "name": "Simple: Gym Tracker",
     "slug": "simple-gym-tracker",
-    "version": "1.7.15",
+    "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/simpleicon.png",
     "ios": {
       "bundleIdentifier": "dev.lutmak.simplegymtracker"
     },
     "android": {
-      "versionCode": 66,
+      "versionCode": 100,
       "blockedPermissions": [
         "android.permission.INTERNET",
         "android.permission.SYSTEM_ALERT_WINDOW",

@@ -176,10 +176,15 @@ export function ExerciseHistoryView({
             >
               <ProgressChart
                 title={chartTitle('progressLoadOverTime', entry.unit)}
-                points={points.map((point) => ({
-                  date: point.date,
-                  value: point.weight,
-                }))}
+                dates={points.map((point) => point.date)}
+                series={[
+                  {
+                    key: 'load',
+                    label: chartTitle('progressLoadOverTime', entry.unit),
+                    color: tokens.data.series[0],
+                    values: points.map((point) => point.weight),
+                  },
+                ]}
                 unit={entry.unit}
                 range={range}
                 emptyLabel={emptyLabel}
@@ -188,10 +193,15 @@ export function ExerciseHistoryView({
               />
               <ProgressChart
                 title={chartTitle('progressEstimated1rm', entry.unit)}
-                points={points.map((point) => ({
-                  date: point.date,
-                  value: point.estimated1RM,
-                }))}
+                dates={points.map((point) => point.date)}
+                series={[
+                  {
+                    key: '1rm',
+                    label: chartTitle('progressEstimated1rm', entry.unit),
+                    color: tokens.data.series[0],
+                    values: points.map((point) => point.estimated1RM),
+                  },
+                ]}
                 unit={entry.unit}
                 range={range}
                 emptyLabel={emptyLabel}
@@ -200,10 +210,15 @@ export function ExerciseHistoryView({
               />
               <ProgressChart
                 title={chartTitle('progressVolume', entry.unit)}
-                points={points.map((point) => ({
-                  date: point.date,
-                  value: point.volume,
-                }))}
+                dates={points.map((point) => point.date)}
+                series={[
+                  {
+                    key: 'volume',
+                    label: chartTitle('progressVolume', entry.unit),
+                    color: tokens.data.series[0],
+                    values: points.map((point) => point.volume),
+                  },
+                ]}
                 unit={entry.unit}
                 range={range}
                 emptyLabel={emptyLabel}

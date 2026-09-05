@@ -46,4 +46,28 @@ describe('SegmentedControl', () => {
     fireEvent.press(screen.getByText('Bodyweight'));
     expect(onChange).toHaveBeenCalledWith('bodyweight');
   });
+
+  it('renders inside a horizontal ScrollView when scroll is set, never wrapped (SPEC.md U1)', () => {
+    const onChange = jest.fn();
+    render(
+      <SegmentedControl options={OPTIONS} value="kg" onChange={onChange} scroll testID="chips" />,
+    );
+
+    const container = screen.getByTestId('chips');
+    expect(container.type).toBe('RCTScrollView');
+    expect(container.props.horizontal).toBe(true);
+    for (const option of OPTIONS) {
+      expect(screen.getByText(option.label)).toBeTruthy();
+    }
+
+    fireEvent.press(screen.getByText('Bodyweight'));
+    expect(onChange).toHaveBeenCalledWith('bodyweight');
+  });
+
+  it('does not scroll-wrap by default', () => {
+    render(
+      <SegmentedControl options={OPTIONS} value="kg" onChange={() => {}} testID="chips" />,
+    );
+    expect(screen.getByTestId('chips').type).not.toBe('RCTScrollView');
+  });
 });

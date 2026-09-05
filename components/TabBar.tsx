@@ -8,39 +8,44 @@ import { useNavigation } from '@react-navigation/native';
 import type { NavigationProp, ParamListBase } from '@react-navigation/native';
 import { useTheme } from '../context/ThemeContext';
 import { useQueueRevision } from '../context/QueueRevision';
-import { dayStampOf, loadSessionQueue, type SessionQueueState } from '../utils/today';
-import { centreActionFor, type CentreLabelKind } from '../utils/shell';
-import { fontSize, spacing, tabBar, tabIndicator, touchTarget } from '../utils/scale';
+import { dayStampOf, loadSessionQueue, resolvePullForwardSession, type SessionQueueState } from '../utils/today';
+import { loadReviewEntry, type ReviewEntry } from '../utils/cycleReview';
+import { centreActionFor, type CentreActionKind } from '../utils/shell';
+import { centreButton, fontSize, spacing, tabBar, tabIndicator } from '../utils/scale';
 import type { RoutineDatabase } from '../utils/routineActions';
-import { Button } from './Button';
+import { Row } from './Row';
+import { Sheet } from './Sheet';
 
 /**
- * The navigation shell (SPECS.md V2): five slots — four tabs around a raised
- * centre action button that answers the session queue (M1). The bar is bespoke
- * because the centre button is not a tab: it is the app's one primary action,
- * contextual, never disabled and never a dead end. Everything it renders comes
- * from the tokens and the scale; the only logic it owns is translating the pure
- * centre action (utils/shell.ts) into copy and a navigation destination.
+ * The navigation shell (SPEC.md §4.3/§4.4): five slots — four tabs around a raised circular
+ * centre action button that answers the session queue. The bar is bespoke because the centre
+ * button is not a tab: it is the app's one primary action, contextual, never disabled and never
+ * a dead end. Its **label never changes** — it always reads "Entrenar"/"Train" — only its icon
+ * and what tapping it does follow the queue (`utils/shell.ts`, `centreActionFor`).
  *
- * The bar loads the queue itself (pure DB reads, no React in utils/today.ts):
- * on mount, on every tab switch, and on every navigation state change — a
- * finished or resolved session leaves the bar on the correct label without any
- * screen telling it to reload. Resolutions that happen in place (no navigation
- * event) announce themselves through the queue-revision context; the bar
+ * The bar loads the queue itself (pure DB reads, no React in `utils/today.ts`): on mount, on
+ * every tab switch, and on every navigation state change — a finished or resolved session leaves
+ * the bar on the correct action without any screen telling it to reload. Resolutions that happen
+ * in place (no navigation event) announce themselves through the queue-revision context; the bar
  * reloads on every revision bump.
  *
- * The centre button takes its natural width — the four tabs share the rest —
- * so the pill never overlaps a neighbour, whatever the longest label is. It is
- * raised half its height above the bar line; the hitSlop keeps the raised part
- * inside its touch target.
+ * **Review is not decided by `centreActionFor`.** A pending cycle review (SPEC.md §3.4) needs a
+ * database read — `loadReviewEntry` (`utils/cycleReview.ts`), owned by the Phase F work — that a
+ * pure function cannot perform. The bar only asks that question when `centreActionFor` would
+ * otherwise answer `restDay`: a cycle can only be complete-and-unreviewed once nothing else in
+ * the routine is due, which is exactly the same precondition `restDay` already encodes, so the
+ * two checks can never disagree about when to fire.
  *
- * The bar reserves that raised half as its own top padding rather than letting
- * the button draw outside the bar's box. A transform does not affect layout, so
- * without the padding the pill floats over whatever the screen has at its
- * bottom edge — observed on the emulator, 2026-08-15, covering the last card of
- * Settings. Reserving it here fixes every screen at once, including the ones
- * Phases H–S have not rebuilt yet, because React Navigation lays the scene out
- * above the bar's measured height.
+ * **Rest day opens a Sheet, never navigates.** "Adelantar la próxima sesión" pulls the next
+ * upcoming session onto today (`resolvePullForwardSession`, SPEC.md §3.3) and opens it directly;
+ * "Registro libre" is one row here, never the label on this button (the audit finding this bar
+ * exists to fix).
+ *
+ * The centre button takes a fixed diameter, raised half its height above the bar line so its
+ * centre sits on the icon row's centre line (§4.3); the bar reserves that overhang as its own top
+ * padding rather than letting the button draw outside the bar's box — a transform does not affect
+ * layout, so without the padding the raised part floats over whatever the screen has at its
+ * bottom edge (ADR-0038, found on the emulator 2026-08-15).
  */
 
 interface TabConfig {
@@ -70,12 +75,32 @@ const TAB_CONFIG: readonly TabConfig[] = [
 /** How many tabs sit to the left of the centre action button. */
 const TABS_LEFT_OF_CENTRE = 2;
 
-const CENTRE_LABEL_KEYS: Record<CentreLabelKind, string> = {
+/** Every reachable state of the centre button (SPEC.md §4.4's table, plus `review`). */
+type BarActionKind = CentreActionKind | 'review';
+
+const CENTRE_ICON: Record<BarActionKind, string> = {
+  start: 'play',
+  continue: 'play',
+  resolve: 'alert-circle',
+  review: 'ribbon',
+  restDay: 'moon',
+  newRoutine: 'add',
+};
+
+const CENTRE_ACCESSIBILITY_KEY: Record<BarActionKind, string> = {
   start: 'startSession',
   continue: 'continueSession',
   resolve: 'resolveSession',
-  freeLog: 'freeLogging',
+  review: 'reviewSessionAction',
+  restDay: 'restDaySheetTitle',
+  newRoutine: 'newRoutineAction',
 };
+
+interface BarAction {
+  kind: BarActionKind;
+  weekSessionId: number | null;
+  review: ReviewEntry | null;
+}
 
 function TabItem({
   config,
@@ -123,10 +148,13 @@ function TabItem({
 export function TabBar({ state, insets }: BottomTabBarProps) {
   const { tokens } = useTheme();
   const { t } = useTranslation();
-  const { revision } = useQueueRevision();
+  const { revision, bump } = useQueueRevision();
   const navigation = useNavigation<NavigationProp<ParamListBase>>();
   const db = useSQLiteContext();
   const [queue, setQueue] = useState<SessionQueueState | null>(null);
+  const [action, setAction] = useState<BarAction | null>(null);
+  const [restDaySheetOpen, setRestDaySheetOpen] = useState(false);
+  const [pullingForward, setPullingForward] = useState(false);
 
   const routineDb: RoutineDatabase = {
     run: (sql, params) => db.runAsync(sql, (params ?? []) as never[]),
@@ -140,8 +168,22 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
   };
 
   const reload = useCallback(() => {
-    loadSessionQueue(routineDb, dayStampOf(new Date()))
-      .then(setQueue)
+    const today = dayStampOf(new Date());
+    loadSessionQueue(routineDb, today)
+      .then(async (nextQueue) => {
+        setQueue(nextQueue);
+        const base = centreActionFor(nextQueue);
+        if (base.kind !== 'restDay') {
+          setAction({ kind: base.kind, weekSessionId: base.weekSessionId, review: null });
+          return;
+        }
+        const review = await loadReviewEntry(routineDb);
+        setAction(
+          review === null
+            ? { kind: 'restDay', weekSessionId: null, review: null }
+            : { kind: 'review', weekSessionId: null, review },
+        );
+      })
       .catch((error) =>
         console.error('Error loading the session queue for the tab bar:', error),
       );
@@ -176,59 +218,179 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
     );
   };
 
-  const action = queue === null ? null : centreActionFor(queue);
-  const centreLabel =
-    action === null ? t('freeLogging') : t(CENTRE_LABEL_KEYS[action.label]);
-
-  const onCentrePress = () => {
-    const current = action ?? { label: 'freeLog' as const, weekSessionId: null };
-    if (current.label === 'resolve') {
-      navigation.navigate('Inicio');
-      return;
-    }
-    if (current.label === 'freeLog') {
-      navigation.navigate('Inicio', { screen: 'FreeLogging' });
-      return;
-    }
-    navigation.navigate('Inicio', {
-      screen: 'StartSession',
-      params: { weekSessionId: current.weekSessionId },
-    });
+  /**
+   * Navigate into a screen that is not its stack's own root, with that root underneath it —
+   * so hardware back returns to RoutinesList/InicioIndex rather than exiting the app.
+   *
+   * A bottom-tab's nested stack is lazy: if its tab has never been focused, `navigate(tab,
+   * {screen, params})` straight to a non-root screen initialises that stack with *only* the
+   * requested route, no root beneath it (found on the emulator, 2026-09-05 — back from
+   * `CycleReview` closed the app instead of landing on `RoutinesList`).
+   *
+   * React Navigation has a documented mechanism for exactly this: `initial: false` inside the
+   * nested `{screen, params}` shorthand (`useNavigationBuilder`'s handling of
+   * `route.params.initial === false && isFirstStateInitialization`). The target stack still
+   * initialises normally — from its own `initialRouteName` — and this then dispatches a NAVIGATE
+   * for `screen` on top of that already-initialised state, in the same action, so there is no
+   * two-call ordering to get wrong.
+   */
+  const navigateIntoStack = (
+    tab: 'Inicio' | 'Routines',
+    targetScreen: string,
+    params?: Record<string, unknown>,
+  ) => {
+    navigation.navigate(tab, { screen: targetScreen, params, initial: false });
   };
 
+  const onCentrePress = () => {
+    if (action === null) {
+      return;
+    }
+    switch (action.kind) {
+      case 'start':
+      case 'continue':
+        navigateIntoStack('Inicio', 'StartSession', { weekSessionId: action.weekSessionId });
+        return;
+      case 'resolve':
+        navigateIntoStack('Inicio', 'InicioIndex', {
+          resolutionWeekSessionId: action.weekSessionId ?? undefined,
+        });
+        return;
+      case 'review':
+        if (action.review !== null) {
+          navigateIntoStack('Routines', 'CycleReview', {
+            routineId: action.review.routineId,
+            cycleId: action.review.cycleId,
+          });
+        }
+        return;
+      case 'restDay':
+        setRestDaySheetOpen(true);
+        return;
+      case 'newRoutine':
+        navigateIntoStack('Routines', 'NewRoutine');
+        return;
+    }
+  };
+
+  const pullForward = async () => {
+    if (pullingForward) {
+      return;
+    }
+    setPullingForward(true);
+    try {
+      const weekSessionId = await resolvePullForwardSession(routineDb, dayStampOf(new Date()));
+      bump();
+      setRestDaySheetOpen(false);
+      navigateIntoStack('Inicio', 'StartSession', { weekSessionId });
+    } catch (error) {
+      console.error('Error pulling the next session forward:', error);
+    } finally {
+      setPullingForward(false);
+    }
+  };
+
+  const upcoming = queue?.upcoming ?? null;
+
   return (
-    <View
-      style={[
-        styles.bar,
-        {
-          backgroundColor: tokens.surface,
-          borderTopColor: tokens.divider,
-          paddingBottom: insets.bottom,
-          paddingHorizontal: Math.max(insets.left, insets.right),
-        },
-      ]}
-    >
-      <View style={styles.row}>
-        {TAB_CONFIG.slice(0, TABS_LEFT_OF_CENTRE).map(renderTab)}
-        <View style={styles.centreSlot}>
-          <Button
-            label={centreLabel}
-            onPress={onCentrePress}
-            style={styles.centreButton}
-            hitSlop={{ top: touchTarget.control / 2 }}
-            testID="centre-action-button"
-          />
+    <>
+      <View
+        style={[
+          styles.bar,
+          {
+            backgroundColor: tokens.surface,
+            borderTopColor: tokens.divider,
+            paddingBottom: insets.bottom,
+            paddingHorizontal: Math.max(insets.left, insets.right),
+          },
+        ]}
+      >
+        <View style={styles.row}>
+          {TAB_CONFIG.slice(0, TABS_LEFT_OF_CENTRE).map(renderTab)}
+          <View style={styles.centreSlot}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                action === null ? t('centreButtonLabel') : t(CENTRE_ACCESSIBILITY_KEY[action.kind])
+              }
+              onPress={onCentrePress}
+              hitSlop={{ top: centreButton.diameter - tabBar.icon }}
+              testID="centre-action-button"
+              style={styles.centreTouch}
+            >
+              {/*
+               * An icon-sized reference box, matching a normal tab's icon height exactly, so the
+               * label below it lands at the same row as every other tab's label. The visible
+               * circle is the absolutely positioned sibling right after it: its bottom edge pins
+               * to this box's bottom (the shared icon baseline) and it extends upward from there,
+               * which is what "raised" means — never a transform on the label's own container,
+               * or the label would rise with it and stop matching the other four (§4.3).
+               */}
+              <View style={styles.centreIconSlot}>
+                <View style={[styles.centreCircle, { backgroundColor: tokens.accent }]}>
+                  <Ionicons
+                    name={action === null ? 'ellipse' : CENTRE_ICON[action.kind]}
+                    size={centreButton.icon}
+                    color={tokens.onAccent}
+                  />
+                </View>
+              </View>
+              <Text
+                style={[styles.centreLabel, { color: tokens.textSecondary }]}
+                maxFontSizeMultiplier={1.5}
+              >
+                {t('centreButtonLabel')}
+              </Text>
+              {/*
+               * A normal tab's column is icon + label + indicator, three children sharing
+               * `gap`; this column is icon-slot + label, two. Centered inside the same row
+               * height, a shorter column lands its label lower than a taller one does — this
+               * spacer, sized to the indicator it stands in for, is what puts "Entrenar" back
+               * on the other four labels' line (found on the emulator, 2026-09-05: ~10 px low).
+               */}
+              <View style={styles.centreIndicatorSpacer} />
+            </Pressable>
+          </View>
+          {TAB_CONFIG.slice(TABS_LEFT_OF_CENTRE).map(renderTab)}
         </View>
-        {TAB_CONFIG.slice(TABS_LEFT_OF_CENTRE).map(renderTab)}
       </View>
-    </View>
+
+      <Sheet
+        visible={restDaySheetOpen}
+        onClose={() => setRestDaySheetOpen(false)}
+        title={t('restDaySheetTitle')}
+        testID="rest-day-sheet"
+      >
+        {upcoming !== null && upcoming.weekSessionId !== null && (
+          <Row
+            label={t('restDayPullForward')}
+            detail={t('restDayPullForwardDetail')}
+            detailBelow
+            onPress={() => void pullForward()}
+            disabled={pullingForward}
+            divided
+            testID="rest-day-pull-forward"
+          />
+        )}
+        <Row
+          label={t('freeLogging')}
+          onPress={() => {
+            setRestDaySheetOpen(false);
+            navigateIntoStack('Inicio', 'FreeLogging');
+          }}
+          testID="rest-day-free-log"
+        />
+      </Sheet>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
   bar: {
     borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: touchTarget.control / 2,
+    // Reserves the circle's overhang above the shared icon baseline, so the raised button never
+    // draws over whatever the screen has at its bottom edge (ADR-0038).
+    paddingTop: centreButton.diameter - tabBar.icon,
   },
   row: {
     height: tabBar.height,
@@ -252,10 +414,33 @@ const styles = StyleSheet.create({
   },
   centreSlot: {
     alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: centreButton.diameter + spacing.card,
+  },
+  centreTouch: {
+    alignItems: 'center',
+    gap: spacing.inline,
+  },
+  centreIconSlot: {
+    position: 'relative',
+    height: tabBar.icon,
+    width: centreButton.diameter,
+  },
+  centreCircle: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    width: centreButton.diameter,
+    height: centreButton.diameter,
+    borderRadius: centreButton.diameter / 2,
+    alignItems: 'center',
     justifyContent: 'center',
   },
-  centreButton: {
-    paddingHorizontal: spacing.card,
-    transform: [{ translateY: -touchTarget.control / 2 }],
+  centreLabel: {
+    fontSize: fontSize.caption,
+  },
+  centreIndicatorSpacer: {
+    height: tabIndicator.height,
   },
 });

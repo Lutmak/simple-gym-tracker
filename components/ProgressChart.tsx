@@ -4,6 +4,7 @@ import { LineChart } from 'react-native-chart-kit';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
+import { hexWithOpacity } from '../utils/theme';
 import { APP_TEXT_MAX_FONT_SIZE_MULTIPLIER } from './AppTextInput';
 import {
   CHART_RANGE_LABEL_MAX,
@@ -11,46 +12,58 @@ import {
   chartLabels,
   type ChartRange,
 } from '../utils/chart';
-import { fontSize, spacing } from '../utils/scale';
+import { dataMark, fontSize, spacing } from '../utils/scale';
 
 /**
- * One line chart, and the two things that are not a line chart.
+ * One line chart, and the two things that are not a line chart (ADR-0047, SPEC.md U1).
  *
- * Every chart in Progreso went through the same forty lines of `chartConfig` copied twice into the
- * screen, which is how the empty case and the single-point case came to be handled differently in
- * each copy. This is the one place the app draws a trend: the existing `react-native-chart-kit`
- * (SPECS.md P3 — no second charting stack, no new dependency), the tokens for every colour, and
- * `utils/chart.ts` for an axis that fits.
+ * Rebuilt for Iteration 5's "drawn to be read" rule: a solid line in a `data.series` colour with
+ * a light area fill, markers only at real data points, three horizontal gridlines in `divider`
+ * and **no vertical grid** (the dashed graph-paper look was the maintainer's specific complaint —
+ * ADR-0047), axis labels thinned by range, and the unit named once in the heading rather than on
+ * every tick. Still the existing `react-native-chart-kit`; nothing new was added to draw this.
  *
- * **The chart owns its whole axis.** The caller hands it the points it wants seen and the range
- * they were windowed to; how many labels fit at that range, whether they name a day or a month,
- * and which points get one at all are decided here, once, from `utils/chart.ts`. Two callers
- * formatting their own axes is how *"06/04, 13/04, 20/04, 27/04"* happened.
+ * **Multi-series is a first-class shape, not bolted on.** Every series shares one `dates` axis —
+ * chart-kit draws one label array against parallel per-series value arrays, so alignment is the
+ * caller's job (typically one point per training week, since that is the cadence 5/3/1 actually
+ * progresses on); this primitive draws exactly the values it is given and does not invent a
+ * value for a date a series has none for. A series may be `style: 'step'` — a dashed, dot-less
+ * reference line, for a training max plotted under its estimated-1RM series.
  *
- * A series of fewer than two points is **not** drawn (B7's rule, `hasChartableSeries`): it says
- * what it has and what is missing, rather than sitting under an axis pretending to be a chart.
+ * **The area fill is drawn only when there is exactly one non-step series.** Overlapping
+ * translucent fills from several simultaneous lines read as noise, not signal, so a chart with
+ * more than one solid series keeps its lines but not its fills — legend and colour carry identity
+ * instead. A legend appears whenever there is more than one series, each entry a colour dot next
+ * to its name in `textSecondary` — never in the series colour itself (dataviz rule: text wears
+ * text tokens, a mark carries identity).
  *
- * **One chart draws exactly one series.** The palette is monochrome (§3.5), so two lines on one
- * axis would have to be told apart by dash pattern or stroke weight — legible on a desk, not on a
- * phone held at arm's length in a gym. Two metrics, or one metric in two units, are two charts,
- * each with its own title and its own unit on the axis.
+ * A series of fewer than two points is **not** drawn (B7's rule): the chart says what it has
+ * and what is missing instead of sitting under an axis pretending to be a chart.
  */
 
-export interface ProgressChartPoint {
-  /** Whole-day stamp, used for the axis label. */
-  date: number;
-  value: number;
+export interface ProgressChartSeries {
+  /** Stable key for React and for telling two series apart; never shown to the user. */
+  key: string;
+  /** Legend text and the series' accessible name. */
+  label: string;
+  /** A `data.series` or `data.state` token — never a raw colour (ADR-0047). */
+  color: string;
+  /** One value per date in the chart's `dates`, same length, same order, aligned by the caller. */
+  values: readonly number[];
+  /** `solid` (default): the drawn line. `step`: a dashed, dot-less reference line (e.g. a training max). */
+  style?: 'solid' | 'step';
 }
 
 export type ProgressChartProps = {
   title: string;
-  /** Already windowed to `range` by the caller — the chart draws what it is given. */
-  points: readonly ProgressChartPoint[];
-  /** The unit every point is in — never mixed within one series (§3.7). */
+  /** The one date axis every series is plotted against. */
+  dates: readonly number[];
+  series: readonly ProgressChartSeries[];
+  /** The unit every series is in — named once, in the heading, never per tick (§4.5). */
   unit: string;
   /** The range these points were windowed to; it sets the axis density and wording. */
   range: ChartRange;
-  /** What to say with nothing logged, and with exactly one session logged. */
+  /** What to say with nothing logged, and with exactly one point logged. */
   emptyLabel: string;
   singlePointLabel: string;
   /** Extra copy under the title, e.g. the mixed-unit advisory. */
@@ -73,11 +86,18 @@ const MONTH_SHORT_KEYS = [
   'monthShortDec',
 ] as const;
 
+/** Three gridlines regardless of range or data spread (ADR-0047: "three horizontal gridlines"). */
+const GRIDLINE_SEGMENTS = 2;
+
+/** An even-length, >= 2 dash pattern — the minimum Android's `DashPathEffect` accepts. */
+const STEP_DASH = [6, 6];
+
 const formatValue = (value: number): string => String(Number(value.toFixed(1)));
 
 export function ProgressChart({
   title,
-  points,
+  dates,
+  series,
   unit,
   range,
   emptyLabel,
@@ -97,7 +117,7 @@ export function ProgressChart({
         style={[styles.title, { color: tokens.textPrimary }]}
         maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
       >
-        {title}
+        {unit === '' ? title : `${title} (${unit})`}
       </Text>
       {note !== undefined && (
         <Text
@@ -110,7 +130,7 @@ export function ProgressChart({
     </>
   );
 
-  if (points.length === 0) {
+  if (dates.length === 0) {
     return (
       <View style={styles.chartBlock} testID={testID}>
         {heading}
@@ -124,16 +144,21 @@ export function ProgressChart({
     );
   }
 
-  if (points.length === 1) {
+  if (dates.length === 1) {
     return (
       <View style={styles.chartBlock} testID={testID}>
         {heading}
-        <Text
-          style={[styles.singleValue, { color: tokens.textPrimary }]}
-          maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
-        >
-          {`${formatValue(points[0].value)} ${unit}`}
-        </Text>
+        {series.map((entry) => (
+          <Text
+            key={entry.key}
+            style={[styles.singleValue, { color: tokens.textPrimary }]}
+            maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+          >
+            {series.length > 1
+              ? `${entry.label}: ${formatValue(entry.values[0] ?? 0)} ${unit}`
+              : `${formatValue(entry.values[0] ?? 0)} ${unit}`}
+          </Text>
+        ))}
         <Text
           style={[styles.helper, { color: tokens.textSecondary }]}
           maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
@@ -144,16 +169,16 @@ export function ProgressChart({
     );
   }
 
-  const style = chartLabelStyle(range, points);
+  const labelStyle = chartLabelStyle(range, dates.map((date) => ({ date })));
   const axisLabel = (stamp: number): string => {
     const date = new Date(stamp * 1000);
-    if (style === 'day') {
+    if (labelStyle === 'day') {
       const day = String(date.getUTCDate()).padStart(2, '0');
       const month = String(date.getUTCMonth() + 1).padStart(2, '0');
       return dateFormat === 'mm-dd-yyyy' ? `${month}/${day}` : `${day}/${month}`;
     }
     const month = t(MONTH_SHORT_KEYS[date.getUTCMonth()]);
-    return style === 'month'
+    return labelStyle === 'month'
       ? month
       : t('chartAxisMonthYear', {
           month,
@@ -161,34 +186,70 @@ export function ProgressChart({
         });
   };
 
+  const solidSeriesCount = series.filter((entry) => entry.style !== 'step').length;
+  const drawsAreaFill = solidSeriesCount === 1;
+
   return (
     <View style={styles.chartBlock} testID={testID}>
       {heading}
+      {series.length > 1 && (
+        <View style={styles.legend}>
+          {series.map((entry) => (
+            <View key={entry.key} style={styles.legendItem}>
+              <View style={[styles.legendDot, { backgroundColor: entry.color }]} />
+              <Text
+                style={[styles.legendLabel, { color: tokens.textSecondary }]}
+                maxFontSizeMultiplier={APP_TEXT_MAX_FONT_SIZE_MULTIPLIER}
+              >
+                {entry.label}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
       <LineChart
         data={{
-          labels: chartLabels(
-            points,
-            (point) => axisLabel(point.date),
-            CHART_RANGE_LABEL_MAX[range],
-          ),
-          datasets: [{ data: points.map((point) => point.value) }],
+          labels: chartLabels(dates, axisLabel, CHART_RANGE_LABEL_MAX[range]),
+          datasets: series.map((entry) => ({
+            data: entry.values as number[],
+            color: (opacity = 1) => hexWithOpacity(entry.color, opacity),
+            strokeWidth: entry.style === 'step' ? 1.5 : 2,
+            withDots: entry.style !== 'step',
+            // react-native-svg's Android DashPathEffect throws on a zero- or one-length dash
+            // array (a solid line must simply omit strokeDashArray, never pass `[]`); a step
+            // line needs an even-length pair, `[6, 6]` (found on the emulator, 2026-09-05 —
+            // `Progreso` crashed the whole app on open with
+            // `ArrayIndexOutOfBoundsException` from `DashPathEffect.<init>`).
+            ...(entry.style === 'step' ? { strokeDashArray: STEP_DASH } : {}),
+          })),
         }}
         width={chartWidth}
         height={180}
-        withShadow={false}
+        segments={GRIDLINE_SEGMENTS}
+        withShadow={drawsAreaFill}
         withInnerLines
         withOuterLines
-        withDots={points.length <= 30}
+        withVerticalLines={false}
+        withDots={dates.length <= 30}
         bezier={false}
         fromZero={false}
-        yAxisSuffix={` ${unit}`}
         chartConfig={{
           backgroundColor: tokens.surface,
           backgroundGradientFrom: tokens.surface,
           backgroundGradientTo: tokens.surface,
           decimalPlaces: 1,
-          color: () => tokens.accent,
+          color: () => tokens.textSecondary,
           labelColor: () => tokens.textSecondary,
+          useShadowColorFromDataset: true,
+          fillShadowGradientOpacity: 0.2,
+          // `strokeDasharray` must be present (not omitted) so it overrides chart-kit's
+          // hardcoded "5, 10" default via its own `Object.assign` merge; `undefined`, not `[]`
+          // or `'0'` — see the dataset comment above for why an empty/short array crashes.
+          propsForBackgroundLines: {
+            stroke: tokens.divider,
+            strokeWidth: 1,
+            strokeDasharray: undefined,
+          },
           propsForDots: { r: '3', strokeWidth: '1', stroke: tokens.divider },
         }}
         style={styles.chart}
@@ -214,5 +275,24 @@ const styles = StyleSheet.create({
   },
   chart: {
     marginLeft: -spacing.card,
+  },
+  legend: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    columnGap: spacing.card,
+    rowGap: spacing.label,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.inline,
+  },
+  legendDot: {
+    width: dataMark.dot,
+    height: dataMark.dot,
+    borderRadius: dataMark.dot / 2,
+  },
+  legendLabel: {
+    fontSize: fontSize.caption,
   },
 });

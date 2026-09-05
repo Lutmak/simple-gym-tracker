@@ -87,11 +87,11 @@ export const radius = {
 } as const;
 
 /**
- * The bottom tab bar — bespoke chrome (V2) that owns the raised centre action.
+ * The bottom tab bar — bespoke chrome that owns the raised centre action.
  * Sizes live here so the bar and its indicator never invent a number.
  */
 export const tabBar = {
-  /** Bar height, excluding the bottom safe-area inset. */
+  /** Bar height, excluding the bottom safe-area inset — the platform's 56 dp content row. */
   height: 56,
   /** Tab icon size. */
   icon: 24,
@@ -101,4 +101,23 @@ export const tabBar = {
 export const tabIndicator = {
   width: 24,
   height: 3,
+} as const;
+
+/**
+ * The raised circular centre button (SPEC.md §4.3): sized larger than a tab icon so it reads as
+ * the one primary action, raised half its height above the bar so the icon row's centre line
+ * passes through its middle. The bar reserves exactly that overhang as top padding.
+ */
+export const centreButton = {
+  diameter: 56,
+  icon: 26,
+} as const;
+
+/**
+ * Data-identity marks (ADR-0047): the small colour swatches that carry a `data` token — a `Stat`
+ * tile's colour dot, a chart legend dot. Never a chart mark itself (points/lines size from the
+ * chart library), only the flat UI dots that sit beside text.
+ */
+export const dataMark = {
+  dot: 8,
 } as const;

@@ -582,31 +582,40 @@ export default function ProgressScreen({ navigation, route }: Props) {
           onChange={setRange}
           testID="progress-main-lifts-range"
         />
-        {series.map((entry) =>
-          entry.series.map((unitSeries) => (
-            <ProgressChart
-              key={`${entry.exerciseName}-${unitSeries.unit}`}
-              title={
-                entry.series.length > 1
-                  ? t('progressChartInUnit', {
-                      title: entry.exerciseName,
-                      unit: unitSeries.unit,
-                    })
-                  : entry.exerciseName
-              }
-              points={windowByRange(unitSeries.points, range, todayStamp).map((point) => ({
-                date: point.date,
-                value: point.weight,
-              }))}
-              unit={unitSeries.unit}
-              range={range}
-              emptyLabel={range === 'all' ? t('progressNoData') : t('progressNoDataInRange')}
-              singlePointLabel={
-                range === 'all' ? t('progressSinglePoint') : t('progressSinglePointInRange')
-              }
-              testID={`progress-main-lift-${entry.exerciseName}-${unitSeries.unit}`}
-            />
-          )),
+        {series.map((entry, liftIndex) =>
+          entry.series.map((unitSeries) => {
+            const points = windowByRange(unitSeries.points, range, todayStamp);
+            const seriesColor = tokens.data.series[liftIndex] ?? tokens.textSecondary;
+            return (
+              <ProgressChart
+                key={`${entry.exerciseName}-${unitSeries.unit}`}
+                title={
+                  entry.series.length > 1
+                    ? t('progressChartInUnit', {
+                        title: entry.exerciseName,
+                        unit: unitSeries.unit,
+                      })
+                    : entry.exerciseName
+                }
+                dates={points.map((point) => point.date)}
+                series={[
+                  {
+                    key: 'weight',
+                    label: entry.exerciseName,
+                    color: seriesColor,
+                    values: points.map((point) => point.weight),
+                  },
+                ]}
+                unit={unitSeries.unit}
+                range={range}
+                emptyLabel={range === 'all' ? t('progressNoData') : t('progressNoDataInRange')}
+                singlePointLabel={
+                  range === 'all' ? t('progressSinglePoint') : t('progressSinglePointInRange')
+                }
+                testID={`progress-main-lift-${entry.exerciseName}-${unitSeries.unit}`}
+              />
+            );
+          }),
         )}
       </Section>
     );

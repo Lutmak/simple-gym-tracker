@@ -1,5 +1,6 @@
 import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react-native';
+import { LineChart } from 'react-native-chart-kit';
 
 import { ProgressChart } from './ProgressChart';
 import { ThemeProvider } from '../context/ThemeContext';
@@ -62,6 +63,24 @@ describe('ProgressChart', () => {
   it('puts the unit in the title, not as a prop the chart repeats per tick', () => {
     renderChart();
     expect(screen.getByText('Sentadilla (kg)')).toBeTruthy();
+  });
+
+  it('rounds the y-axis to a nice value instead of the data\'s own raw min/max', () => {
+    // The exact spread the audit found unreadable: raw min/mid/max would be 49.1/95.5/142.9.
+    // chart-kit computes its axis labels from the raw min/max of every plotted dataset — react-
+    // native-svg's text nodes need native measurement to expose their rendered string, which this
+    // test environment cannot provide, so the assertion is on the hidden padding dataset
+    // ProgressChart hands chart-kit: niceAxisBounds([49.1, 96, 142.9], 'kg') is {45, 95, 145}
+    // (utils/chart.test.ts), and that pair is what pulls chart-kit's own min/max onto it.
+    renderChart({
+      dates: [1, 2, 3],
+      series: [{ key: 'a', label: 'Sentadilla', color: '#2A78D6', values: [49.1, 96.0, 142.9] }],
+    });
+    const chart = screen.UNSAFE_root.findByType(LineChart);
+    const datasets = chart.props.data.datasets as { data: number[] }[];
+    const padding = datasets[datasets.length - 1].data;
+    expect(Math.min(...padding)).toBe(45);
+    expect(Math.max(...padding)).toBe(145);
   });
 
   it('shows no legend for a single series', () => {

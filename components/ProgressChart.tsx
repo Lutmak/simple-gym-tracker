@@ -10,6 +10,7 @@ import {
   CHART_RANGE_LABEL_MAX,
   chartLabelStyle,
   chartLabels,
+  niceAxisBounds,
   type ChartRange,
 } from '../utils/chart';
 import { dataMark, fontSize, spacing } from '../utils/scale';
@@ -194,6 +195,17 @@ export function ProgressChart({
   const solidSeriesCount = series.filter((entry) => entry.style !== 'step').length;
   const drawsAreaFill = solidSeriesCount === 1;
 
+  // chart-kit has no "nice axis" option of its own: it always interpolates its three labels
+  // between the plotted data's own raw min and max. The fix is a fourth, invisible dataset whose
+  // two values ARE the rounded axis (utils/chart.ts's niceAxisBounds) — chart-kit's min/max
+  // widens to include them, which is what pulls the three labels onto round numbers, and
+  // `withDots: false` plus a fully transparent stroke keep it undrawn.
+  const axis = niceAxisBounds(
+    series.flatMap((entry) => entry.values),
+    unit,
+  );
+  const axisPadding = dates.map((_, index) => (index === 0 ? axis.min : axis.max));
+
   // One legend entry per distinct label, first occurrence wins: a lift's e1RM line and its own
   // `step` training-max line share one dot when the caller gives them the same label.
   const legendEntries = series.filter(
@@ -231,18 +243,26 @@ export function ProgressChart({
       <LineChart
         data={{
           labels: chartLabels(dates, axisLabel, CHART_RANGE_LABEL_MAX[range]),
-          datasets: series.map((entry) => ({
-            data: entry.values as number[],
-            color: (opacity = 1) => hexWithOpacity(entry.color, opacity),
-            strokeWidth: entry.style === 'step' ? 1.5 : 2,
-            withDots: entry.style !== 'step',
-            // react-native-svg's Android DashPathEffect throws on a zero- or one-length dash
-            // array (a solid line must simply omit strokeDashArray, never pass `[]`); a step
-            // line needs an even-length pair, `[6, 6]` (found on the emulator, 2026-09-05 —
-            // `Progreso` crashed the whole app on open with
-            // `ArrayIndexOutOfBoundsException` from `DashPathEffect.<init>`).
-            ...(entry.style === 'step' ? { strokeDashArray: STEP_DASH } : {}),
-          })),
+          datasets: [
+            ...series.map((entry) => ({
+              data: entry.values as number[],
+              color: (opacity = 1) => hexWithOpacity(entry.color, opacity),
+              strokeWidth: entry.style === 'step' ? 1.5 : 2,
+              withDots: entry.style !== 'step',
+              // react-native-svg's Android DashPathEffect throws on a zero- or one-length dash
+              // array (a solid line must simply omit strokeDashArray, never pass `[]`); a step
+              // line needs an even-length pair, `[6, 6]` (found on the emulator, 2026-09-05 —
+              // `Progreso` crashed the whole app on open with
+              // `ArrayIndexOutOfBoundsException` from `DashPathEffect.<init>`).
+              ...(entry.style === 'step' ? { strokeDashArray: STEP_DASH } : {}),
+            })),
+            {
+              data: axisPadding,
+              color: () => 'rgba(0, 0, 0, 0)',
+              strokeWidth: 0,
+              withDots: false,
+            },
+          ],
         }}
         width={chartWidth}
         height={180}
@@ -258,7 +278,8 @@ export function ProgressChart({
           backgroundColor: tokens.surface,
           backgroundGradientFrom: tokens.surface,
           backgroundGradientTo: tokens.surface,
-          decimalPlaces: 1,
+          // niceAxisBounds only ever produces whole-number gridlines (multiples of 5 kg/10 lb).
+          decimalPlaces: 0,
           color: () => tokens.textSecondary,
           labelColor: () => tokens.textSecondary,
           useShadowColorFromDataset: true,

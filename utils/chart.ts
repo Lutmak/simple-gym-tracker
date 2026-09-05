@@ -176,3 +176,45 @@ export function groupByUnit<T extends { unit: string }>(
     .sort((a, b) => (lastIndex.get(b[0]) ?? 0) - (lastIndex.get(a[0]) ?? 0))
     .map(([unit, bucket]) => ({ unit, rows: bucket }));
 }
+
+/**
+ * A y-axis whose three gridlines land on round numbers, never the data's own raw min/max
+ * (SPEC.md U3 — "142.9 / 96.0 / 49.1" is not a readable axis). `min`/`max` are the outer two of
+ * the three gridlines `ProgressChart` draws (`segments: 2`); `mid` is their midpoint, always
+ * exactly halfway since the step on both sides of it is the same.
+ */
+export interface NiceAxis {
+  min: number;
+  mid: number;
+  max: number;
+}
+
+/**
+ * The rounding unit every gridline value is a multiple of: 5 kg, 10 lb (SPEC.md U3's own wording).
+ * `min` rounds down to this; the step between gridlines is then the smallest multiple of it that
+ * still reaches `max` in two segments, so every one of the three values stays a multiple of it too.
+ */
+const NICE_AXIS_GRANULARITY: Readonly<Record<string, number>> = {
+  kg: 5,
+  lb: 10,
+};
+
+/**
+ * `unit` outside `kg`/`lb` falls back to the `kg` granularity: every value this app charts is a
+ * weight. Pads outward from the data's own min/max, never in, and as tightly as a multiple of the
+ * granularity allows — flooring `min` straight to the nearest round *step* (rather than this
+ * smaller granularity first) is what produced 0/100/200 for a 49-143 kg spread during development:
+ * technically round, but mostly empty chart above and below the real line.
+ */
+export function niceAxisBounds(values: readonly number[], unit: string): NiceAxis {
+  if (values.length === 0) {
+    return { min: 0, mid: 0, max: 0 };
+  }
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  const granularity = NICE_AXIS_GRANULARITY[unit] ?? NICE_AXIS_GRANULARITY.kg;
+  const min = Math.floor(dataMin / granularity) * granularity;
+  const stepsNeeded = Math.max(1, Math.ceil((dataMax - min) / (2 * granularity)));
+  const step = stepsNeeded * granularity;
+  return { min, mid: min + step, max: min + 2 * step };
+}

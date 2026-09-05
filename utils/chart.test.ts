@@ -6,6 +6,7 @@ import {
   chartLabels,
   chartRangeStart,
   groupByUnit,
+  niceAxisBounds,
   windowByRange,
 } from './chart';
 import { buildDemoRows } from './demoData';
@@ -184,5 +185,41 @@ describe('a series never mixes units', () => {
     expect(groupByUnit([{ unit: 'kg' }])).toEqual([
       { unit: 'kg', rows: [{ unit: 'kg' }] },
     ]);
+  });
+});
+
+describe('niceAxisBounds — a readable y-axis, never the data\'s own raw min/max', () => {
+  it('reproduces the exact defect the audit found: 49.1 / 96.0 / 142.9 becomes round kg values', () => {
+    // The real spread the strength chart drew before this fix (demo data, all four main lifts).
+    expect(niceAxisBounds([49.1, 96.0, 142.9], 'kg')).toEqual({ min: 45, mid: 95, max: 145 });
+  });
+
+  it('pads outward, never in — the axis always covers every value', () => {
+    const axis = niceAxisBounds([49.1, 96.0, 142.9], 'kg');
+    expect(axis.min).toBeLessThanOrEqual(49.1);
+    expect(axis.max).toBeGreaterThanOrEqual(142.9);
+  });
+
+  it('rounds to 10s for lb, not the kg granularity', () => {
+    expect(niceAxisBounds([61, 118], 'lb')).toEqual({ min: 60, mid: 90, max: 120 });
+  });
+
+  it('keeps the midpoint exactly halfway — the same step on both sides', () => {
+    const axis = niceAxisBounds([12, 88], 'kg');
+    expect(axis.mid - axis.min).toBe(axis.max - axis.mid);
+  });
+
+  it('falls back to kg steps for an unrecognized unit', () => {
+    expect(niceAxisBounds([49.1, 142.9], 'reps')).toEqual(niceAxisBounds([49.1, 142.9], 'kg'));
+  });
+
+  it('handles no values without throwing', () => {
+    expect(niceAxisBounds([], 'kg')).toEqual({ min: 0, mid: 0, max: 0 });
+  });
+
+  it('handles a flat series (every value identical)', () => {
+    const axis = niceAxisBounds([100, 100, 100], 'kg');
+    expect(axis.min).toBeLessThanOrEqual(100);
+    expect(axis.max).toBeGreaterThanOrEqual(100);
   });
 });

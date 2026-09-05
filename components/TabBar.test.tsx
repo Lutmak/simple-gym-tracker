@@ -105,17 +105,6 @@ const expectCentreIcon = async (name: string): Promise<void> => {
   });
 };
 
-/**
- * Every push into a screen that is not its stack's root goes through two `navigate()` calls
- * a real tick apart (`navigateIntoStack`'s `setTimeout(0)` — two calls in the same tick get
- * coalesced by React Navigation into just the second, which is the bug this exists to avoid).
- * Waiting for the count here is what a screenshot can't prove: that the second call really
- * did land, on its own render pass, after the first.
- */
-const waitForNavigateCalls = async (count: number): Promise<void> => {
-  await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(count));
-};
-
 beforeEach(() => {
   mockNavigate.mockClear();
   mockResolvePullForward.mockClear();
@@ -135,14 +124,14 @@ describe('TabBar centre button — the six queue states', () => {
     await expectCentreIcon('play');
 
     fireEvent.press(screen.getByTestId('centre-action-button'));
-    // The stack's own root goes first, so a hardware back from StartSession lands on it
-    // instead of exiting the app (found on the emulator, 2026-09-05).
-    await waitForNavigateCalls(2);
-    expect(mockNavigate.mock.calls[0]).toEqual(['Inicio', { screen: 'InicioIndex' }]);
-    expect(mockNavigate.mock.calls[1]).toEqual([
-      'Inicio',
-      { screen: 'StartSession', params: { weekSessionId: 7 } },
-    ]);
+    // `initial: false` puts InicioIndex (the stack's own root) beneath StartSession, so a
+    // hardware back lands there instead of exiting the app (found on the emulator, 2026-09-05).
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('Inicio', {
+      screen: 'StartSession',
+      params: { weekSessionId: 7 },
+      initial: false,
+    });
   });
 
   it('shows "continue" for a session already moved onto today', async () => {
@@ -156,12 +145,12 @@ describe('TabBar centre button — the six queue states', () => {
     await expectCentreIcon('play');
 
     fireEvent.press(screen.getByTestId('centre-action-button'));
-    await waitForNavigateCalls(2);
-    expect(mockNavigate.mock.calls[0]).toEqual(['Inicio', { screen: 'InicioIndex' }]);
-    expect(mockNavigate.mock.calls[1]).toEqual([
-      'Inicio',
-      { screen: 'StartSession', params: { weekSessionId: 7 } },
-    ]);
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('Inicio', {
+      screen: 'StartSession',
+      params: { weekSessionId: 7 },
+      initial: false,
+    });
   });
 
   it('shows "resolve" and opens the H2 resolution sheet request', async () => {
@@ -175,11 +164,11 @@ describe('TabBar centre button — the six queue states', () => {
     await expectCentreIcon('alert-circle');
 
     fireEvent.press(screen.getByTestId('centre-action-button'));
-    // InicioIndex is already this stack's root, so this is the one and only call.
     expect(mockNavigate).toHaveBeenCalledTimes(1);
     expect(mockNavigate).toHaveBeenCalledWith('Inicio', {
       screen: 'InicioIndex',
       params: { resolutionWeekSessionId: 7 },
+      initial: false,
     });
   });
 
@@ -201,13 +190,14 @@ describe('TabBar centre button — the six queue states', () => {
     await expectCentreIcon('ribbon');
 
     fireEvent.press(screen.getByTestId('centre-action-button'));
-    // RoutinesList goes first, so back from CycleReview lands there, not out of the app.
-    await waitForNavigateCalls(2);
-    expect(mockNavigate.mock.calls[0]).toEqual(['Routines', { screen: 'RoutinesList' }]);
-    expect(mockNavigate.mock.calls[1]).toEqual([
-      'Routines',
-      { screen: 'CycleReview', params: { routineId: 1, cycleId: 9 } },
-    ]);
+    // `initial: false` puts RoutinesList beneath CycleReview, so back lands there, not out of
+    // the app.
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('Routines', {
+      screen: 'CycleReview',
+      params: { routineId: 1, cycleId: 9 },
+      initial: false,
+    });
   });
 
   it('shows "restDay" and opens the sheet, not a navigation', async () => {
@@ -245,12 +235,12 @@ describe('TabBar centre button — the six queue states', () => {
     fireEvent.press(screen.getByTestId('centre-action-button'));
     fireEvent.press(screen.getByTestId('rest-day-free-log'));
 
-    await waitForNavigateCalls(2);
-    expect(mockNavigate.mock.calls[0]).toEqual(['Inicio', { screen: 'InicioIndex' }]);
-    expect(mockNavigate.mock.calls[1]).toEqual([
-      'Inicio',
-      { screen: 'FreeLogging', params: undefined },
-    ]);
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('Inicio', {
+      screen: 'FreeLogging',
+      params: undefined,
+      initial: false,
+    });
   });
 
   it('pulling the next session forward resolves it and starts it', async () => {
@@ -273,12 +263,12 @@ describe('TabBar centre button — the six queue states', () => {
     fireEvent.press(screen.getByTestId('rest-day-pull-forward'));
 
     expect(mockResolvePullForward).toHaveBeenCalled();
-    await waitForNavigateCalls(2);
-    expect(mockNavigate.mock.calls[0]).toEqual(['Inicio', { screen: 'InicioIndex' }]);
-    expect(mockNavigate.mock.calls[1]).toEqual([
-      'Inicio',
-      { screen: 'StartSession', params: { weekSessionId: 42 } },
-    ]);
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledTimes(1));
+    expect(mockNavigate).toHaveBeenCalledWith('Inicio', {
+      screen: 'StartSession',
+      params: { weekSessionId: 42 },
+      initial: false,
+    });
   });
 
   it('shows "newRoutine" and opens the new-routine door when there is no active routine', async () => {
@@ -292,11 +282,11 @@ describe('TabBar centre button — the six queue states', () => {
     await expectCentreIcon('add');
 
     fireEvent.press(screen.getByTestId('centre-action-button'));
-    await waitForNavigateCalls(2);
-    expect(mockNavigate.mock.calls[0]).toEqual(['Routines', { screen: 'RoutinesList' }]);
-    expect(mockNavigate.mock.calls[1]).toEqual([
-      'Routines',
-      { screen: 'NewRoutine', params: undefined },
-    ]);
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+    expect(mockNavigate).toHaveBeenCalledWith('Routines', {
+      screen: 'NewRoutine',
+      params: undefined,
+      initial: false,
+    });
   });
 });

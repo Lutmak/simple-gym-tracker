@@ -227,28 +227,19 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
    * requested route, no root beneath it (found on the emulator, 2026-09-05 — back from
    * `CycleReview` closed the app instead of landing on `RoutinesList`).
    *
-   * Navigating to the root and then the target fixes it only if the two calls land in separate
-   * render passes: two `navigation.navigate()` calls made back-to-back in the same tick both
-   * read the navigation state as it was *before either had committed*, so the second silently
-   * overwrites the first instead of stacking on top of it (confirmed on the emulator the same
-   * day — back from `CycleReview` landed on `Inicio`, the tab open before either call, not on
-   * `RoutinesList`). The zero-delay `setTimeout` is what forces the second call into its own
-   * tick, after the first's state update has actually applied.
+   * React Navigation has a documented mechanism for exactly this: `initial: false` inside the
+   * nested `{screen, params}` shorthand (`useNavigationBuilder`'s handling of
+   * `route.params.initial === false && isFirstStateInitialization`). The target stack still
+   * initialises normally — from its own `initialRouteName` — and this then dispatches a NAVIGATE
+   * for `screen` on top of that already-initialised state, in the same action, so there is no
+   * two-call ordering to get wrong.
    */
   const navigateIntoStack = (
     tab: 'Inicio' | 'Routines',
-    rootScreen: string,
     targetScreen: string,
     params?: Record<string, unknown>,
   ) => {
-    if (targetScreen === rootScreen) {
-      navigation.navigate(tab, { screen: targetScreen, params });
-      return;
-    }
-    navigation.navigate(tab, { screen: rootScreen });
-    setTimeout(() => {
-      navigation.navigate(tab, { screen: targetScreen, params });
-    }, 0);
+    navigation.navigate(tab, { screen: targetScreen, params, initial: false });
   };
 
   const onCentrePress = () => {
@@ -258,18 +249,16 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
     switch (action.kind) {
       case 'start':
       case 'continue':
-        navigateIntoStack('Inicio', 'InicioIndex', 'StartSession', {
-          weekSessionId: action.weekSessionId,
-        });
+        navigateIntoStack('Inicio', 'StartSession', { weekSessionId: action.weekSessionId });
         return;
       case 'resolve':
-        navigateIntoStack('Inicio', 'InicioIndex', 'InicioIndex', {
+        navigateIntoStack('Inicio', 'InicioIndex', {
           resolutionWeekSessionId: action.weekSessionId ?? undefined,
         });
         return;
       case 'review':
         if (action.review !== null) {
-          navigateIntoStack('Routines', 'RoutinesList', 'CycleReview', {
+          navigateIntoStack('Routines', 'CycleReview', {
             routineId: action.review.routineId,
             cycleId: action.review.cycleId,
           });
@@ -279,7 +268,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
         setRestDaySheetOpen(true);
         return;
       case 'newRoutine':
-        navigateIntoStack('Routines', 'RoutinesList', 'NewRoutine');
+        navigateIntoStack('Routines', 'NewRoutine');
         return;
     }
   };
@@ -293,7 +282,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
       const weekSessionId = await resolvePullForwardSession(routineDb, dayStampOf(new Date()));
       bump();
       setRestDaySheetOpen(false);
-      navigateIntoStack('Inicio', 'InicioIndex', 'StartSession', { weekSessionId });
+      navigateIntoStack('Inicio', 'StartSession', { weekSessionId });
     } catch (error) {
       console.error('Error pulling the next session forward:', error);
     } finally {
@@ -387,7 +376,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
           label={t('freeLogging')}
           onPress={() => {
             setRestDaySheetOpen(false);
-            navigateIntoStack('Inicio', 'InicioIndex', 'FreeLogging');
+            navigateIntoStack('Inicio', 'FreeLogging');
           }}
           testID="rest-day-free-log"
         />

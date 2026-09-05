@@ -256,7 +256,12 @@ export default function InicioScreen({ navigation, route }: Props) {
   const openSessionDetail = (target: InicioSessionTarget) =>
     setDetailTarget({ kind: 'session', ...target });
 
-  /** §3.3 — "adelantar": the rest-day hero's own shortcut to the tab bar's rest-day sheet action. */
+  /**
+   * §3.3 — "adelantar": the rest-day hero's own shortcut to the tab bar's rest-day sheet action.
+   * The row below only renders when `queue.pullForwardAvailable` holds — the resolver's own
+   * precondition (`utils/today.ts`), so this can never be pressed into a `dayOccupied` throw
+   * (SPEC.md Z2).
+   */
   const pullForward = async () => {
     if (pullingForward) {
       return;
@@ -701,7 +706,7 @@ export default function InicioScreen({ navigation, route }: Props) {
             })}
           </Text>
         )}
-        {queue.upcoming !== null && queue.upcoming.weekSessionId !== null && (
+        {queue.upcoming !== null && queue.upcoming.weekSessionId !== null && queue.pullForwardAvailable && (
           <Row
             label={t('restDayPullForward', { name: queue.upcoming.name })}
             detail={t('restDayPullForwardDetail')}

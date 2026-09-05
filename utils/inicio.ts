@@ -11,6 +11,7 @@ import {
   computeSessionQueue,
   DAY_SECONDS,
   dayStampOfStamp,
+  effectiveDay,
   loadSessionQueueInput,
   nextPlanSession,
   type QueueRow,
@@ -124,9 +125,6 @@ export function weekStartStamp(todayStamp: number, firstWeekday: FirstWeekday): 
   return todayStamp - daysSinceStart * DAY_SECONDS;
 }
 
-const statusForRow = (row: QueueWeekSessionRow | undefined): InicioDayStatus =>
-  row?.status ?? 'pending';
-
 /** The tappable statuses (SPEC.md U2) — everything a resolved day's cell can carry. */
 const TAPPABLE_STATUSES: ReadonlySet<InicioDayStatus> = new Set([
   'completed',
@@ -134,13 +132,22 @@ const TAPPABLE_STATUSES: ReadonlySet<InicioDayStatus> = new Set([
   'discarded',
 ]);
 
-const weekQueueRowsByDay = (input: InicioInput, startStamp: number): Map<string, QueueRow> => {
-  const rows = new Map<string, QueueRow>();
+/**
+ * Every row this calendar week actually holds, keyed by the day it sits on
+ * (`effectiveDay` — the day it was resolved onto, its nominal day otherwise):
+ * the same rule `utils/progressCalendar.ts` places a session by, so a moved
+ * or pulled-forward row lands in the same cell everywhere it is drawn,
+ * regardless of which week its nominal date falls in. The one-session-per-day
+ * invariant (ADR-0033) means at most one row ever lands on a given day.
+ */
+const weekQueueRowsByDay = (input: InicioInput, startStamp: number): Map<number, QueueRow> => {
+  const rows = new Map<number, QueueRow>();
   for (const row of buildQueueRows(input)) {
-    if (row.nominal < startStamp || row.nominal >= startStamp + 7 * DAY_SECONDS) {
+    const day = effectiveDay(row);
+    if (day < startStamp || day >= startStamp + 7 * DAY_SECONDS) {
       continue;
     }
-    rows.set(`${row.session.sessionId}:${row.nominal}`, row);
+    rows.set(day, row);
   }
   return rows;
 };
@@ -151,19 +158,18 @@ export function buildInicioWeek(
   firstWeekday: FirstWeekday,
 ): InicioWeek {
   const startStamp = weekStartStamp(todayStamp, firstWeekday);
-  const rowBySessionDay = weekQueueRowsByDay(input, startStamp);
-  const sessionByWeekday = new Map(input.sessions.map((session) => [session.weekday, session]));
+  const rowByDay = weekQueueRowsByDay(input, startStamp);
   const firstDay = firstWeekday === 'Monday' ? 1 : 0;
   const days: InicioDay[] = [];
 
   for (let index = 0; index < 7; index += 1) {
     const weekday = (firstDay + index) % 7;
     const stamp = startStamp + index * DAY_SECONDS;
-    const session = sessionByWeekday.get(weekday);
-    const row = session === undefined
-      ? undefined
-      : rowBySessionDay.get(`${session.sessionId}:${stamp}`);
-    const status = session === undefined ? 'rest' : statusForRow(row?.weekSession);
+    const row = rowByDay.get(stamp);
+    // A day this week does not hold a row draws as `rest` (SPEC.md Z2): a ring
+    // for a training weekday with nothing behind it would disagree with the
+    // "N of M" count below, which only ever counts what the week holds.
+    const status: InicioDayStatus = row?.weekSession.status ?? 'rest';
     const target: InicioSessionTarget | null =
       input.routine === null || row === undefined || !TAPPABLE_STATUSES.has(status)
         ? null
@@ -178,7 +184,7 @@ export function buildInicioWeek(
       stamp,
       weekday,
       status,
-      sessionName: session?.name ?? null,
+      sessionName: row?.session.name ?? null,
       target,
     });
   }

@@ -27,7 +27,12 @@ const input = (weekSessions: InicioInput['weekSessions']): InicioInput => ({
 });
 
 describe('Inicio week', () => {
-  it('uses the routine queue rows to show training and rest days in order', () => {
+  it('places a moved session on the day it landed, not its nominal day', () => {
+    // Squat (Mon) stays put and is completed. Bench (nominal Wed) moved to Thursday — a day the
+    // 3-day routine does not otherwise train — so Wednesday now holds nothing and draws as rest.
+    // Press (nominal Fri) is still pending. This is the same rule Progreso's calendar uses
+    // (`utils/progressCalendar.ts`, `sessionCalendarDate`): a moved session's day is where it
+    // landed, never where it didn't happen.
     const week = buildInicioWeek(
       input([
         {
@@ -44,7 +49,7 @@ describe('Inicio week', () => {
           weekNumber: 1,
           sessionId: 2,
           status: 'moved',
-          resolvedOnDate: dayStamp('2026-08-14'), nominalDate: null
+          resolvedOnDate: dayStamp('2026-08-13'), nominalDate: null
         },
         {
           weekSessionId: 3,
@@ -62,8 +67,8 @@ describe('Inicio week', () => {
     expect(week.days.map((day) => day.status)).toEqual([
       'completed',
       'rest',
-      'moved',
       'rest',
+      'moved',
       'pending',
       'rest',
       'rest',
@@ -73,23 +78,20 @@ describe('Inicio week', () => {
     expect(week.completed).toBe(2);
   });
 
-  it('renders a routine with no cycle rows as planned pending days', () => {
+  it('draws every day as rest when the active cycle holds no rows for this week', () => {
+    // An active cycle with literally no seeded WeekSessions never happens in practice
+    // (`createCycle` seeds every week up front), but the rule must still be honest if it did:
+    // a ring only for a session the week actually holds, never a phantom "pending" for a
+    // training weekday with nothing behind it (SPEC.md Z2 — the same rule that places a moved
+    // or pulled-forward session by where it landed, not by what the plan says in the abstract).
     const week = buildInicioWeek(
       { ...input([]), weekSessions: [] },
       dayStamp('2026-08-15'),
       'Monday',
     );
 
-    expect(week.days.map((day) => day.status)).toEqual([
-      'pending',
-      'rest',
-      'pending',
-      'rest',
-      'pending',
-      'rest',
-      'rest',
-    ]);
-    expect(week.planned).toBe(3);
+    expect(week.days.every((day) => day.status === 'rest')).toBe(true);
+    expect(week.planned).toBe(0);
     expect(week.completed).toBe(0);
   });
 
@@ -103,6 +105,62 @@ describe('Inicio week', () => {
     expect(week.days.every((day) => day.status === 'rest')).toBe(true);
     expect(week.planned).toBe(0);
     expect(week.completed).toBe(0);
+  });
+});
+
+/**
+ * SPEC.md Z2, finding 2. A 4-day routine (Mon/Tue/Thu/Fri); cycle 1 week 1's nominal dates fall on
+ * Mon 7–Fri 11 (`cycles[0].startedAt` is the Monday the week itself starts from, per
+ * `nominalSessionStamp`). Monday's session (Squat) was pulled forward onto Friday 4 and completed
+ * there — today. Nothing else in week 1 has happened yet.
+ *
+ * The calendar week containing today (`firstWeekday: 'Monday'`) is Mon 31 Aug–Sun 6 Sep — none of
+ * week 1's own nominal days fall inside it, only Squat's landing day does. The honest read: this
+ * calendar week holds exactly one session (the one that landed in it), so "1 de 1" — not "0 of 4"
+ * (nothing nominal is due yet) and not "1 of 4" (the other three are not due this week either; a
+ * ring for them would draw sessions this week does not hold, disagreeing with the count).
+ */
+describe('Inicio week — a session pulled forward across a week boundary (SPEC.md Z2)', () => {
+  const fourDayInput = (weekSessions: InicioInput['weekSessions']): InicioInput => ({
+    routine: { routineId: 1, name: 'Wendler', unit: 'kg', roundingIncrement: 2.5 },
+    cycles: [
+      { cycleId: 1, cycleNumber: 1, startedAt: dayStamp('2026-09-07'), currentWeek: 1, weeks: 4, status: 'active' },
+    ],
+    sessions: [
+      { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
+      { sessionId: 2, weekday: 2, name: 'Bench Day', sortOrder: 2 },
+      { sessionId: 3, weekday: 4, name: 'Deadlift Day', sortOrder: 3 },
+      { sessionId: 4, weekday: 5, name: 'Press Day', sortOrder: 4 },
+    ],
+    exercises: [],
+    weekSessions,
+  });
+
+  const today = dayStamp('2026-09-04');
+
+  const weekOneRows: InicioInput['weekSessions'] = [
+    // Squat: nominal Monday 7, pulled forward and completed onto Friday 4.
+    { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'completed', resolvedOnDate: today, nominalDate: null },
+    // The rest of week 1 has not happened yet; nominal Tuesday 8 / Thursday 10 / Friday 11.
+    { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null, nominalDate: null },
+    { weekSessionId: 3, cycleId: 1, weekNumber: 1, sessionId: 3, status: 'pending', resolvedOnDate: null, nominalDate: null },
+    { weekSessionId: 4, cycleId: 1, weekNumber: 1, sessionId: 4, status: 'pending', resolvedOnDate: null, nominalDate: null },
+  ];
+
+  it('places the done disc on Friday, the day it landed — not a pending ring anywhere', () => {
+    const week = buildInicioWeek(fourDayInput(weekOneRows), today, 'Monday');
+
+    expect(week.days.map((day) => day.status)).toEqual([
+      'rest', 'rest', 'rest', 'rest', 'completed', 'rest', 'rest',
+    ]);
+    expect(week.days.map((day) => day.weekday)).toEqual([1, 2, 3, 4, 5, 6, 0]);
+  });
+
+  it('counts "1 de 1": the calendar week holds only the session that landed in it', () => {
+    const week = buildInicioWeek(fourDayInput(weekOneRows), today, 'Monday');
+
+    expect(week.planned).toBe(1);
+    expect(week.completed).toBe(1);
   });
 });
 
@@ -137,6 +195,7 @@ describe('Inicio streak', () => {
         makeRow(11, 3, 3, 'completed', dayStamp('2026-08-28')),
         makeRow(7, 4, 1, 'completed', dayStamp('2026-08-31')),
         makeRow(8, 4, 2, 'pending', null),
+        makeRow(12, 4, 3, 'pending', null),
       ]),
       dayStamp('2026-09-05'),
       'Monday',
@@ -181,6 +240,11 @@ describe('Inicio streak', () => {
         row(4, 2, 2, 'moved', dayStamp('2026-08-22')),
         row(5, 3, 1, 'completed', dayStamp('2026-08-24')),
         row(6, 3, 2, 'completed', dayStamp('2026-08-27')),
+        // Week 4 (this week) is seeded but not yet trained — the cycle's own `weeks: 4` means
+        // both its rows already exist, same as any freshly seeded week (`createCycle` seeds every
+        // week of the cycle up front).
+        row(7, 4, 1, 'pending', null),
+        row(8, 4, 2, 'pending', null),
       ]),
       dayStamp('2026-08-31'),
       'Monday',
@@ -242,7 +306,7 @@ describe('Inicio week — the tappable day target', () => {
       weekNumber: 1,
       sessionId: 1,
     });
-    // Wednesday (index 2) has no row at all — pending by default, not tappable.
+    // Wednesday (index 2) holds no row this week — rest, not tappable.
     expect(week.days[2].target).toBeNull();
     // Friday (index 4) is an explicit pending row — still not tappable.
     expect(week.days[4].target).toBeNull();

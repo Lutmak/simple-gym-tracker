@@ -20,6 +20,7 @@ const state = (overrides: Partial<SessionQueueState>): SessionQueueState => ({
   resolution: null,
   upcoming: null,
   review: null,
+  pullForwardAvailable: false,
   ...overrides,
 });
 

@@ -98,6 +98,7 @@ const baseData = (overrides: Partial<InicioData> = {}): InicioData => ({
     resolution: null,
     upcoming: null,
     review: null,
+    pullForwardAvailable: true,
     ...(overrides.queue ?? {}),
   },
   week: overrides.week ?? {
@@ -162,7 +163,7 @@ beforeEach(() => {
 
 describe('Inicio — no routine', () => {
   it('shows the empty state and nothing else', async () => {
-    await renderScreen(baseData({ queue: { routine: null, head: null, resolution: null, upcoming: null, review: null } }));
+    await renderScreen(baseData({ queue: { routine: null, head: null, resolution: null, upcoming: null, review: null, pullForwardAvailable: false } }));
 
     expect(screen.getByTestId('inicio-no-routine')).toBeTruthy();
     expect(screen.queryByTestId('inicio-hero')).toBeNull();
@@ -179,6 +180,7 @@ describe('Inicio — due today', () => {
       resolution: 'due',
       upcoming: null,
       review: null,
+      pullForwardAvailable: false,
       head: {
         weekSessionId: 7,
         sessionId: 3,
@@ -233,6 +235,7 @@ describe('Inicio — in progress (continue)', () => {
           resolution: 'due',
           upcoming: null,
           review: null,
+          pullForwardAvailable: false,
           head: {
             weekSessionId: 7, sessionId: 3, name: 'Press Day', weekday: 1,
             date: 500, originDate: 400, doTodayAvailable: true, todayOccupiedBy: null, exercises: [],
@@ -253,6 +256,7 @@ describe('Inicio — unresolved', () => {
           resolution: 'unresolved',
           upcoming: null,
           review: null,
+          pullForwardAvailable: false,
           head: {
             weekSessionId: 9, sessionId: 3, name: 'Bench Day', weekday: 3,
             date: 300, originDate: 300, doTodayAvailable: true, todayOccupiedBy: null, exercises: [],
@@ -274,6 +278,7 @@ describe('Inicio — review pending', () => {
         queue: {
           routine, head: null, resolution: null, upcoming: null,
           review: { cycleId: 5, cycleNumber: 2, completedSessions: 16, totalSessions: 16 },
+          pullForwardAvailable: false,
         },
       }),
     );
@@ -295,6 +300,7 @@ describe('Inicio — rest day', () => {
         queue: {
           routine, head: null, resolution: null, review: null,
           upcoming: { weekSessionId: 42, sessionId: 5, name: 'Squat Day', weekday: 1, date: 900 },
+          pullForwardAvailable: true,
         },
         upcomingSessions: [{ weekSessionId: 42, sessionId: 5, name: 'Squat Day', weekday: 1, date: 900 }],
       }),
@@ -313,6 +319,32 @@ describe('Inicio — rest day', () => {
   it('has no "Adelantar" row when there is nothing seeded to pull', async () => {
     await renderScreen(baseData());
     expect(screen.getByTestId('inicio-rest')).toBeTruthy();
+    expect(screen.queryByTestId('inicio-adelantar')).toBeNull();
+  });
+
+  /**
+   * SPEC.md Z2, finding 1: an upcoming session exists, but the resolver's own precondition does
+   * not hold — a session (from elsewhere in the queue, e.g. an earlier pull-forward) already sits
+   * on today, so `resolvePullForwardSession` would throw `dayOccupied`. The hero must still name
+   * the next session; only the actionable "Adelantar" row must disappear.
+   */
+  it('shows the next session without the row when the resolver\'s precondition does not hold', async () => {
+    await renderScreen(
+      baseData({
+        queue: {
+          routine, head: null, resolution: null, review: null,
+          upcoming: { weekSessionId: 42, sessionId: 5, name: 'Squat Day', weekday: 1, date: 900 },
+          pullForwardAvailable: false,
+        },
+        upcomingSessions: [{ weekSessionId: 42, sessionId: 5, name: 'Squat Day', weekday: 1, date: 900 }],
+      }),
+    );
+
+    expect(screen.getByTestId('inicio-rest')).toBeTruthy();
+    // `t()` returns the bare key in this test environment (no locale resources loaded), so the
+    // interpolated session name is not observable here — but the next-session line itself, which
+    // only renders when there is one, proves the hero still names it.
+    expect(screen.getByText('inicioNextSession')).toBeTruthy();
     expect(screen.queryByTestId('inicio-adelantar')).toBeNull();
   });
 });

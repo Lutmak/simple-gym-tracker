@@ -280,6 +280,18 @@ export interface SessionQueueState {
    * seeded, but nothing here assumes that.
    */
   review: QueueReviewEntry | null;
+  /**
+   * §3.3 — whether "adelantar" can be offered right now: this is
+   * `resolvePullForwardSession`'s own precondition (no session — of any
+   * status — already sits on today), computed once here so the offer (Inicio's
+   * rest-day hero, the centre button's rest-day sheet) and the resolver can
+   * never disagree about when it is safe. `head === null` alone is not
+   * enough: `head` is built from *pending* rows only, so a session already
+   * completed or moved onto today does not become the head, yet it still
+   * occupies the day — exactly the gap that let the resolver throw
+   * `dayOccupied` after the offer was already shown (SPEC.md Z2).
+   */
+  pullForwardAvailable: boolean;
 }
 
 export interface QueueReviewEntry {
@@ -323,7 +335,14 @@ export function buildQueueRows(input: SessionQueueInput): QueueRow[] {
   return rows;
 }
 
-const effectiveDay = (row: QueueRow): number => row.weekSession.resolvedOnDate ?? row.nominal;
+/**
+ * The day a row actually sits on: the day it was resolved onto when it has
+ * one — a move, a do-it-today, a pull-forward, a completion — and its nominal
+ * cycle day otherwise. `utils/inicio.ts` and `utils/progressCalendar.ts` place
+ * a session on a calendar with this same rule, so a moved or pulled-forward
+ * session always lands in the same place everywhere it is drawn.
+ */
+export const effectiveDay = (row: QueueRow): number => row.weekSession.resolvedOnDate ?? row.nominal;
 
 const byQueueOrder = (a: QueueRow, b: QueueRow): number =>
   a.nominal - b.nominal ||
@@ -428,7 +447,14 @@ export function computeSessionQueue(
 ): SessionQueueState {
   const routine = input.routine;
   if (routine === null) {
-    return { routine: null, head: null, resolution: null, upcoming: null, review: null };
+    return {
+      routine: null,
+      head: null,
+      resolution: null,
+      upcoming: null,
+      review: null,
+      pullForwardAvailable: false,
+    };
   }
 
   const rows = buildQueueRows(input);
@@ -489,7 +515,10 @@ export function computeSessionQueue(
           date: effectiveDay(upcomingRow),
         };
 
-  return { routine, head, resolution, upcoming, review: reviewEntryFor(input) };
+  const pullForwardAvailable =
+    head === null && !rows.some((row) => effectiveDay(row) === todayStamp);
+
+  return { routine, head, resolution, upcoming, review: reviewEntryFor(input), pullForwardAvailable };
 }
 
 /**
@@ -712,11 +741,15 @@ export type PullForwardOutcome =
 /**
  * "Adelantar la próxima sesión" (SPEC.md §3.3): on a rest day — nothing due, nothing already
  * logged today — the queue's next upcoming session can be pulled onto today instead of waiting
- * for its nominal day. This is `applyDoToday` under its own name for its one real precondition:
- * the queue's head must be empty, which is exactly "nothing is due and nothing was logged today"
- * (a head that were due would mean today is already spoken for, and `applyDoToday`'s own occupancy
- * check would reject it anyway — this makes the precondition explicit and testable rather than
- * leaving every caller to reconstruct it).
+ * for its nominal day. This is `applyDoToday` under its own name for its one real precondition,
+ * `state.pullForwardAvailable`: the queue's head must be empty AND no row of any status may
+ * already sit on today. The head check alone used to be the whole guard here, but `head` is built
+ * from pending rows only, so a session already completed or moved onto today never became the
+ * head, yet still occupied the day — this function would then fall through to `applyDoToday`,
+ * which rejects on occupancy anyway, but for the *next* upcoming session, not the one already
+ * offered, so callers saw a `dayOccupied` throw after the UI had already offered "adelantar"
+ * (SPEC.md Z2). `pullForwardAvailable` is computed once in `computeSessionQueue` so the offer and
+ * this resolver read the identical precondition and can never disagree about when it holds.
  *
  * Stacking stays impossible for the same reason it is everywhere else in this module: a head that
  * is not null after one pull-forward means today is now occupied, so a second call is rejected by
@@ -727,7 +760,7 @@ export function applyPullForwardSession(
   todayStamp: number,
 ): PullForwardOutcome {
   const state = computeSessionQueue(input, todayStamp);
-  if (state.head !== null) {
+  if (!state.pullForwardAvailable) {
     return { ok: false, reason: 'notRestDay' };
   }
   const weekSessionId = state.upcoming?.weekSessionId ?? null;

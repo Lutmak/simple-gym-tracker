@@ -130,6 +130,7 @@ describe('TabBar centre button — the six queue states', () => {
       resolution: 'due',
       upcoming: null,
       review: null,
+      pullForwardAvailable: false,
     });
     await renderBar();
     await expectCentreIcon('play');
@@ -152,6 +153,7 @@ describe('TabBar centre button — the six queue states', () => {
       resolution: 'due',
       upcoming: null,
       review: null,
+      pullForwardAvailable: false,
     });
     await renderBar();
     await expectCentreIcon('play');
@@ -172,6 +174,7 @@ describe('TabBar centre button — the six queue states', () => {
       resolution: 'unresolved',
       upcoming: null,
       review: null,
+      pullForwardAvailable: false,
     });
     await renderBar();
     await expectCentreIcon('alert-circle');
@@ -192,6 +195,7 @@ describe('TabBar centre button — the six queue states', () => {
       resolution: null,
       upcoming: null,
       review: { cycleId: 9, cycleNumber: 3, completedSessions: 16, totalSessions: 16 },
+      pullForwardAvailable: false,
     });
     await renderBar();
     await expectCentreIcon('ribbon');
@@ -220,6 +224,7 @@ describe('TabBar centre button — the six queue states', () => {
         date: 500,
       },
       review: null,
+      pullForwardAvailable: true,
     });
     await renderBar();
     await expectCentreIcon('moon');
@@ -230,6 +235,32 @@ describe('TabBar centre button — the six queue states', () => {
     expect(screen.getByTestId('rest-day-free-log')).toBeTruthy();
   });
 
+  it('offers only "Registro libre" when the resolver\'s own precondition does not hold', async () => {
+    // Same shape as the "restDay" case above — an upcoming session exists — but something (a
+    // session already resolved onto today, from elsewhere in the queue) makes pulling it forward
+    // unsafe. Reproduces the Z2 finding: the row must not appear at all, not just fail on press.
+    mockLoadSessionQueue.mockResolvedValue({
+      routine,
+      head: null,
+      resolution: null,
+      upcoming: {
+        weekSessionId: 42,
+        sessionId: 5,
+        name: 'Squat Day',
+        weekday: 1,
+        date: 500,
+      },
+      review: null,
+      pullForwardAvailable: false,
+    });
+    await renderBar();
+    await expectCentreIcon('moon');
+
+    fireEvent.press(screen.getByTestId('centre-action-button'));
+    expect(screen.queryByTestId('rest-day-pull-forward')).toBeNull();
+    expect(screen.getByTestId('rest-day-free-log')).toBeTruthy();
+  });
+
   it('opens free logging from the rest-day sheet with InicioIndex beneath it', async () => {
     mockLoadSessionQueue.mockResolvedValue({
       routine,
@@ -237,6 +268,7 @@ describe('TabBar centre button — the six queue states', () => {
       resolution: null,
       upcoming: null,
       review: null,
+      pullForwardAvailable: false,
     });
     await renderBar();
     await expectCentreIcon('moon');
@@ -265,6 +297,7 @@ describe('TabBar centre button — the six queue states', () => {
         date: 500,
       },
       review: null,
+      pullForwardAvailable: true,
     });
     mockResolvePullForward.mockResolvedValue(42);
     await renderBar();
@@ -288,6 +321,7 @@ describe('TabBar centre button — the six queue states', () => {
       resolution: null,
       upcoming: null,
       review: null,
+      pullForwardAvailable: false,
     });
     await renderBar();
     await expectCentreIcon('add');

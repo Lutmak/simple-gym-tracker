@@ -821,6 +821,56 @@ describe('applyPullForwardSession ("adelantar"), pure', () => {
   });
 });
 
+describe('pullForwardAvailable — the offer and the resolver share one precondition (SPEC.md Z2)', () => {
+  const input = (weekSessions: SessionQueueInput['weekSessions']): SessionQueueInput => ({
+    routine: { routineId: 1, name: 'Demo', unit: 'kg', roundingIncrement: 2.5 },
+    cycles: [
+      { cycleId: 1, cycleNumber: 1, startedAt: dayStampFromYmd('2026-05-04'), currentWeek: 1, weeks: 4, status: 'active' },
+    ],
+    sessions: [
+      { sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 },
+      { sessionId: 2, weekday: 3, name: 'Bench Day', sortOrder: 2 },
+    ],
+    exercises: [],
+    weekSessions,
+  });
+
+  test('a clean rest day is offered', () => {
+    const restDay = dayStampFromYmd('2026-05-01');
+    const state = computeSessionQueue(
+      input([
+        { weekSessionId: 1, cycleId: 1, weekNumber: 1, sessionId: 1, status: 'pending', resolvedOnDate: null, nominalDate: null },
+        { weekSessionId: 2, cycleId: 1, weekNumber: 1, sessionId: 2, status: 'pending', resolvedOnDate: null, nominalDate: null },
+      ]),
+      restDay,
+    );
+    expect(state.head).toBeNull();
+    expect(state.pullForwardAvailable).toBe(true);
+  });
+
+  test('a session already resolved onto today from elsewhere in the queue is not offered, even though head is empty', () => {
+    // Reproduces the Z2 walkthrough crash: Squat's week-2 row was pulled forward and completed
+    // onto today. It is no longer `pending`, so `computeSessionQueue`'s head — built from pending
+    // rows only — never sees it and reports `head: null`, exactly like a genuine rest day. But
+    // today is not free: Bench's own week-2 row (still pending, nominal next week) must not be
+    // offered as "adelantar" — pulling it forward would collide with Squat's completed row on the
+    // same day.
+    const today = dayStampFromYmd('2026-05-08'); // a Friday
+    const rows: SessionQueueInput['weekSessions'] = [
+      { weekSessionId: 1, cycleId: 1, weekNumber: 2, sessionId: 1, status: 'completed', resolvedOnDate: today, nominalDate: null },
+      { weekSessionId: 2, cycleId: 1, weekNumber: 2, sessionId: 2, status: 'pending', resolvedOnDate: null, nominalDate: null },
+    ];
+
+    const state = computeSessionQueue(input(rows), today);
+    expect(state.head).toBeNull();
+    expect(state.pullForwardAvailable).toBe(false);
+
+    // Rejected by the shared precondition, not by `applyDoToday`'s own occupancy check —
+    // `notRestDay`, never the `dayOccupied` the walkthrough actually hit.
+    expect(applyPullForwardSession(input(rows), today)).toEqual({ ok: false, reason: 'notRestDay' });
+  });
+});
+
 describe('resolvePullForwardSession, against the demo data', () => {
   test('writes resolved_on_date for the pulled-forward session and returns its id', async () => {
     const { db, executor } = connect();
@@ -856,6 +906,77 @@ describe('resolvePullForwardSession, against the demo data', () => {
     await resolvePullForwardSession(executor, restDay);
 
     await expect(resolvePullForwardSession(executor, restDay)).rejects.toThrow('notRestDay');
+
+    db.close();
+  });
+
+  /**
+   * SPEC.md Z2, finding 1, end to end. A 4-day routine (Mon/Tue/Thu/Fri); cycle 1 week 1's nominal
+   * dates fall on Mon 7–Fri 11; Monday's session (Squat) was pulled forward onto Friday 4 and
+   * completed there — today. Before this fix, Inicio's hero and the rest-day sheet still offered
+   * "Adelantar" for the next session (Bench, nominal next week), and pressing it threw
+   * `resolvePullForwardSession: dayOccupied` — `computeSessionQueue`'s `head` is built from
+   * pending rows only, so Squat's now-`completed` row never became the head, and the offer never
+   * knew today was already spoken for.
+   */
+  test('the exact Z2 walkthrough: a completed pulled-forward session blocks the next offer without throwing', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    const today = dayStampFromYmd('2026-09-04'); // Friday
+    const cycleStart = dayStampFromYmd('2026-09-07'); // Monday — week 1 nominal: Mon 7 / Tue 8 / Thu 10 / Fri 11
+
+    await executor.run(
+      `INSERT INTO Routines
+         (name, origin, progression_rule, unit, rounding_increment, rest_main_seconds,
+          rest_accessory_seconds, is_active, created_at)
+       VALUES ('Wendler', 'user', 'wave', 'kg', 2.5, 180, 90, 1, ?);`,
+      [today],
+    );
+    const routineId = Number((await executor.get('SELECT last_insert_rowid() AS id;', []))?.id);
+
+    const sessionIds: number[] = [];
+    for (const [weekday, name] of [
+      [1, 'Squat Day'],
+      [2, 'Bench Day'],
+      [4, 'Deadlift Day'],
+      [5, 'Press Day'],
+    ] as const) {
+      await executor.run(
+        `INSERT INTO Sessions (routine_id, weekday, name, sort_order) VALUES (?, ?, ?, ?);`,
+        [routineId, weekday, name, sessionIds.length + 1],
+      );
+      sessionIds.push(Number((await executor.get('SELECT last_insert_rowid() AS id;', []))?.id));
+    }
+
+    await executor.run(
+      `INSERT INTO Cycles (routine_id, cycle_number, weeks, status, current_week, started_at)
+       VALUES (?, 1, 4, 'active', 1, ?);`,
+      [routineId, cycleStart],
+    );
+    const cycleId = Number((await executor.get('SELECT last_insert_rowid() AS id;', []))?.id);
+    await executor.run(`INSERT INTO CycleWeeks (cycle_id, week_number) VALUES (?, 1);`, [cycleId]);
+    const cycleWeekId = Number((await executor.get('SELECT last_insert_rowid() AS id;', []))?.id);
+
+    // Squat: pulled forward and completed onto today. The other three are still pending, nominal
+    // later this week or next — untouched.
+    await executor.run(
+      `INSERT INTO WeekSessions (cycle_week_id, session_id, status, resolved_on_date)
+       VALUES (?, ?, 'completed', ?);`,
+      [cycleWeekId, sessionIds[0], today],
+    );
+    for (const sessionId of sessionIds.slice(1)) {
+      await executor.run(
+        `INSERT INTO WeekSessions (cycle_week_id, session_id, status) VALUES (?, ?, 'pending');`,
+        [cycleWeekId, sessionId],
+      );
+    }
+
+    const before = await loadSessionQueue(executor, today);
+    expect(before.head).toBeNull();
+    expect(before.pullForwardAvailable).toBe(false);
+
+    await expect(resolvePullForwardSession(executor, today)).rejects.toThrow('notRestDay');
 
     db.close();
   });

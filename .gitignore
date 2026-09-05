@@ -44,5 +44,5 @@ yarn-error.*
 
 # Maintainer workflow notes — kept locally, deliberately not part of the published project
 CLAUDE.md
-ENGINEERING.md
-SPECS.md
+SPEC.md
+/docs/

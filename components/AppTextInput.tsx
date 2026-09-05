@@ -110,12 +110,20 @@ const AppTextInput = React.forwardRef<TextInput, AppTextInputProps>(
         ...nativeProps
       } = props;
 
+      // Committing on blur/submit alone missed a typed value whenever nothing fired one:
+      // dismissing the Android keyboard with the back key does not blur the input, so
+      // typing "100" and pressing back left the field showing 100 while the parent still
+      // held null (found on the fresh-install walkthrough, 2026-09-04 — a session's weight
+      // sheet stayed disabled with a value visibly typed in). Every valid keystroke now
+      // commits immediately; '' commits `null`, the same "not yet entered" state a fresh
+      // field starts in, so clearing the field is not a special case either.
       const handleRawChange: NonNullable<TextInputProps['onChangeText']> = (
         value,
       ) => {
         const normalizedValue = normalizeNumericInput(value);
         setRawNumericValue(normalizedValue);
         onRawChange?.(normalizedValue);
+        onCommit?.(parseNumericInput(normalizedValue));
       };
 
       const commitNumericValue = () => {

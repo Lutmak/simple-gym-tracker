@@ -1,8 +1,10 @@
 import React, { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSQLiteContext } from 'expo-sqlite';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
@@ -21,6 +23,8 @@ import {
   duplicateRoutine,
   type RoutineDatabase,
 } from '../utils/routineActions';
+import { loadCatalogExercises } from '../utils/exerciseCatalog';
+import { loadRoutineDocumentText } from '../utils/routineDocument';
 import {
   loadRoutineLibrary,
   weekdaySequence,
@@ -29,6 +33,16 @@ import {
   type LibraryRoutine,
 } from '../utils/routineLibrary';
 import type { RoutinesStackParamList } from '../App';
+
+/** The document's own filename convention (ADR-0048): ASCII-safe, no path separators. */
+const slugifyFileName = (name: string): string => {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug === '' ? 'routine' : slug;
+};
 
 type Props = NativeStackScreenProps<RoutinesStackParamList, 'RoutinesList'>;
 
@@ -102,6 +116,38 @@ export default function RoutinesListScreen({ navigation }: Props) {
       return t('routineNoTrainingDays');
     }
     return `${t('sessionCount', { count: days.length })} · ${days.join(' · ')}`;
+  };
+
+  /**
+   * X3 — export closes the sheet immediately (no confirmation, ADR-0048/§7.5: export creates
+   * nothing and changes nothing) and writes the routine's document to the cache directory before
+   * handing it to the OS share sheet, exactly like `Settings.tsx`'s `exportDatabase` does for the
+   * whole-database export.
+   */
+  const exportRoutine = async (routineId: number) => {
+    setActionsFor(null);
+    try {
+      const catalogRows = await loadCatalogExercises(routineDb);
+      const catalog = new Map(catalogRows.map((row) => [row.exerciseKey, row]));
+      const { name, text } = await loadRoutineDocumentText(routineDb, catalog, routineId);
+
+      const path = `${FileSystem.cacheDirectory}${slugifyFileName(name)}.sgtroutine.json`;
+      await FileSystem.writeAsStringAsync(path, text);
+
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        Alert.alert(t('exportRoutineFailedTitle'), t('sharingNotAvailable'));
+        return;
+      }
+
+      await Sharing.shareAsync(path, {
+        mimeType: 'application/json',
+        dialogTitle: t('exportRoutineDialogTitle'),
+      });
+    } catch (err) {
+      console.error('Routine export error:', err);
+      Alert.alert(t('exportRoutineFailedTitle'), t('exportRoutineErrorMessage'));
+    }
   };
 
   const runAction = async (action: () => Promise<unknown>, message: string) => {
@@ -219,6 +265,7 @@ export default function RoutinesListScreen({ navigation }: Props) {
             t('errorDuplicatingRoutine'),
           )
         }
+        onExport={(routineId) => void exportRoutine(routineId)}
         onDelete={(routineId) =>
           void runAction(() => deleteRoutine(routineDb, routineId), t('errorDeletingRoutine'))
         }

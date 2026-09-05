@@ -29,14 +29,15 @@ import {
   type CustomExerciseDraft,
 } from './customExercise';
 import type { CatalogExercise } from './exerciseCatalog';
-import type {
-  RoutineCopyRows,
-  RoutineDatabase,
-  RoutineLoadSource,
-  RoutineProgressionRule,
-  RoutineRole,
-  RoutineSourceBundle,
-  RoutineUnit,
+import {
+  loadRoutineSourceById,
+  type RoutineCopyRows,
+  type RoutineDatabase,
+  type RoutineLoadSource,
+  type RoutineProgressionRule,
+  type RoutineRole,
+  type RoutineSourceBundle,
+  type RoutineUnit,
 } from './routineActions';
 import type { BarProfileKey } from './barProfiles';
 
@@ -771,4 +772,21 @@ export function parseRoutineDocumentText(
     return { ok: false, errors: [error('wrongFormat')] };
   }
   return parseRoutineDocument(doc, catalog);
+}
+
+/**
+ * Reads a routine and its pretty-printed document text, for the caller that writes it to a file
+ * and hands it to the share sheet (X3). Deliberately stops at the JSON text: writing to
+ * `cacheDirectory` and calling `Sharing.shareAsync` are `expo-file-system`/`expo-sharing` calls,
+ * which this module has no reason to import — `RoutineActionsSheet`'s caller does that one step,
+ * exactly as `Settings.tsx`'s `exportDatabase` already does for the whole-database export.
+ */
+export async function loadRoutineDocumentText(
+  db: RoutineDatabase,
+  catalog: ReadonlyMap<string, CatalogExercise>,
+  routineId: number,
+): Promise<{ name: string; text: string }> {
+  const bundle = await loadRoutineSourceById(db, routineId);
+  const document = serialiseRoutine(bundle, catalog);
+  return { name: document.routine.name, text: JSON.stringify(document, null, 2) };
 }

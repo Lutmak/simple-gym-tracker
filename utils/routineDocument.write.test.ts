@@ -11,7 +11,7 @@ import fixtureWave from '../data/fixtures/531-base-template.sgtroutine.json';
 import { runSchema, type SchemaExecutor } from './schema';
 import type { RoutineCopyRows, RoutineDatabase } from './routineActions';
 import { loadCatalogExercises, type CatalogExercise } from './exerciseCatalog';
-import { parseRoutineDocument, writeRoutineDocument } from './routineDocument';
+import { loadRoutineDocumentText, parseRoutineDocument, writeRoutineDocument } from './routineDocument';
 
 type TestExecutor = SchemaExecutor & RoutineDatabase;
 
@@ -190,6 +190,43 @@ describe('writeRoutineDocument — the transactional edge', () => {
       }
     ).n;
     expect(routineRows).toBe(2);
+  });
+
+  it('X3 — export then import reproduces the routine (sessions, exercises, weights, bar, unit override)', async () => {
+    const { db, executor } = connect();
+    await runSchema(executor);
+
+    // Import the wave fixture once — this is the routine that will be exported.
+    const imported = parseRoutineDocument(fixtureWave, await realCatalog(executor));
+    expect(imported.ok).toBe(true);
+    if (!imported.ok) {
+      return;
+    }
+    const original = await writeRoutineDocument(executor, imported.rows, imported.newCustomExercises);
+
+    // Export it back out, then import the exported text as if it were a second device's file.
+    const { text } = await loadRoutineDocumentText(executor, await realCatalog(executor), original.routineId);
+    const reparsed = parseRoutineDocument(JSON.parse(text), await realCatalog(executor));
+    expect(reparsed.ok).toBe(true);
+    if (!reparsed.ok) {
+      return;
+    }
+    expect(reparsed.newCustomExercises).toHaveLength(0);
+    const reimported = await writeRoutineDocument(executor, reparsed.rows, reparsed.newCustomExercises);
+
+    const detailsOf = (routineId: number) =>
+      db
+        .prepare(
+          `SELECT s.weekday, s.sort_order AS session_sort_order,
+                  e.catalog_exercise_id, e.role, e.target_sets, e.target_reps, e.load_source,
+                  e.training_max_pct, e.training_max_weight, e.absolute_weight, e.unit_override,
+                  e.is_amrap, e.sort_order, e.bar_profile, e.bar_weight, e.warmups_enabled
+           FROM SessionExercises e JOIN Sessions s ON s.session_id = e.session_id
+           WHERE s.routine_id = ? ORDER BY s.sort_order, e.sort_order;`,
+        )
+        .all(routineId);
+
+    expect(detailsOf(reimported.routineId)).toEqual(detailsOf(original.routineId));
   });
 
   it('rolls back the whole write on a mid-transaction failure', async () => {

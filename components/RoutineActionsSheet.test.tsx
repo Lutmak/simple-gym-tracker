@@ -57,6 +57,22 @@ describe('RoutineActionsSheet — one action bar per routine', () => {
     expect(screen.getByTestId('routine-action-delete')).toBeTruthy();
   });
 
+  it('does not offer export when the caller has no export door', () => {
+    renderSheet({ target: routineTarget });
+    expect(screen.queryByTestId('routine-action-export')).toBeNull();
+  });
+
+  it('X3 — exports a routine directly, with no confirmation step', () => {
+    const props = renderSheet({ target: routineTarget, onExport: jest.fn() });
+    fireEvent.press(screen.getByTestId('routine-action-export'));
+    expect(props.onExport).toHaveBeenCalledWith(routineTarget.routineId);
+  });
+
+  it('never offers export for a preset', () => {
+    renderSheet({ target: presetTarget, onExport: jest.fn() });
+    expect(screen.queryByTestId('routine-action-export')).toBeNull();
+  });
+
   it('says which routine activation replaces, before anything is confirmed', () => {
     renderSheet({ target: routineTarget });
     expect(screen.getByText('routineActionActivateReplaces')).toBeTruthy();

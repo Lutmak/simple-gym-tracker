@@ -23,6 +23,13 @@ type NotificationsModule = typeof import('expo-notifications');
 
 export const WORKOUT_CHANNEL_ID = 'workout-reminders';
 
+/**
+ * Whether reminders can exist at all in this runtime — false in Expo Go (see the module doc
+ * above). Ajustes uses this to disable the switch and explain why, rather than offering a
+ * control that silently ignores the tap (U6).
+ */
+export const notificationsAvailable = (): boolean => !isRunningInExpoGo();
+
 let notificationsModule: NotificationsModule | null | undefined;
 
 const notifications = (): NotificationsModule | null => {

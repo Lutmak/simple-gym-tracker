@@ -63,6 +63,8 @@ describe('buildRoutineCopyRows — pure copy builder', () => {
       isActive: false,
       description: 'A simple two-day upper/lower split.',
       philosophy: 'Fewer days, more focus.',
+      descriptionEs: 'Una rutina sencilla a dos días de tren superior e inferior.',
+      philosophyEs: 'Menos días, más atención a cada uno.',
       recommendedDays: 2,
       plannedJokers: 0,
       tmIncrementUpper: null,

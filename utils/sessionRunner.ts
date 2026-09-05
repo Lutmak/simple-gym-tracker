@@ -417,27 +417,46 @@ export interface SavedSession {
   finishContext: SessionFinishContext;
 }
 
+/** What one exercise's §3.2 baseline learns from this session, and from which logged set. */
+export interface LearnedBaseline {
+  sessionExerciseId: number;
+  exerciseName: string;
+  column: 'training_max_weight' | 'absolute_weight';
+  /** The baseline that gets written — a training max for `training_max_pct`, else a starting load. */
+  baseline: number;
+  /** The baseline's unit — the exercise's plan unit, not necessarily the logged set's own. */
+  unit: RoutineUnit;
+  fromWeight: number;
+  fromReps: number;
+  fromUnit: RoutineUnit;
+}
+
 /**
- * The §3.2 baseline write, inside the session transaction: for every exercise
- * whose plan weight is still NULL, the HEAVIEST set the user actually logged
- * becomes the baseline (training max for `training_max_pct`, starting load
- * otherwise) — a lifter naturally ramping up across a first-ever session
- * should not have day-one's max calibrated off their lightest attempt (F1).
- * The `IS NULL` guard is what makes it "learned, never demanded" — a value
- * the user entered by hand is never overwritten, and an exercise that
- * already has a baseline is never touched again.
+ * The §3.2 baselines THIS session's draft would learn — every exercise whose plan weight is
+ * still NULL, the HEAVIEST set the user actually logged becomes the baseline (training max for
+ * `training_max_pct`, starting load otherwise): a lifter naturally ramping up across a
+ * first-ever session should not have day-one's max calibrated off their lightest attempt (F1).
+ * An exercise that already carries a value is never included — "learned, never demanded" means
+ * a value the user entered by hand is never overwritten, and an existing baseline never
+ * recalculated. Pure and DB-free so both the writer (`applyLearnedBaselines`) and the finish
+ * summary (`utils/sessionSummary.ts`, U6: nobody was told what a first session set) read the
+ * same rule instead of two copies of it drifting apart.
  */
-async function applyLearnedBaselines(
-  db: RoutineDatabase,
+export function learnedBaselinesFor(
   session: RunnerSession,
   draft: RunnerDraft,
-): Promise<void> {
+): LearnedBaseline[] {
+  const results: LearnedBaseline[] = [];
   for (const [exerciseIndex, exercise] of session.exercises.entries()) {
     if (exercise.isPlanned === false) {
       continue;
     }
     const column = baselineColumn(exercise.loadSource);
     if (column === null) {
+      continue;
+    }
+    const existing = column === 'training_max_weight' ? exercise.trainingMaxWeight : exercise.absoluteWeight;
+    if (existing !== null) {
       continue;
     }
     const sets = draft[exerciseIndex] ?? [];
@@ -465,11 +484,36 @@ async function applyLearnedBaselines(
     if (baseline === null) {
       continue;
     }
+    results.push({
+      sessionExerciseId: exercise.sessionExerciseId,
+      exerciseName: exercise.name,
+      column,
+      baseline,
+      unit: planUnit,
+      fromWeight: heaviest.weight ?? 0,
+      fromReps: heaviest.reps,
+      fromUnit: heaviest.unit ?? planUnit,
+    });
+  }
+  return results;
+}
+
+/**
+ * The baseline write, inside the session transaction. The `IS NULL` guard on the UPDATE is a
+ * second, DB-level enforcement of the same rule `learnedBaselinesFor` already applied in
+ * memory — belt and suspenders against a concurrent write, not the primary guard.
+ */
+async function applyLearnedBaselines(
+  db: RoutineDatabase,
+  session: RunnerSession,
+  draft: RunnerDraft,
+): Promise<void> {
+  for (const learned of learnedBaselinesFor(session, draft)) {
     await db.run(
       `UPDATE SessionExercises
-         SET ${column} = ?
-       WHERE session_exercise_id = ? AND ${column} IS NULL;`,
-      [baseline, exercise.sessionExerciseId],
+         SET ${learned.column} = ?
+       WHERE session_exercise_id = ? AND ${learned.column} IS NULL;`,
+      [learned.baseline, learned.sessionExerciseId],
     );
   }
 }

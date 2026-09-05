@@ -4,11 +4,11 @@ import { useFocusEffect } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSQLiteContext } from 'expo-sqlite';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system/legacy';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import { useTranslation } from 'react-i18next';
 import { useTheme } from '../context/ThemeContext';
 import { useSettings } from '../context/SettingsContext';
+import { pickLocalizedText } from '../utils/i18n';
 import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { ScreenTitle } from '../components/ScreenTitle';
@@ -16,6 +16,7 @@ import { Section } from '../components/Section';
 import { fontSize, spacing, tabBar } from '../utils/scale';
 import { type RoutineDatabase } from '../utils/routineActions';
 import { loadCatalogExercises } from '../utils/exerciseCatalog';
+import { readPickedFileAsText } from '../utils/pickedFile';
 import {
   parseRoutineDocumentText,
   writeRoutineDocument,
@@ -95,7 +96,7 @@ const WAVE_PRESET_KEY = '531';
  */
 export default function NewRoutineScreen({ navigation }: Props) {
   const { tokens } = useTheme();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { firstWeekday } = useSettings();
   const db = useSQLiteContext();
 
@@ -152,11 +153,11 @@ export default function NewRoutineScreen({ navigation }: Props) {
     setBusy(true);
     setError(null);
     try {
-      // `copyToCacheDirectory: false` is deliberate: Expo Go's `readAsStringAsync` runs a
-      // scoped-permission check that a copied `file://` path under `cache/DocumentPicker/`
-      // fails (it sits outside this experience's scoped cache — a standalone build would not
-      // hit this). The `content://` URI the picker returns without a copy is exempt from that
-      // check and reads directly.
+      // `copyToCacheDirectory: false` is deliberate: the picker's own copy under
+      // `cache/DocumentPicker/` fails Expo Go's scoped-permission check (it sits outside this
+      // experience's scoped cache). The raw `content://` URI it returns instead cannot be read
+      // directly either — `readPickedFileAsText` stages it into a path this app owns first
+      // (`utils/pickedFile.ts`).
       const picked = await DocumentPicker.getDocumentAsync({
         type: IMPORT_PICKER_TYPES,
         copyToCacheDirectory: false,
@@ -164,8 +165,8 @@ export default function NewRoutineScreen({ navigation }: Props) {
       if (picked.canceled) {
         return;
       }
-      const uri = picked.assets?.[0]?.uri;
-      if (uri === undefined) {
+      const asset = picked.assets?.[0];
+      if (asset === undefined) {
         Alert.alert(t('importRoutineFailedTitle'), t('fileNotSelectedError'));
         return;
       }
@@ -179,7 +180,7 @@ export default function NewRoutineScreen({ navigation }: Props) {
         return;
       }
 
-      const text = await FileSystem.readAsStringAsync(uri);
+      const text = await readPickedFileAsText(asset.uri, asset.name);
       const result = parseRoutineDocumentText(text, catalog);
       if (!result.ok) {
         const lines = result.errors.map((issue) => describeImportError(issue, t)).join('\n');
@@ -222,9 +223,10 @@ export default function NewRoutineScreen({ navigation }: Props) {
       t(WEEKDAY_SHORT_KEYS[weekday]),
     );
     const plan = `${t('sessionCount', { count: days.length })} · ${days.join(' · ')}`;
+    const description = pickLocalizedText(i18n.language, entry.description, entry.descriptionEs);
     return entry.copyRoutineId === null
-      ? `${plan}\n${entry.description}`
-      : `${plan} · ${t('presetAlreadyInLibrary')}\n${entry.description}`;
+      ? `${plan}\n${description}`
+      : `${plan} · ${t('presetAlreadyInLibrary')}\n${description}`;
   };
 
   const chevron = (name: string) => (

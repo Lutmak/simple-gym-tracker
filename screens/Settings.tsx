@@ -22,6 +22,7 @@ import { fontSize, spacing, tabBar } from '../utils/scale';
 import {
   applyTrainingDayReminders,
   cancelAllReminders,
+  notificationsAvailable,
   requestNotificationPermissions,
 } from '../utils/notificationUtils';
 import {
@@ -34,6 +35,7 @@ import {
 } from '../utils/notificationSchedule';
 import { replaceDatabaseFile } from '../utils/databaseImport';
 import { DatabaseImportValidationError } from '../utils/databaseSchema';
+import { cleanupStagedFile, stagePickedFile } from '../utils/pickedFile';
 import { loadDemoData, removeDemoData, type DemoDatabase } from '../utils/demoData';
 import type { BarProfileKey } from '../utils/barProfiles';
 import {
@@ -399,13 +401,16 @@ export default function Settings() {
 
             let documentPickerResult;
             try {
+              // `copyToCacheDirectory: false` plus `stagePickedFile`, not the picker's own
+              // copy: see `utils/pickedFile.ts` for why the picker's copy and a raw
+              // `content://` read both fail on Expo Go and on a Downloads-provider file.
               documentPickerResult = await DocumentPicker.getDocumentAsync({
                 type: [
                   'application/x-sqlite3',
                   'application/octet-stream',
                   'application/vnd.sqlite3',
                 ],
-                copyToCacheDirectory: true,
+                copyToCacheDirectory: false,
               });
 
               if (
@@ -423,10 +428,12 @@ export default function Settings() {
               return;
             }
 
-            const sourceUri = documentPickerResult.assets[0].uri;
+            const asset = documentPickerResult.assets[0];
+            let stagedPath: string | null = null;
 
             try {
-              await replaceDatabaseFile(sourceUri, dbFilePath);
+              stagedPath = await stagePickedFile(asset.uri, asset.name);
+              await replaceDatabaseFile(stagedPath, dbFilePath);
 
               Alert.alert(t('importSuccessTitle'), t('importSuccessMessage'), [
                 { text: t('ok') },
@@ -443,6 +450,10 @@ export default function Settings() {
               Alert.alert(t('importFailedTitle'), finalAlertMessage, [
                 { text: t('ok') },
               ]);
+            } finally {
+              if (stagedPath !== null) {
+                await cleanupStagedFile(stagedPath);
+              }
             }
           },
         },
@@ -458,9 +469,11 @@ export default function Settings() {
   const installImagePack = async () => {
     let documentPickerResult;
     try {
+      // See `utils/pickedFile.ts`: the picker's own copy and a raw `content://` read both
+      // fail, so the raw URI is staged into this app's own cache before anything reads it.
       documentPickerResult = await DocumentPicker.getDocumentAsync({
         type: IMAGE_PACK_PICKER_TYPES,
-        copyToCacheDirectory: true,
+        copyToCacheDirectory: false,
       });
 
       if (
@@ -477,15 +490,16 @@ export default function Settings() {
       return;
     }
 
+    const asset = documentPickerResult.assets[0];
+    let stagedPath: string | null = null;
+
     try {
+      stagedPath = await stagePickedFile(asset.uri, asset.name);
       const catalogRows = await db.getAllAsync<{ exercise_key: string }>(
         'SELECT exercise_key FROM Catalog_Exercises;',
       );
       const knownKeys = new Set(catalogRows.map((row) => row.exercise_key));
-      const installed = await installImagePackFromUri(
-        documentPickerResult.assets[0].uri,
-        knownKeys,
-      );
+      const installed = await installImagePackFromUri(stagedPath, knownKeys);
       Alert.alert(
         t('imagePackInstalled'),
         t('imagePackInstalledMessage', { count: installed }),
@@ -497,6 +511,10 @@ export default function Settings() {
           ? t(imagePackErrorMessageKey(error.reason))
           : t('imagePackInstallError');
       Alert.alert(t('imagePackInstallFailed'), finalAlertMessage);
+    } finally {
+      if (stagedPath !== null) {
+        await cleanupStagedFile(stagedPath);
+      }
     }
   };
 
@@ -590,10 +608,13 @@ export default function Settings() {
       <Section title={t('notifications')} testID="settings-notifications">
         <Row
           label={t('remindScheduledWorkouts')}
+          detail={notificationsAvailable() ? undefined : t('notificationsNeedsInstalledApp')}
+          detailBelow
           right={
             <Switch
               value={notificationPermissionGranted}
               onValueChange={handleNotificationToggle}
+              disabled={!notificationsAvailable()}
               testID="settings-notifications-toggle"
             />
           }

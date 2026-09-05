@@ -58,6 +58,10 @@ export interface RoutineSource {
   isActive: boolean;
   description: string | null;
   philosophy: string | null;
+  /** Real Spanish, only ever populated for a preset preview (`Preset_Routines`); a copied
+   *  routine never carries description/philosophy at all, in either language. */
+  descriptionEs: string | null;
+  philosophyEs: string | null;
   recommendedDays: number | null;
   /** How many jokers a wave routine plans ahead (§3.4); 0 = off. */
   plannedJokers: number;
@@ -304,8 +308,9 @@ export async function loadPresetRoutineSource(
   presetKey: string,
 ): Promise<RoutineSourceBundle> {
   const routineRow = await db.get(
-    `SELECT routine_key, name, description, philosophy, recommended_days,
-            rest_main_seconds, rest_accessory_seconds, progression_rule, rounding_increment_kg
+    `SELECT routine_key, name, description, philosophy, description_es, philosophy_es,
+            recommended_days, rest_main_seconds, rest_accessory_seconds, progression_rule,
+            rounding_increment_kg
      FROM Preset_Routines WHERE routine_key = ?;`,
     [presetKey],
   );
@@ -343,6 +348,8 @@ export async function loadPresetRoutineSource(
       isActive: false,
       description: nullableStr(routineRow.description),
       philosophy: nullableStr(routineRow.philosophy),
+      descriptionEs: nullableStr(routineRow.description_es),
+      philosophyEs: nullableStr(routineRow.philosophy_es),
       // Presets don't collect these (F3 is the wave setup wizard's own
       // fields); a preset activation always gets the wave engine's defaults.
       tmIncrementUpper: null,
@@ -401,6 +408,8 @@ export async function loadRoutineSourceById(
       isActive: num(routineRow.is_active) === 1,
       description: null,
       philosophy: null,
+      descriptionEs: null,
+      philosophyEs: null,
       recommendedDays: null,
       plannedJokers: nullableNum(routineRow.planned_jokers) ?? 0,
       tmIncrementUpper: nullableNum(routineRow.tm_increment_upper),

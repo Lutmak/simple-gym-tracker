@@ -7,6 +7,7 @@ import {
   derivedCategory,
   estimateTrainingMax,
   isRecommendedWaveAdvanced,
+  nextRoundingIncrementForUnit,
   recommendedWaveAdvanced,
   ROUNDING_INCREMENT_OPTIONS,
   warmupRampFor,
@@ -508,6 +509,29 @@ describe('R3 — the advanced block, and warm-ups per exercise', () => {
   it('offers only increments a gym\'s plates can make', () => {
     expect(ROUNDING_INCREMENT_OPTIONS.kg).toContain(defaultRoundingIncrement('kg'));
     expect(ROUNDING_INCREMENT_OPTIONS.lb).toContain(defaultRoundingIncrement('lb'));
+  });
+
+  describe('nextRoundingIncrementForUnit — a unit switch resets an untouched increment', () => {
+    it('resets lb\'s untouched default (5) to kg\'s own default, not kg\'s coincidental 5', () => {
+      // 5 is a valid option for BOTH units (ROUNDING_INCREMENT_OPTIONS.kg contains 5 too),
+      // which is exactly why checking only "is 5 valid under kg" is not enough — found on the
+      // fresh-install walkthrough, 2026-09-04.
+      expect(nextRoundingIncrementForUnit('lb', 5, 'kg')).toBe(defaultRoundingIncrement('kg'));
+    });
+
+    it('resets kg\'s untouched default (2.5) to lb\'s own default on the same switch back', () => {
+      expect(nextRoundingIncrementForUnit('kg', 2.5, 'lb')).toBe(defaultRoundingIncrement('lb'));
+    });
+
+    it('keeps a deliberately chosen increment that the new unit still offers', () => {
+      // 5 kg is not kg's default (2.5) — a deliberate choice — and lb still offers 5.
+      expect(nextRoundingIncrementForUnit('kg', 5, 'lb')).toBe(5);
+    });
+
+    it('falls back to the new unit\'s default when the chosen increment is not one of its options', () => {
+      // 1.25 is a deliberate kg choice (not kg's default), but lb has no 1.25 plate.
+      expect(nextRoundingIncrementForUnit('kg', 1.25, 'lb')).toBe(defaultRoundingIncrement('lb'));
+    });
   });
 
   it('builds a routine from the recommendations alone, with no weight anywhere', () => {

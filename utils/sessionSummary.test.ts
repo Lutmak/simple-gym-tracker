@@ -114,7 +114,46 @@ describe('buildSessionSummary', () => {
           actual: { reps: 5, weight: 80, unit: 'kg' },
         },
       ],
+      learnedBaselines: [],
     });
+  });
+
+  it('names the baseline a first-ever session just learned (U6)', () => {
+    // Squat has no absolute weight yet — a first-ever exercise, per F1 — and this session's
+    // heaviest logged set is the second one, not the first, matching applyLearnedBaselines'
+    // own "heaviest, not first" rule.
+    const learningSession: RunnerSession = {
+      ...session,
+      exercises: [
+        { ...session.exercises[0], absoluteWeight: null },
+        session.exercises[1],
+      ],
+    };
+
+    const summary = buildSessionSummary(learningSession, [
+      [
+        { reps: 5, weight: 90 },
+        { reps: 5, weight: 95 },
+        { reps: 5, weight: 92.5 },
+      ],
+      [
+        { reps: 8, weight: 60, unit: 'lb' },
+        { reps: 8, weight: 60, unit: 'lb' },
+      ],
+    ]);
+
+    expect(summary.learnedBaselines).toEqual([
+      {
+        sessionExerciseId: 31,
+        exerciseName: 'Squat',
+        column: 'absolute_weight',
+        baseline: 95,
+        unit: 'kg',
+        fromWeight: 95,
+        fromReps: 5,
+        fromUnit: 'kg',
+      },
+    ]);
   });
 
   it('does not invent weighted volume for bodyweight sets', () => {

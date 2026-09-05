@@ -1,6 +1,8 @@
 import {
   isUnlearnedSet,
+  learnedBaselinesFor,
   runnerTargetsFor,
+  type LearnedBaseline,
   type LoggedSet,
   type RunnerDraft,
   type RunnerSession,
@@ -53,6 +55,12 @@ export interface SessionSummary {
   durationSeconds: number | null;
   volumes: SessionSummaryVolume[];
   deviations: SessionSummaryDeviation[];
+  /**
+   * The §3.2 baselines this session set (U6): a first-ever session for an exercise learned a
+   * training max or a starting load, and until now the summary never said so. Empty on every
+   * later session, once every exercise already has a value.
+   */
+  learnedBaselines: LearnedBaseline[];
 }
 
 const exerciseUnit = (exercise: RunnerSession['exercises'][number], session: RunnerSession): RoutineUnit =>
@@ -222,5 +230,6 @@ export function buildSessionSummary(
       volume: Number(volume.toFixed(4)),
     })),
     deviations,
+    learnedBaselines: learnedBaselinesFor(session, draft),
   };
 }

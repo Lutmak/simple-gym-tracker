@@ -130,6 +130,28 @@ export function defaultRoundingIncrement(unit: RoutineUnit): number {
   return WAVE_UNIT_DEFAULTS[unit].roundingIncrement;
 }
 
+/**
+ * The rounding increment a unit switch carries forward. An untouched increment — still the OLD
+ * unit's own default — follows the unit, matching `WAVE_UNIT_DEFAULTS`; a value the user
+ * deliberately chose stays theirs, but only if the NEW unit still offers it, since an increment
+ * invalid for the new unit cannot stay selected either.
+ *
+ * `ROUNDING_INCREMENT_OPTIONS` overlaps at 5 for kg and lb, which is why checking only "is this
+ * value valid under the new unit" is not enough on its own: lb's default (5) is also a valid kg
+ * option, so that check alone carried lb's untouched default into kg as if the user had chosen
+ * 5 kg on purpose — found on the fresh-install walkthrough, 2026-09-04 (switching lb → kg left
+ * "5" selected and the review read "5 kg").
+ */
+export function nextRoundingIncrementForUnit(
+  currentUnit: RoutineUnit,
+  currentIncrement: number,
+  nextUnit: RoutineUnit,
+): number {
+  const wasUntouched = currentIncrement === defaultRoundingIncrement(currentUnit);
+  const staysValid = ROUNDING_INCREMENT_OPTIONS[nextUnit].includes(currentIncrement);
+  return !wasUntouched && staysValid ? currentIncrement : defaultRoundingIncrement(nextUnit);
+}
+
 /** The rest values a 5/3/1 routine is created with (§3.8). */
 export const WAVE_REST_MAIN_SECONDS = 180;
 export const WAVE_REST_ACCESSORY_SECONDS = 90;

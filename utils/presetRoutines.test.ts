@@ -38,6 +38,11 @@ describe('preset routines — committed data', () => {
       expect(routine.key).toMatch(/^[a-z0-9-]+$/);
       expect(routine.description.length).toBeGreaterThan(0);
       expect(routine.philosophy.length).toBeGreaterThan(0);
+      // U6: real Spanish, not the English string reused, and not left empty.
+      expect(routine.descriptionEs.length).toBeGreaterThan(0);
+      expect(routine.descriptionEs).not.toBe(routine.description);
+      expect(routine.philosophyEs.length).toBeGreaterThan(0);
+      expect(routine.philosophyEs).not.toBe(routine.philosophy);
       expect(validLevels).toContain(routine.level);
       expect(validRules).toContain(routine.progressionRule);
       expect(routine.roundingIncrementKg).toBeGreaterThan(0);
@@ -193,6 +198,59 @@ describe('preset routines — seed', () => {
       expect(catalog).toHaveLength(1);
       expect(row.exercise_name).toBe(catalog[0].name);
     }
+  });
+
+  it('seeds the Spanish description and philosophy for every preset', async () => {
+    const { executor } = connect();
+    await runSchema(executor);
+
+    const rows = await executor.getAll<{
+      routine_key: string;
+      description_es: string;
+      philosophy_es: string;
+    }>('SELECT routine_key, description_es, philosophy_es FROM Preset_Routines;');
+    expect(rows).toHaveLength(22);
+    for (const row of rows) {
+      expect(row.description_es.length).toBeGreaterThan(0);
+      expect(row.philosophy_es.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('backfills the Spanish columns on a database seeded before U6 added them', async () => {
+    const { executor } = connect();
+    // A pre-U6 schema: Preset_Routines exists without description_es/philosophy_es, and one
+    // routine is already seeded — exactly what ensurePresetRoutinesSpanishColumns and the
+    // ON CONFLICT DO UPDATE in seedPresetRoutines exist to repair.
+    await executor.exec(`CREATE TABLE Preset_Routines (
+      routine_key TEXT PRIMARY KEY NOT NULL,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL,
+      philosophy TEXT NOT NULL,
+      level TEXT NOT NULL,
+      recommended_days INTEGER NOT NULL,
+      rest_main_seconds INTEGER NOT NULL,
+      rest_accessory_seconds INTEGER NOT NULL,
+      progression_rule TEXT NOT NULL,
+      rounding_increment_kg REAL NOT NULL
+    );`);
+    await executor.run(
+      `INSERT INTO Preset_Routines
+       (routine_key, name, description, philosophy, level, recommended_days,
+        rest_main_seconds, rest_accessory_seconds, progression_rule, rounding_increment_kg)
+       VALUES ('newbie-gains', 'Newbie Gains', 'old description', 'old philosophy', 'beginner',
+               3, 90, 60, 'linear', 2.5);`,
+      [],
+    );
+
+    await runSchema(executor);
+
+    const row = (
+      await executor.getAll<{ description_es: string; philosophy_es: string }>(
+        `SELECT description_es, philosophy_es FROM Preset_Routines WHERE routine_key = 'newbie-gains';`,
+      )
+    )[0];
+    expect(row.description_es.length).toBeGreaterThan(0);
+    expect(row.philosophy_es.length).toBeGreaterThan(0);
   });
 
   it('is idempotent — running the schema twice does not duplicate presets', async () => {

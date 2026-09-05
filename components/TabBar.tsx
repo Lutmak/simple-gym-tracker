@@ -33,9 +33,11 @@ import { Sheet } from './Sheet';
  * `restDay` — the bar has nothing of its own to fetch or reconcile.
  *
  * **Rest day opens a Sheet, never navigates.** "Adelantar la próxima sesión" pulls the next
- * upcoming session onto today (`resolvePullForwardSession`, SPEC.md §3.3) and opens it directly;
- * "Registro libre" is one row here, never the label on this button (the audit finding this bar
- * exists to fix).
+ * upcoming session onto today (`resolvePullForwardSession`, SPEC.md §3.3) and opens it directly.
+ * It is offered only when `queue.pullForwardAvailable` holds — the same precondition the resolver
+ * itself checks (`utils/today.ts`), so this row and the throw it would otherwise cause never
+ * disagree (SPEC.md Z2). "Registro libre" is one row here, never the label on this button (the
+ * audit finding this bar exists to fix).
  *
  * The centre button takes a fixed diameter, raised half its height above the bar line so its
  * centre sits on the icon row's centre line (§4.3); the bar reserves that overhang as its own top
@@ -338,7 +340,7 @@ export function TabBar({ state, insets }: BottomTabBarProps) {
         title={t('restDaySheetTitle')}
         testID="rest-day-sheet"
       >
-        {upcoming !== null && upcoming.weekSessionId !== null && (
+        {upcoming !== null && upcoming.weekSessionId !== null && queue?.pullForwardAvailable === true && (
           <Row
             label={t('restDayPullForward', { name: upcoming.name })}
             detail={t('restDayPullForwardDetail')}

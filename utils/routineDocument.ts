@@ -40,6 +40,7 @@ import {
   type RoutineUnit,
 } from './routineActions';
 import type { BarProfileKey } from './barProfiles';
+import { DEFAULT_CYCLE_WEEKS } from './cycleSeed';
 
 export const ROUTINE_DOCUMENT_FORMAT = 'sgt-routine';
 export const ROUTINE_DOCUMENT_VERSION = 1;
@@ -67,6 +68,9 @@ export interface RoutineDocumentExercise {
   barProfile?: BarProfileKey | null;
   barWeight?: number;
   warmupsEnabled?: boolean | null;
+  /** The 5/3/1 upper/lower role (§3.1); omitted means inferred from the training max, same as a
+   *  hand-built routine (Z1: optional, added without a version bump). */
+  category?: 'upper' | 'lower';
 }
 
 export interface RoutineDocumentSession {
@@ -86,6 +90,13 @@ export interface RoutineDocument {
     restMainSeconds: number;
     restAccessorySeconds: number;
     plannedJokers: number;
+    /** Per-routine TM increments (§3.1); omitted means the wave engine's own unit default,
+     *  same as a hand-built routine (Z1: optional, added without a version bump). */
+    tmIncrementUpper?: number;
+    tmIncrementLower?: number;
+    /** The cycle length a NEW cycle seeds with (§3.2): 3 or 4. Omitted means 4 (Z1: optional,
+     *  added without a version bump). */
+    cycleWeeks?: number;
   };
   sessions: RoutineDocumentSession[];
 }
@@ -107,6 +118,9 @@ export type RoutineDocumentErrorCode =
   | 'roundingIncrementInvalid'
   | 'restInvalid'
   | 'plannedJokersInvalid'
+  | 'tmIncrementUpperInvalid'
+  | 'tmIncrementLowerInvalid'
+  | 'cycleWeeksInvalid'
   | 'weekdayInvalid'
   | 'duplicateWeekday'
   | 'sessionNameRequired'
@@ -130,7 +144,8 @@ export type RoutineDocumentErrorCode =
   | 'customNameRequired'
   | 'customExclusiveWithReference'
   | 'customMuscleInvalid'
-  | 'customEquipmentInvalid';
+  | 'customEquipmentInvalid'
+  | 'categoryInvalid';
 
 export interface RoutineDocumentError {
   code: RoutineDocumentErrorCode;
@@ -246,22 +261,36 @@ export function serialiseRoutine(
     if (exercise.warmupsEnabled !== null) {
       doc.warmupsEnabled = exercise.warmupsEnabled;
     }
+    if (exercise.category !== null) {
+      doc.category = exercise.category;
+    }
 
     sessions[sessionIndex].exercises.push(doc);
+  }
+
+  const routineDoc: RoutineDocument['routine'] = {
+    name: bundle.routine.name,
+    progressionRule: bundle.routine.progressionRule,
+    unit: bundle.routine.unit,
+    roundingIncrement: bundle.routine.roundingIncrement,
+    restMainSeconds: bundle.routine.restMainSeconds,
+    restAccessorySeconds: bundle.routine.restAccessorySeconds,
+    plannedJokers: bundle.routine.plannedJokers,
+  };
+  if (bundle.routine.tmIncrementUpper !== null) {
+    routineDoc.tmIncrementUpper = bundle.routine.tmIncrementUpper;
+  }
+  if (bundle.routine.tmIncrementLower !== null) {
+    routineDoc.tmIncrementLower = bundle.routine.tmIncrementLower;
+  }
+  if (bundle.routine.cycleWeeks !== DEFAULT_CYCLE_WEEKS) {
+    routineDoc.cycleWeeks = bundle.routine.cycleWeeks;
   }
 
   return {
     format: ROUTINE_DOCUMENT_FORMAT,
     version: ROUTINE_DOCUMENT_VERSION,
-    routine: {
-      name: bundle.routine.name,
-      progressionRule: bundle.routine.progressionRule,
-      unit: bundle.routine.unit,
-      roundingIncrement: bundle.routine.roundingIncrement,
-      restMainSeconds: bundle.routine.restMainSeconds,
-      restAccessorySeconds: bundle.routine.restAccessorySeconds,
-      plannedJokers: bundle.routine.plannedJokers,
-    },
+    routine: routineDoc,
     sessions,
   };
 }
@@ -375,6 +404,32 @@ export function parseRoutineDocument(
       errors.push(error('plannedJokersInvalid', { field: 'routine.plannedJokers' }));
     } else {
       plannedJokers = routineRaw.plannedJokers;
+    }
+  }
+  // §3.1/§3.2 fields (Z1): optional, added without a version bump. Omitted means the wave
+  // engine's own defaults, matching a hand-built routine exactly (utils/routineActions.ts).
+  let tmIncrementUpper: number | null = null;
+  if (routineRaw.tmIncrementUpper !== undefined) {
+    if (!isFiniteNumber(routineRaw.tmIncrementUpper) || routineRaw.tmIncrementUpper <= 0) {
+      errors.push(error('tmIncrementUpperInvalid', { field: 'routine.tmIncrementUpper' }));
+    } else {
+      tmIncrementUpper = routineRaw.tmIncrementUpper;
+    }
+  }
+  let tmIncrementLower: number | null = null;
+  if (routineRaw.tmIncrementLower !== undefined) {
+    if (!isFiniteNumber(routineRaw.tmIncrementLower) || routineRaw.tmIncrementLower <= 0) {
+      errors.push(error('tmIncrementLowerInvalid', { field: 'routine.tmIncrementLower' }));
+    } else {
+      tmIncrementLower = routineRaw.tmIncrementLower;
+    }
+  }
+  let cycleWeeks: number = DEFAULT_CYCLE_WEEKS;
+  if (routineRaw.cycleWeeks !== undefined) {
+    if (routineRaw.cycleWeeks !== 3 && routineRaw.cycleWeeks !== 4) {
+      errors.push(error('cycleWeeksInvalid', { field: 'routine.cycleWeeks' }));
+    } else {
+      cycleWeeks = routineRaw.cycleWeeks;
     }
   }
 
@@ -521,6 +576,17 @@ export function parseRoutineDocument(
         warmupsEnabled = exercise.warmupsEnabled;
       }
 
+      // §3.1 (Z1): optional, added without a version bump. Omitted means inferred from the
+      // training max, same as a hand-built routine.
+      let category: 'upper' | 'lower' | null = null;
+      if (exercise.category !== undefined) {
+        if (exercise.category !== 'upper' && exercise.category !== 'lower') {
+          errors.push(error('categoryInvalid', field('category')));
+        } else {
+          category = exercise.category;
+        }
+      }
+
       const isAmrap = exercise.isAmrap === true;
 
       // Catalog resolution. catalogKey wins over catalogName when both are present and
@@ -607,9 +673,7 @@ export function parseRoutineDocument(
         barProfile,
         barWeight,
         warmupsEnabled,
-        // §3.1 is per-exercise 5/3/1 upper/lower classification; the document format does not
-        // carry it yet, so an imported exercise always starts inferred, same as a hand-built one.
-        category: null,
+        category,
       });
     });
   });
@@ -631,11 +695,9 @@ export function parseRoutineDocument(
       isActive: false,
       createdAt: Date.now(),
       plannedJokers,
-      // §3.1/§3.2 are per-routine 5/3/1 knobs the document format does not carry yet; an
-      // imported routine starts at the wave engine's own defaults, same as one built by hand.
-      tmIncrementUpper: null,
-      tmIncrementLower: null,
-      cycleWeeks: 4,
+      tmIncrementUpper,
+      tmIncrementLower,
+      cycleWeeks,
     },
     sessions: sessionsOut,
     exercises: exercisesOut,

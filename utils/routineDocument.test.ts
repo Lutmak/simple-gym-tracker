@@ -178,11 +178,13 @@ describe('serialiseRoutine → parseRoutineDocument — round trip', () => {
         isActive: false,
         description: null,
         philosophy: null,
+        descriptionEs: null,
+        philosophyEs: null,
         recommendedDays: null,
         plannedJokers: 1,
-        tmIncrementUpper: null,
-        tmIncrementLower: null,
-        cycleWeeks: 4,
+        tmIncrementUpper: 2.5,
+        tmIncrementLower: 5,
+        cycleWeeks: 3,
       },
       sessions: [{ sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 }],
       exercises: [
@@ -205,7 +207,7 @@ describe('serialiseRoutine → parseRoutineDocument — round trip', () => {
           barProfile: 'olympic',
           barWeight: null,
           warmupsEnabled: true,
-          category: null,
+          category: 'lower',
         },
         {
           exerciseId: 2,
@@ -253,8 +255,80 @@ describe('serialiseRoutine → parseRoutineDocument — round trip', () => {
     expect(result.rows.routine.restAccessorySeconds).toBe(expected.routine.restAccessorySeconds);
     expect(result.rows.routine.isActive).toBe(expected.routine.isActive);
     expect(result.rows.routine.plannedJokers).toBe(expected.routine.plannedJokers);
+    // Z1: tmIncrementUpper/Lower, cycleWeeks and per-exercise category all round-trip too.
+    expect(result.rows.routine.tmIncrementUpper).toBe(expected.routine.tmIncrementUpper);
+    expect(result.rows.routine.tmIncrementLower).toBe(expected.routine.tmIncrementLower);
+    expect(result.rows.routine.cycleWeeks).toBe(expected.routine.cycleWeeks);
     expect(result.rows.sessions).toEqual(expected.sessions);
     expect(result.rows.exercises).toEqual(expected.exercises);
+  });
+
+  it('omits tmIncrementUpper/Lower and cycleWeeks when they are the wave engine\'s own defaults, and category when inferred', () => {
+    const catalog = new Map<string, CatalogExercise>([
+      ['Barbell_Squat', catalogRow({ exerciseKey: 'Barbell_Squat', name: 'Barbell Squat', equipment: 'barbell' })],
+    ]);
+    const bundle: RoutineSourceBundle = {
+      routine: {
+        routineKey: null,
+        name: 'Defaults Only',
+        origin: 'user',
+        progressionRule: 'wave',
+        roundingIncrement: 2.5,
+        unit: 'kg',
+        restMainSeconds: 180,
+        restAccessorySeconds: 90,
+        isActive: false,
+        description: null,
+        philosophy: null,
+        descriptionEs: null,
+        philosophyEs: null,
+        recommendedDays: null,
+        plannedJokers: 0,
+        tmIncrementUpper: null,
+        tmIncrementLower: null,
+        cycleWeeks: 4,
+      },
+      sessions: [{ sessionId: 1, weekday: 1, name: 'Squat Day', sortOrder: 1 }],
+      exercises: [
+        {
+          exerciseId: 1,
+          sessionId: 1,
+          catalogExerciseId: 'Barbell_Squat',
+          name: 'Barbell Squat',
+          role: 'main',
+          targetSets: 3,
+          targetReps: 5,
+          loadSource: 'training_max_pct',
+          trainingMaxPct: 0.9,
+          trainingMaxWeight: 140,
+          absoluteWeight: null,
+          unitOverride: null,
+          isAmrap: true,
+          sortOrder: 1,
+          equipment: 'barbell',
+          barProfile: 'olympic',
+          barWeight: null,
+          warmupsEnabled: true,
+          category: null,
+        },
+      ],
+    };
+
+    const doc = serialiseRoutine(bundle, catalog);
+    expect(doc.routine.tmIncrementUpper).toBeUndefined();
+    expect(doc.routine.tmIncrementLower).toBeUndefined();
+    expect(doc.routine.cycleWeeks).toBeUndefined();
+    expect(doc.sessions[0].exercises[0].category).toBeUndefined();
+
+    const result = parseRoutineDocument(doc, catalog);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.rows.routine.tmIncrementUpper).toBeNull();
+    expect(result.rows.routine.tmIncrementLower).toBeNull();
+    expect(result.rows.routine.cycleWeeks).toBe(4);
+    expect(result.rows.exercises[0].category).toBeNull();
   });
 });
 
@@ -386,5 +460,77 @@ describe('parseRoutineDocument — validation', () => {
       return;
     }
     expect(codeOf(result.errors)).toEqual(['trainingMaxPctInvalid']);
+  });
+
+  // Z1 — the four optional fields added to the v1 format without a version bump.
+  it('accepts tmIncrementUpper/Lower and cycleWeeks when present and valid', () => {
+    const doc = baseDoc();
+    doc.routine.tmIncrementUpper = 2.5;
+    doc.routine.tmIncrementLower = 5;
+    doc.routine.cycleWeeks = 3;
+    const result = parseRoutineDocument(doc, catalog);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.rows.routine.tmIncrementUpper).toBe(2.5);
+    expect(result.rows.routine.tmIncrementLower).toBe(5);
+    expect(result.rows.routine.cycleWeeks).toBe(3);
+  });
+
+  it('rejects a non-positive tmIncrementUpper', () => {
+    const doc = baseDoc();
+    doc.routine.tmIncrementUpper = 0;
+    const result = parseRoutineDocument(doc, catalog);
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(codeOf(result.errors)).toEqual(['tmIncrementUpperInvalid']);
+  });
+
+  it('rejects a non-positive tmIncrementLower', () => {
+    const doc = baseDoc();
+    doc.routine.tmIncrementLower = -1;
+    const result = parseRoutineDocument(doc, catalog);
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(codeOf(result.errors)).toEqual(['tmIncrementLowerInvalid']);
+  });
+
+  it('rejects a cycleWeeks that is neither 3 nor 4', () => {
+    const doc = baseDoc();
+    doc.routine.cycleWeeks = 5;
+    const result = parseRoutineDocument(doc, catalog);
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(codeOf(result.errors)).toEqual(['cycleWeeksInvalid']);
+  });
+
+  it('accepts an exercise category of "upper" or "lower"', () => {
+    const doc = baseDoc();
+    doc.sessions[0].exercises[0].category = 'upper';
+    const result = parseRoutineDocument(doc, catalog);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+    expect(result.rows.exercises[0].category).toBe('upper');
+  });
+
+  it('rejects an exercise category that is neither "upper" nor "lower"', () => {
+    const doc = baseDoc();
+    // @ts-expect-error — deliberately invalid input, exactly what a hand-authored file might carry
+    doc.sessions[0].exercises[0].category = 'core';
+    const result = parseRoutineDocument(doc, catalog);
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+    expect(codeOf(result.errors)).toEqual(['categoryInvalid']);
   });
 });

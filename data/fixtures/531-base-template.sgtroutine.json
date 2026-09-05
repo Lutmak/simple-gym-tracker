@@ -8,7 +8,10 @@
     "roundingIncrement": 2.5,
     "restMainSeconds": 180,
     "restAccessorySeconds": 90,
-    "plannedJokers": 0
+    "plannedJokers": 0,
+    "tmIncrementUpper": 2.5,
+    "tmIncrementLower": 5,
+    "cycleWeeks": 3
   },
   "sessions": [
     {
@@ -26,7 +29,8 @@
           "trainingMaxWeight": 140,
           "isAmrap": true,
           "barProfile": "olympic",
-          "warmupsEnabled": true
+          "warmupsEnabled": true,
+          "category": "lower"
         },
         {
           "catalogKey": "Dumbbell_Lunges",
@@ -72,7 +76,8 @@
           "trainingMaxWeight": 100,
           "isAmrap": true,
           "barProfile": "olympic",
-          "warmupsEnabled": true
+          "warmupsEnabled": true,
+          "category": "upper"
         },
         {
           "catalogKey": "Bent_Over_Barbell_Row",
@@ -123,7 +128,8 @@
           "trainingMaxWeight": 160,
           "isAmrap": true,
           "barProfile": "olympic",
-          "warmupsEnabled": true
+          "warmupsEnabled": true,
+          "category": "lower"
         },
         {
           "catalogKey": "Chin-Up",
@@ -168,7 +174,8 @@
           "trainingMaxWeight": 62.5,
           "isAmrap": true,
           "barProfile": "olympic",
-          "warmupsEnabled": true
+          "warmupsEnabled": true,
+          "category": "upper"
         },
         {
           "catalogKey": "Seated_Cable_Rows",

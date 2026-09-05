@@ -152,20 +152,22 @@ describe('derivedCategory — from the catalog primary muscles', () => {
 });
 
 describe('warmupRampFor — the intrinsic ramp at real weights', () => {
-  it('returns the 40/50/60 ramp off the first work set, rounded to the increment', () => {
-    const ramp = warmupRampFor(day({ trainingMax: 200 }), 'kg', 2.5, 'nearest', 0.9);
+  it('returns the flat 40/50/60 ramp of the training max itself, rounded to the increment (F6)', () => {
+    const ramp = warmupRampFor(day({ trainingMax: 200 }), 'kg', 2.5, 'nearest');
     expect(ramp).not.toBeNull();
-    // First work set = 200 x 0.9 = 180; 40% = 72, 50% = 90, 60% = 108.
+    // 40% of 200 = 80, 50% = 100, 60% = 120 — the training max itself, never
+    // TM x TM percentage (that is not the training max and matches no real
+    // work set in the wave table).
     expect(ramp?.map((set) => ({ pct: set.percent, reps: set.reps, weight: set.weight }))).toEqual([
-      { pct: 40, reps: 5, weight: 72.5 },
-      { pct: 50, reps: 5, weight: 90 },
-      { pct: 60, reps: 3, weight: 107.5 },
+      { pct: 40, reps: 5, weight: 80 },
+      { pct: 50, reps: 5, weight: 100 },
+      { pct: 60, reps: 3, weight: 120 },
     ]);
   });
 
   it('is null while the training max is missing or invalid', () => {
-    expect(warmupRampFor(day({ trainingMax: null }), 'kg', 2.5, 'nearest', 0.9)).toBeNull();
-    expect(warmupRampFor(day({ trainingMax: 0 }), 'kg', 2.5, 'nearest', 0.9)).toBeNull();
+    expect(warmupRampFor(day({ trainingMax: null }), 'kg', 2.5, 'nearest')).toBeNull();
+    expect(warmupRampFor(day({ trainingMax: 0 }), 'kg', 2.5, 'nearest')).toBeNull();
   });
 });
 

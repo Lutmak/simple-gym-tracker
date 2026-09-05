@@ -528,7 +528,6 @@ export default function FiveThreeOneSetupScreen({ navigation, route }: Props) {
       draft.unit,
       draft.roundingIncrement,
       draft.advanced.roundingDirection,
-      draft.advanced.tmPercentage,
     );
 
   const rampLine = (day: ScreenDay): string => {

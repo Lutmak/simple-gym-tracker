@@ -245,21 +245,22 @@ export function estimateTrainingMax(
 
 /**
  * The warm-up ramp a day shows when warm-ups are on: the standard 40% x5,
- * 50% x5, 60% x3 of the first work set — TM x TM percentage — rounded to the
- * routine's increment. The same base the D6 session runner uses, so the ramp
- * seen at setup is the ramp seen in the gym.
+ * 50% x5, 60% x3 of the TRAINING MAX itself (F6) — never TM x TM percentage,
+ * which is not the training max and matches no real work set in the wave
+ * table (weeks 1-3 top out at 85/90/95% of TM, never flatly at the TM
+ * percentage). The same base the D6 session runner uses, so the ramp seen
+ * at setup is the ramp seen in the gym, unchanged week to week.
  */
 export function warmupRampFor(
   day: WaveDayDraft,
   unit: RoutineUnit,
   roundingIncrement: number,
   roundingDirection: RoundingDirection,
-  tmPercentage: number,
 ): WarmupSet[] | null {
   if (day.trainingMax === null || !Number.isFinite(day.trainingMax) || day.trainingMax <= 0) {
     return null;
   }
-  return warmupSets(day.trainingMax * tmPercentage, {
+  return warmupSets(day.trainingMax, {
     increment: roundingIncrement,
     direction: roundingDirection,
     unit,

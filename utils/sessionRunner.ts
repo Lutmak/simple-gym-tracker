@@ -273,19 +273,28 @@ export function runnerTargetWeight(
 
 /**
  * The warm-up ramp for a weighted exercise: the standard 5/3/1 convention of
- * 40% x5, 50% x5, 60% x3 of the first work set's target, rounded to the
- * routine's increment (reuses the tested arithmetic from utils/fiveThreeOne.ts).
- * Bodyweight exercises have no bar to ramp — no warm-ups.
+ * 40% x5, 50% x5, 60% x3 (reuses the tested arithmetic from
+ * utils/fiveThreeOne.ts). F6: this is always a flat percentage of the
+ * TRAINING MAX, unchanged week to week — never of the week's own first work
+ * set (65% of TM in week 1, 70% in week 2, 40% in the deload week, ...),
+ * which is a different number every week and not the standard ramp at all.
+ * An absolute-loaded exercise has no training max distinct from its current
+ * target, so it still ramps off that (unaffected by this — it never varied
+ * by week to begin with). Bodyweight exercises have no bar to ramp — no
+ * warm-ups.
  */
 export function warmupSetsFor(
   exercise: RunnerExercise,
   session: RunnerSession,
 ): { weight: number; reps: number }[] {
-  const target = runnerTargetWeight(exercise, session.roundingIncrement, session.weekNumber);
-  if (target === null || target <= 0) {
+  const base =
+    exercise.loadSource === 'training_max_pct'
+      ? exercise.trainingMaxWeight
+      : runnerTargetWeight(exercise, session.roundingIncrement, session.weekNumber);
+  if (base === null || base <= 0) {
     return [];
   }
-  return warmupSets(target, {
+  return warmupSets(base, {
     increment: session.roundingIncrement,
     direction: 'nearest',
     unit: exerciseUnit(exercise, session),

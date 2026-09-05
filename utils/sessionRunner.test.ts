@@ -20,6 +20,7 @@ import {
 } from './sessionRunner';
 import {
   estimateTrainingMax,
+  warmupRampFor,
   writeWaveRoutine,
   type WaveDayDraft,
   type WaveSetupDraft,
@@ -94,16 +95,24 @@ const row = (session: RunnerSession): RunnerSession['exercises'][number] => {
 };
 
 describe('warmupSetsFor — the ramp is a UI affordance, never a work set', () => {
-  it('derives the standard 40/50/60 x 5/5/3 ramp from the first work set, rounded', async () => {
-    const { executor } = connect();
-    const session = await fixture(executor);
-    const warmups = warmupSetsFor(squat(session), session);
-    expect(warmups).toEqual([
-      { weight: 20, reps: 5 },
-      { weight: 25, reps: 5 },
-      { weight: 27.5, reps: 3 },
-    ]);
-  });
+  it(
+    'derives the standard 40/50/60 x 5/5/3 ramp from the TRAINING MAX itself (F6) — ' +
+      'never the week\'s own first work set, which is a different number every week',
+    async () => {
+      const { executor } = connect();
+      const session = await fixture(executor);
+      // The fixture's squat has a 120 kg training max; 40/50/60% of THAT —
+      // not of whatever this week's (here, the deload week's) first work
+      // set happens to be — is 48/60/72, rounded to the 2.5 kg increment.
+      expect(squat(session).trainingMaxWeight).toBe(120);
+      const warmups = warmupSetsFor(squat(session), session);
+      expect(warmups).toEqual([
+        { weight: 47.5, reps: 5 },
+        { weight: 60, reps: 5 },
+        { weight: 72.5, reps: 3 },
+      ]);
+    },
+  );
 
   it('returns no warm-ups for a bodyweight exercise', async () => {
     const { executor } = connect();
@@ -117,6 +126,37 @@ describe('warmupSetsFor — the ramp is a UI affordance, never a work set', () =
     };
     expect(warmupSetsFor(bodyweight, session)).toEqual([]);
   });
+
+  it(
+    'produces the identical ramp the setup screen previews, in every week of the cycle (F6) — ' +
+      'the ramp seen at setup is the ramp seen in the gym, unchanged by the week',
+    async () => {
+      const { executor } = connect();
+      const session = await fixture(executor);
+      const trainingMax = squat(session).trainingMaxWeight;
+      if (trainingMax === null) {
+        throw new Error('Fixture squat has no training max');
+      }
+      const previewDay: WaveDayDraft = {
+        key: 'd1',
+        weekday: 1,
+        liftName: 'Squat',
+        catalogExerciseId: null,
+        category: 'lower',
+        trainingMax,
+        assistanceStartWeight: null,
+        assistance: [],
+      };
+      const previewRamp = warmupRampFor(previewDay, session.unit, session.roundingIncrement, 'nearest');
+      expect(previewRamp).not.toBeNull();
+      const previewShape = previewRamp?.map((set) => ({ weight: set.weight, reps: set.reps }));
+
+      for (let weekNumber = 1; weekNumber <= 4; weekNumber += 1) {
+        const runnerRamp = warmupSetsFor(squat(session), { ...session, weekNumber });
+        expect(runnerRamp).toEqual(previewShape);
+      }
+    },
+  );
 });
 
 describe('runnerTargetsFor — the runner receives the cycle week', () => {
@@ -355,7 +395,14 @@ describe('buildLogRows — the §3.2 history rows', () => {
 
   it('never writes a warm-up weight — only work-set weights reach Weight_Log', async () => {
     const { executor } = connect();
-    const session = await fixture(executor);
+    const original = await fixture(executor);
+    // Warm-ups are a flat 40/50/60% of the training max (F6), unchanged by
+    // week; the fixture's own week happens to be the deload week, whose OWN
+    // work sets are also 40/50/60% of the TM — the same numbers by pure
+    // coincidence of that one week, not an overlap bug. Week 1's work sets
+    // (65/75/85% of TM) keep the two clearly distinct, which is what this
+    // test is actually about.
+    const session: RunnerSession = { ...original, weekNumber: 1 };
     const warmups = warmupSetsFor(squat(session), session);
 
     const rows = buildLogRows(session, planned(session));
